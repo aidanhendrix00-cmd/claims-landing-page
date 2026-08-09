@@ -1,17 +1,17 @@
 {
-"name": "123",
-"compatibility_date": "2026-08-09",
-"main": "src/worker.js",
-"assets": {
-"directory": "./",
-"not_found_handling": "single-page-application",
-"binding": "ASSETS"
-},
-"d1_databases": [
-{
-"binding": "DB",
-"database_name": "binding",
-"database_id": "f9f76f36-45de-4595-80c2-d331be22729f"
-}
-]
+  "name": "123",
+  "compatibility_date": "2026-08-09",
+  "main": "src/worker.js",
+  "assets": {
+    "directory": "./",
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "binding",
+      "database_id": "f9f76f36-45de-4595-80c2-d331be22729f"
+    }
+  ]
 }
