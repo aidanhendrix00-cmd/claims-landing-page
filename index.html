@@ -1021,7 +1021,25 @@
     document.getElementById('loginView').style.display = 'block';
   }
   function submitAuthLogin(){
-    document.getElementById('loginNote').classList.add('show');
+    var email = document.getElementById('li-username').value.trim();
+    var password = document.getElementById('li-password').value;
+    var note = document.getElementById('loginNote');
+    note.classList.add('show');
+    note.textContent = 'Logging in...';
+    fetch('/api/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email: email, password: password })
+    }).then(function(res){ return res.json(); }).then(function(data){
+      if (data.ok) {
+        note.textContent = 'Success! Redirecting...';
+        window.location.href = data.redirect || '/dashboard';
+      } else {
+        note.textContent = data.error || 'Invalid email or password.';
+      }
+    }).catch(function(){
+      note.textContent = 'Something went wrong. Please try again.';
+    });
   }
   function submitAuthReset(){
     document.getElementById('resetNote').classList.add('show');
