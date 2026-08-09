@@ -187,6 +187,9 @@ async function handleSignup(request, env) {
   if (password !== confirmPassword) {
     return json({ ok: false, error: 'Passwords do not match.' }, 400);
   }
+  if (!body.agreeToTerms) {
+    return json({ ok: false, error: 'You must agree to the Terms & Conditions to create an account.' }, 400);
+  }
 
   const existingUser = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = ?').bind(email).first();
   if (existingUser) {
@@ -224,9 +227,11 @@ async function handleSignup(request, env) {
     tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(tenantId).first();
   }
 
+  const acceptedAt = new Date().toISOString();
+  const acceptedIp = request.headers.get('CF-Connecting-IP') || '';
   const insertUser = await env.DB.prepare(
-    'INSERT INTO users (tenant_id, email, password_hash, salt, role, status, email_verified, verification_token, verification_expires, full_name) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)'
-  ).bind(tenant.id, email, passwordHash, salt, userRole, userStatus, verificationToken, verificationExpires, fullName).run();
+    'INSERT INTO users (tenant_id, email, password_hash, salt, role, status, email_verified, verification_token, verification_expires, full_name, terms_accepted_at, terms_accepted_ip, terms_version) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)'
+  ).bind(tenant.id, email, passwordHash, salt, userRole, userStatus, verificationToken, verificationExpires, fullName, acceptedAt, acceptedIp, 'v1').run();
   const userId = insertUser.meta.last_row_id;
 
   if (isNewTenant) {
