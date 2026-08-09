@@ -6,7 +6,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 const NO_STORE = 'private, no-store, no-cache, must-revalidate';
 const VERIFICATION_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 const NOTIFY_EMAIL = 'hndrx@claims-collection.net';
-const FROM_EMAIL = 'clAIms <onboarding@claims-collection.net>';
+const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
