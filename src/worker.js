@@ -161,6 +161,12 @@ export default {
         headers: { 'Location': '/dashboard', 'Cache-Control': NO_STORE }
       });
     }
+    if (url.pathname === '/dashboard.html') {
+      return new Response(null, {
+        status: 302,
+        headers: { 'Location': '/dashboard', 'Cache-Control': NO_STORE }
+      });
+    }
 
     return env.ASSETS.fetch(request);
   }
