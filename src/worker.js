@@ -3,6 +3,7 @@
 
 const SESSION_COOKIE = 'session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const NO_STORE = 'private, no-store, no-cache, must-revalidate';
 
 function toHex(buf) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -65,22 +66,22 @@ async function handleLogin(request, env) {
   try {
     body = await request.json();
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: 'Invalid request body' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: false, error: 'Invalid request body' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE } });
   }
   const email = (body.email || '').trim().toLowerCase();
   const password = body.password || '';
   if (!email || !password) {
-    return new Response(JSON.stringify({ ok: false, error: 'Email and password are required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: false, error: 'Email and password are required' }), { status: 400, headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE } });
   }
 
   const user = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
   if (!user) {
-    return new Response(JSON.stringify({ ok: false, error: 'Invalid email or password' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: false, error: 'Invalid email or password' }), { status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE } });
   }
 
   const computedHash = await hashPassword(password, user.salt);
   if (computedHash !== user.password_hash) {
-    return new Response(JSON.stringify({ ok: false, error: 'Invalid email or password' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: false, error: 'Invalid email or password' }), { status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE } });
   }
 
   const token = randomToken();
@@ -90,7 +91,7 @@ async function handleLogin(request, env) {
   const cookie = `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}`;
   return new Response(JSON.stringify({ ok: true, redirect: '/dashboard' }), {
     status: 200,
-    headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie }
+    headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
   });
 }
 
@@ -103,14 +104,17 @@ async function handleLogout(request, env) {
   const cookie = `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
   return new Response(JSON.stringify({ ok: true, redirect: '/' }), {
     status: 200,
-    headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie }
+    headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
   });
 }
 
 async function handleDashboard(request, env) {
   const user = await getSessionUser(request, env);
   if (!user) {
-    return Response.redirect(new URL('/', request.url).toString() + '?login=1', 302);
+    return new Response(null, {
+      status: 302,
+      headers: { 'Location': new URL('/', request.url).toString() + '?login=1', 'Cache-Control': NO_STORE }
+    });
   }
   const assetResponse = await env.ASSETS.fetch(new URL('/dashboard.html', request.url));
   let html = await assetResponse.text();
@@ -118,13 +122,13 @@ async function handleDashboard(request, env) {
   html = html
     .replace(/data-company-name="[^"]*"/, 'data-company-name="' + safeName + '"')
     .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"');
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } });
 }
 
 async function handleMe(request, env) {
   const user = await getSessionUser(request, env);
   if (!user) {
-    return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: false }), { status: 401, headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE } });
   }
   return new Response(JSON.stringify({
     ok: true,
@@ -132,7 +136,7 @@ async function handleMe(request, env) {
     role: user.role,
     tenant: user.tenant_slug,
     companyName: user.company_name
-  }), { headers: { 'Content-Type': 'application/json' } });
+  }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE } });
 }
 
 export default {
