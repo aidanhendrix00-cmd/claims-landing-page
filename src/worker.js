@@ -5,6 +5,7 @@ const SESSION_COOKIE = 'session';
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 const NO_STORE = 'private, no-store, no-cache, must-revalidate';
 const VERIFICATION_TTL_SECONDS = 60 * 60 * 24; // 24 hours
+const RESET_TTL_SECONDS = 60 * 60; // 1 hour
 const NOTIFY_EMAIL = 'hndrx@claims-collection.net';
 const SUPPORT_EMAIL = 'help@claims-collection.net';
 const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
@@ -91,6 +92,95 @@ const HELP_WIDGET_HTML = '<style>' +
   '}' +
   '<' + '/script>';
 
+const RESET_PASSWORD_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var resetView=document.getElementById("resetView");' +
+  'var authCard=resetView?resetView.parentElement:null;' +
+  'if(!resetView||!authCard){return;}' +
+  'var resetNote=document.getElementById("resetNote");' +
+  'if(resetNote){resetNote.innerHTML="";resetNote.classList.remove("show");}' +
+  'var confirmView=document.createElement("div");' +
+  'confirmView.id="clmsResetConfirmView";' +
+  'confirmView.style.display="none";' +
+  'confirmView.innerHTML=' +
+  '\'<div class="auth-eyebrow">Reset Password</div>\'+' +
+  '\'<h1>Choose a new password</h1>\'+' +
+  '\'<p class="auth-sub">Enter a new password for your account.</p>\'+' +
+  '\'<div class="auth-field"><label>New Password</label><input type="password" id="clms-rc-password" placeholder="At least 8 characters" autocomplete="new-password"></div>\'+' +
+  '\'<div class="auth-field"><label>Confirm New Password</label><input type="password" id="clms-rc-confirm" placeholder="Re-enter new password" autocomplete="new-password"></div>\'+' +
+  '\'<button class="btn-auth" id="clms-rc-submit">Set New Password</button>\'+' +
+  '\'<div class="auth-note" id="clmsResetConfirmNote"></div>\';' +
+  'authCard.appendChild(confirmView);' +
+  'var resetToken=null;' +
+  'try{var params=new URLSearchParams(location.search);resetToken=params.get("reset_token");}catch(e){}' +
+  'function showConfirmView(){' +
+  'var loginView=document.getElementById("loginView");' +
+  'if(loginView){loginView.style.display="none";}' +
+  'resetView.style.display="none";' +
+  'confirmView.style.display="block";' +
+  '}' +
+  'function backToLogin(){' +
+  'confirmView.style.display="none";' +
+  'resetView.style.display="none";' +
+  'var loginView=document.getElementById("loginView");' +
+  'if(loginView){loginView.style.display="block";}' +
+  '}' +
+  'document.getElementById("clms-rc-submit").addEventListener("click",function(){' +
+  'var password=document.getElementById("clms-rc-password").value;' +
+  'var confirmPassword=document.getElementById("clms-rc-confirm").value;' +
+  'var note=document.getElementById("clmsResetConfirmNote");' +
+  'note.classList.add("show");' +
+  'if(!password||password.length<8){note.textContent="Password must be at least 8 characters.";return;}' +
+  'if(password!==confirmPassword){note.textContent="Passwords do not match.";return;}' +
+  'if(!resetToken){note.textContent="This reset link is missing its token. Please use the link from your email.";return;}' +
+  'var btn=document.getElementById("clms-rc-submit");' +
+  'btn.disabled=true;' +
+  'note.textContent="Updating your password...";' +
+  'fetch("/api/reset-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:resetToken,password:password,confirmPassword:confirmPassword})})' +
+  '.then(function(r){return r.json().then(function(d){return {ok:r.ok,data:d};});})' +
+  '.then(function(res){' +
+  'btn.disabled=false;' +
+  'if(res.ok&&res.data&&res.data.ok){' +
+  'note.textContent="Password updated — you can log in now.";' +
+  'document.getElementById("clms-rc-password").value="";' +
+  'document.getElementById("clms-rc-confirm").value="";' +
+  'setTimeout(backToLogin,1800);' +
+  '}else{' +
+  'note.textContent=(res.data&&res.data.error)||"That reset link is invalid or expired.";' +
+  '}' +
+  '})' +
+  '.catch(function(){' +
+  'btn.disabled=false;' +
+  'note.textContent="Something went wrong. Please try again.";' +
+  '});' +
+  '});' +
+  'window.submitAuthReset=function(){' +
+  'var emailInput=document.getElementById("reset-email");' +
+  'var email=emailInput?emailInput.value.trim():"";' +
+  'var note=document.getElementById("resetNote");' +
+  'note.classList.add("show");' +
+  'if(!email){note.textContent="Please enter your email address.";return;}' +
+  'note.textContent="Sending reset link...";' +
+  'fetch("/api/forgot-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:email})})' +
+  '.then(function(r){return r.json();})' +
+  '.then(function(d){' +
+  'note.textContent=(d&&d.message)||"If an account exists for that email, we\'ve sent a reset link.";' +
+  '})' +
+  '.catch(function(){' +
+  'note.textContent="Something went wrong. Please try again.";' +
+  '});' +
+  '};' +
+  'if(resetToken){' +
+  'if(typeof navigateToOverlay==="function"){navigateToOverlay("#login");}' +
+  'else{var overlay=document.getElementById("loginOverlay");if(overlay){overlay.classList.add("open");}}' +
+  'showConfirmView();' +
+  '}' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -171,7 +261,7 @@ async function injectHelpWidget(response) {
   const contentType = response.headers.get('Content-Type') || '';
   if (contentType.indexOf('text/html') === -1) return response;
   return new HTMLRewriter().on('body', {
-    element: function(el) { el.append(HELP_WIDGET_HTML, { html: true }); }
+    element: function(el) { el.append(HELP_WIDGET_HTML, { html: true }); el.append(RESET_PASSWORD_SCRIPT, { html: true }); }
   }).transform(response);
 }
 
@@ -293,6 +383,81 @@ async function handleSupportRequest(request, env) {
   await sendEmail(env, { to: email, subject: 'We got your message — clAIms support', html: confirmHtml, kind: 'support_confirmation' });
 
   return json({ ok: true, message: 'Thanks — we got your message.' });
+}
+
+async function handleForgotPassword(request, env) {
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+
+  const email = (body.email || '').trim().toLowerCase();
+  const genericMessage = "If an account exists for that email, we've sent a reset link.";
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
+  }
+
+  const user = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
+  if (user) {
+    const token = randomToken();
+    const expires = new Date(Date.now() + RESET_TTL_SECONDS * 1000).toISOString();
+    await env.DB.prepare('UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?').bind(token, expires, user.id).run();
+
+    const resetUrl = SITE_URL + '/?reset_token=' + token + '#login';
+    const resetHtml =
+      '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;">' +
+      '<h2 style="color:#171717;">Reset your password</h2>' +
+      '<p>Hi ' + escapeHtml(user.full_name || '') + ',</p>' +
+      '<p>We received a request to reset the password for your clAIms account. Click below to choose a new password.</p>' +
+      '<p style="margin:28px 0;"><a href="' + resetUrl + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Reset password</a></p>' +
+      '<p style="color:#666;font-size:13px;">This link expires in 1 hour. If you did not request this, you can safely ignore this email — your password will not be changed.</p>' +
+      '</div>';
+    await sendEmail(env, {
+      to: user.email,
+      subject: 'Reset your clAIms password',
+      html: resetHtml,
+      kind: 'password_reset',
+      tenantId: user.tenant_id,
+      userId: user.id
+    });
+  }
+
+  return json({ ok: true, message: genericMessage });
+}
+
+async function handleResetPassword(request, env) {
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+
+  const token = (body.token || '').trim();
+  const password = body.password || '';
+  const confirmPassword = body.confirmPassword || '';
+
+  if (!token) {
+    return json({ ok: false, error: 'Missing reset token.' }, 400);
+  }
+  if (!password || password.length < 8) {
+    return json({ ok: false, error: 'Password must be at least 8 characters.' }, 400);
+  }
+  if (password !== confirmPassword) {
+    return json({ ok: false, error: 'Passwords do not match.' }, 400);
+  }
+
+  const user = await env.DB.prepare('SELECT * FROM users WHERE reset_token = ?').bind(token).first();
+  if (!user) {
+    return json({ ok: false, error: 'That reset link is invalid or has already been used.' }, 400);
+  }
+  if (!user.reset_expires || new Date(user.reset_expires) < new Date()) {
+    return json({ ok: false, error: 'That reset link has expired. Please request a new one.' }, 400);
+  }
+
+  const salt = randomSalt();
+  const passwordHash = await hashPassword(password, salt);
+  await env.DB.prepare(
+    'UPDATE users SET password_hash = ?, salt = ?, reset_token = NULL, reset_expires = NULL WHERE id = ?'
+  ).bind(passwordHash, salt, user.id).run();
+  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run();
+
+  return json({ ok: true, message: 'Password updated successfully.' });
 }
 
 async function handleSignup(request, env) {
@@ -650,6 +815,12 @@ export default {
     }
     if (url.pathname === '/api/support' && request.method === 'POST') {
       return handleSupportRequest(request, env);
+    }
+    if (url.pathname === '/api/forgot-password' && request.method === 'POST') {
+      return handleForgotPassword(request, env);
+    }
+    if (url.pathname === '/api/reset-password' && request.method === 'POST') {
+      return handleResetPassword(request, env);
     }
     if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
       return handleStripeWebhook(request, env);
