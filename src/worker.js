@@ -210,6 +210,36 @@ const DEMO_FIX_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const PROCESS_EXPLAINER_HTML = '<div class="clms-process-explainer">' +
+  '<div class="section-head" style="margin-bottom:36px;">' +
+  '<div class="eyebrow">Get Started</div>' +
+  '<h2 style="font-size:26px;">From sign-up to a working dashboard</h2>' +
+  '<p>Here\'s exactly what happens after you click Get Started.</p>' +
+  '</div>' +
+  '<div class="steps-row" style="margin-bottom:56px;">' +
+  '<div class="step-card">' +
+  '<div class="step-num">1</div>' +
+  '<h3>Create Your Account</h3>' +
+  '<p>Sign up using your company\'s work domain email so we can verify your business and connect you with your team.</p>' +
+  '</div>' +
+  '<div class="step-card">' +
+  '<div class="step-num">2</div>' +
+  '<h3>Submit Payment</h3>' +
+  '<p>Choose the plan that fits your AR volume and submit payment to activate your account.</p>' +
+  '</div>' +
+  '<div class="step-card">' +
+  '<div class="step-num">3</div>' +
+  '<h3>Implementation Period</h3>' +
+  '<p>Our team configures your offices, departments, and integrations during a short onboarding window.</p>' +
+  '</div>' +
+  '<div class="step-card">' +
+  '<div class="step-num">4</div>' +
+  '<h3>Log In &amp; Get Results</h3>' +
+  '<p>Receive your clAIms login and dashboard access, then watch your outstanding AR start moving.</p>' +
+  '</div>' +
+  '</div>' +
+  '</div>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -289,13 +319,20 @@ function redirectTo(target) {
 async function injectHelpWidget(response) {
   const contentType = response.headers.get('Content-Type') || '';
   if (contentType.indexOf('text/html') === -1) return response;
-  return new HTMLRewriter().on('body', {
-    element: function(el) {
-      el.append(HELP_WIDGET_HTML, { html: true });
-      el.append(RESET_PASSWORD_SCRIPT, { html: true });
-      el.append(DEMO_FIX_SCRIPT, { html: true });
-    }
-  }).transform(response);
+  return new HTMLRewriter()
+    .on('body', {
+      element: function(el) {
+        el.append(HELP_WIDGET_HTML, { html: true });
+        el.append(RESET_PASSWORD_SCRIPT, { html: true });
+        el.append(DEMO_FIX_SCRIPT, { html: true });
+      }
+    })
+    .on('#tiersRow', {
+      element: function(el) {
+        el.before(PROCESS_EXPLAINER_HTML, { html: true });
+      }
+    })
+    .transform(response);
 }
 
 async function handleDemoDashboard(request, env) {
