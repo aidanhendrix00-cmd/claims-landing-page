@@ -6,6 +6,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 const NO_STORE = 'private, no-store, no-cache, must-revalidate';
 const VERIFICATION_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 const NOTIFY_EMAIL = 'hndrx@claims-collection.net';
+const SUPPORT_EMAIL = 'help@claims-collection.net';
 const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
 
@@ -19,6 +20,76 @@ const STRIPE_LINKS = {
   growth: 'https://buy.stripe.com/dRm5kw2jF8Xf6Vr0b5b7y01',
   enterprise: null
 };
+
+const HELP_WIDGET_HTML = '<style>' +
+  '#clms-help-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#C29B57;color:#171717;border:none;box-shadow:0 10px 30px -8px rgba(23,23,23,0.45);cursor:pointer;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:700;font-size:22px;z-index:99999;display:flex;align-items:center;justify-content:center;transition:transform .15s ease, box-shadow .15s ease;line-height:1;}' +
+  '#clms-help-btn:hover{transform:scale(1.06);box-shadow:0 14px 36px -8px rgba(23,23,23,0.55);}' +
+  '#clms-help-panel{position:fixed;bottom:92px;right:24px;width:320px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #E5E0D2;border-radius:14px;box-shadow:0 24px 60px -20px rgba(23,23,23,0.35);z-index:99999;display:none;overflow:hidden;font-family:"IBM Plex Sans",Arial,sans-serif;}' +
+  '#clms-help-panel.open{display:block;}' +
+  '#clms-help-panel .chp-head{background:#171717;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}' +
+  '#clms-help-panel .chp-head h4{margin:0;font-size:14px;font-weight:600;}' +
+  '#clms-help-panel .chp-head span{display:block;font-size:10.5px;color:#DCC393;margin-top:3px;}' +
+  '#clms-help-panel .chp-close{background:none;border:none;color:#D8D4C8;font-size:18px;cursor:pointer;line-height:1;padding:0;}' +
+  '#clms-help-panel .chp-close:hover{color:#fff;}' +
+  '#clms-help-panel .chp-body{padding:16px;}' +
+  '#clms-help-panel input,#clms-help-panel textarea{width:100%;font-family:inherit;font-size:13px;color:#171717;border:1.5px solid #E5E0D2;border-radius:8px;padding:9px 11px;background:#FBFAF6;margin-bottom:10px;box-sizing:border-box;}' +
+  '#clms-help-panel textarea{min-height:70px;resize:vertical;}' +
+  '#clms-help-panel input:focus,#clms-help-panel textarea:focus{outline:none;border-color:#C29B57;}' +
+  '#clms-help-panel button.chp-submit{width:100%;background:#171717;color:#fff;font-weight:600;font-size:13px;padding:10px;border:none;border-radius:8px;cursor:pointer;}' +
+  '#clms-help-panel button.chp-submit:hover{opacity:.87;}' +
+  '#clms-help-panel button.chp-submit:disabled{opacity:.6;cursor:default;}' +
+  '#clms-help-panel .chp-note{font-size:11.5px;color:#615D53;margin-top:10px;line-height:1.5;}' +
+  '#clms-help-panel .chp-status{display:none;padding:12px 15px;font-size:12.5px;border-radius:8px;margin-top:4px;line-height:1.5;}' +
+  '#clms-help-panel .chp-status.ok{display:block;background:#DFEEE9;color:#1E5245;}' +
+  '#clms-help-panel .chp-status.err{display:block;background:#F7E2DF;color:#6E3B3B;}' +
+  '@media (max-width:420px){#clms-help-btn{bottom:16px;right:16px;}#clms-help-panel{right:16px;bottom:80px;}}' +
+  '</style>' +
+  '<button id="clms-help-btn" aria-label="Customer support and help" onclick="(function(){var p=document.getElementById(\'clms-help-panel\');p.classList.toggle(\'open\');})()">?</button>' +
+  '<div id="clms-help-panel">' +
+  '<div class="chp-head"><div><h4>Need help?</h4><span>We usually reply within one business day</span></div>' +
+  '<button class="chp-close" aria-label="Close" onclick="document.getElementById(\'clms-help-panel\').classList.remove(\'open\')">&times;</button></div>' +
+  '<div class="chp-body">' +
+  '<form id="clms-help-form" onsubmit="return clmsSubmitHelp(event)">' +
+  '<input type="text" id="chp-name" placeholder="Your name" autocomplete="name" required>' +
+  '<input type="email" id="chp-email" placeholder="Your email" autocomplete="email" required>' +
+  '<textarea id="chp-message" placeholder="How can we help?" required></textarea>' +
+  '<button type="submit" class="chp-submit" id="chp-submit-btn">Send message</button>' +
+  '</form>' +
+  '<div class="chp-status" id="chp-status"></div>' +
+  '<div class="chp-note">Or email us directly at <a href="mailto:help@claims-collection.net" style="color:#C29B57;font-weight:600;">help@claims-collection.net</a></div>' +
+  '</div></div>' +
+  '<script>' +
+  'function clmsSubmitHelp(e){' +
+  'e.preventDefault();' +
+  'var btn=document.getElementById("chp-submit-btn");' +
+  'var status=document.getElementById("chp-status");' +
+  'status.className="chp-status";status.textContent="";' +
+  'var name=document.getElementById("chp-name").value.trim();' +
+  'var email=document.getElementById("chp-email").value.trim();' +
+  'var message=document.getElementById("chp-message").value.trim();' +
+  'if(!name||!email||!message){return false;}' +
+  'btn.disabled=true;btn.textContent="Sending...";' +
+  'fetch("/api/support",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:name,email:email,message:message,page:location.href})})' +
+  '.then(function(r){return r.json().then(function(d){return {ok:r.ok,data:d};});})' +
+  '.then(function(res){' +
+  'btn.disabled=false;btn.textContent="Send message";' +
+  'if(res.ok&&res.data&&res.data.ok){' +
+  'status.className="chp-status ok";' +
+  'status.textContent="Thanks, "+name.split(" ")[0]+" — we got your message and will reply to "+email+" soon.";' +
+  'document.getElementById("clms-help-form").reset();' +
+  '}else{' +
+  'status.className="chp-status err";' +
+  'status.textContent=(res.data&&res.data.error)||"Something went wrong sending your message. Please email help@claims-collection.net directly.";' +
+  '}' +
+  '})' +
+  '.catch(function(){' +
+  'btn.disabled=false;btn.textContent="Send message";' +
+  'status.className="chp-status err";' +
+  'status.textContent="Network error — please email help@claims-collection.net directly.";' +
+  '});' +
+  'return false;' +
+  '}' +
+  '<' + '/script>';
 
 function planForSize(size) {
   if (size === '1-10') return 'starter';
@@ -96,6 +167,14 @@ function redirectTo(target) {
   return new Response(null, { status: 302, headers: { 'Location': location, 'Cache-Control': NO_STORE } });
 }
 
+async function injectHelpWidget(response) {
+  const contentType = response.headers.get('Content-Type') || '';
+  if (contentType.indexOf('text/html') === -1) return response;
+  return new HTMLRewriter().on('body', {
+    element: function(el) { el.append(HELP_WIDGET_HTML, { html: true }); }
+  }).transform(response);
+}
+
 async function uniqueSlug(env, base) {
   let slug = base;
   let n = 1;
@@ -108,7 +187,7 @@ async function uniqueSlug(env, base) {
 }
 
 async function sendEmail(env, opts) {
-  const to = opts.to, subject = opts.subject, html = opts.html, kind = opts.kind, tenantId = opts.tenantId, userId = opts.userId;
+  const to = opts.to, subject = opts.subject, html = opts.html, kind = opts.kind, tenantId = opts.tenantId, userId = opts.userId, replyTo = opts.replyTo;
   if (!env.RESEND_API_KEY) {
     try {
       await env.DB.prepare(
@@ -118,13 +197,15 @@ async function sendEmail(env, opts) {
     return { ok: false, skipped: true };
   }
   try {
+    const payload = { from: FROM_EMAIL, to: [to], subject: subject, html: html };
+    if (replyTo) payload.reply_to = replyTo;
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Authorization': 'Bearer ' + env.RESEND_API_KEY,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ from: FROM_EMAIL, to: [to], subject: subject, html: html })
+      body: JSON.stringify(payload)
     });
     const ok = res.ok;
     let errText = '';
@@ -158,6 +239,60 @@ async function getSessionUser(request, env) {
   if (!row) return null;
   if (new Date(row.expires_at) < new Date()) return null;
   return row;
+}
+
+async function handleSupportRequest(request, env) {
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+
+  const name = (body.name || '').trim();
+  const email = (body.email || '').trim().toLowerCase();
+  const message = (body.message || '').trim();
+  const page = String(body.page || '').slice(0, 300);
+
+  if (!name || !email || !message) {
+    return json({ ok: false, error: 'Please fill out your name, email, and message.' }, 400);
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
+  }
+  if (name.length > 200 || message.length > 4000) {
+    return json({ ok: false, error: 'That message is too long.' }, 400);
+  }
+
+  const user = await getSessionUser(request, env);
+
+  const notifyHtml =
+    '<div style="font-family:sans-serif;max-width:560px;margin:0 auto;">' +
+    '<h2>New support request</h2>' +
+    '<table style="border-collapse:collapse;width:100%;">' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Name</td><td style="padding:4px 8px;">' + escapeHtml(name) + '</td></tr>' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Email</td><td style="padding:4px 8px;">' + escapeHtml(email) + '</td></tr>' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Page</td><td style="padding:4px 8px;">' + escapeHtml(page) + '</td></tr>' +
+    (user ? '<tr><td style="padding:4px 8px;font-weight:600;">Logged in as</td><td style="padding:4px 8px;">' + escapeHtml(user.email) + ' (' + escapeHtml(user.company_name || '') + ')</td></tr>' : '') +
+    '</table>' +
+    '<p style="white-space:pre-wrap;padding:14px 16px;background:#F5F2EA;border-radius:8px;margin-top:14px;">' + escapeHtml(message) + '</p>' +
+    '</div>';
+  await sendEmail(env, {
+    to: SUPPORT_EMAIL,
+    subject: 'Support request from ' + name,
+    html: notifyHtml,
+    kind: 'support_request',
+    replyTo: email,
+    tenantId: user ? user.tenant_id : null,
+    userId: user ? user.id : null
+  });
+
+  const confirmHtml =
+    '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;">' +
+    '<h2 style="color:#171717;">We got your message</h2>' +
+    '<p>Hi ' + escapeHtml(name) + ',</p>' +
+    '<p>Thanks for reaching out to clAIms support. A member of our team will reply to this email within one business day.</p>' +
+    '<p style="color:#666;font-size:13px;">Your message: &ldquo;' + escapeHtml(message.slice(0, 300)) + '&rdquo;</p>' +
+    '</div>';
+  await sendEmail(env, { to: email, subject: 'We got your message — clAIms support', html: confirmHtml, kind: 'support_confirmation' });
+
+  return json({ ok: true, message: 'Thanks — we got your message.' });
 }
 
 async function handleSignup(request, env) {
@@ -466,7 +601,7 @@ async function handleDashboard(request, env) {
   html = html
     .replace(/data-company-name="[^"]*"/, 'data-company-name="' + safeName + '"')
     .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"');
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } });
+  return injectHelpWidget(new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
 }
 
 async function handleMe(request, env) {
@@ -513,6 +648,9 @@ export default {
     if (url.pathname === '/api/reject-user' && request.method === 'POST') {
       return handleRejectUser(request, env);
     }
+    if (url.pathname === '/api/support' && request.method === 'POST') {
+      return handleSupportRequest(request, env);
+    }
     if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
       return handleStripeWebhook(request, env);
     }
@@ -526,6 +664,7 @@ export default {
       });
     }
 
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    return injectHelpWidget(assetResponse);
   }
 };
