@@ -6,7 +6,7 @@
     "directory": "./",
     "not_found_handling": "single-page-application",
     "binding": "ASSETS",
-    "run_worker_first": ["/dashboard", "/dashboard.html", "/api/*"]
+        "run_worker_first": true
   },
   "d1_databases": [
     {
