@@ -181,6 +181,35 @@ const RESET_PASSWORD_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const DEMO_FIX_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var frame=document.getElementById("dashboardFrame");' +
+  'if(!frame){return;}' +
+  'var loaded=false;' +
+  'window.loadDemoIfNeeded=function(){' +
+  'if(loaded){return;}' +
+  'loaded=true;' +
+  'var loading=document.getElementById("demoLoading");' +
+  'fetch("/api/demo-dashboard").then(function(r){' +
+  'if(!r.ok){throw new Error("bad status");}' +
+  'return r.text();' +
+  '}).then(function(html){' +
+  'frame.srcdoc=html;' +
+  'frame.addEventListener("load",function(){' +
+  'if(loading){loading.classList.add("hide");}' +
+  '},{once:true});' +
+  '}).catch(function(){' +
+  'loaded=false;' +
+  'if(loading){loading.textContent="Couldn\'t load the demo right now — please try again shortly.";}' +
+  '});' +
+  '};' +
+  'if(location.hash==="#demo"){window.loadDemoIfNeeded();}' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -261,8 +290,21 @@ async function injectHelpWidget(response) {
   const contentType = response.headers.get('Content-Type') || '';
   if (contentType.indexOf('text/html') === -1) return response;
   return new HTMLRewriter().on('body', {
-    element: function(el) { el.append(HELP_WIDGET_HTML, { html: true }); el.append(RESET_PASSWORD_SCRIPT, { html: true }); }
+    element: function(el) {
+      el.append(HELP_WIDGET_HTML, { html: true });
+      el.append(RESET_PASSWORD_SCRIPT, { html: true });
+      el.append(DEMO_FIX_SCRIPT, { html: true });
+    }
   }).transform(response);
+}
+
+async function handleDemoDashboard(request, env) {
+  const assetResponse = await env.ASSETS.fetch(new URL('/dashboard.html', request.url));
+  const html = await assetResponse.text();
+  return new Response(html, {
+    status: assetResponse.status,
+    headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' }
+  });
 }
 
 async function uniqueSlug(env, base) {
@@ -821,6 +863,9 @@ export default {
     }
     if (url.pathname === '/api/reset-password' && request.method === 'POST') {
       return handleResetPassword(request, env);
+    }
+    if (url.pathname === '/api/demo-dashboard' && request.method === 'GET') {
+      return handleDemoDashboard(request, env);
     }
     if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
       return handleStripeWebhook(request, env);
