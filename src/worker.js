@@ -533,7 +533,7 @@ const DEMO_POPUP_SCRIPT = '<script>' +
   'if(typeof loadDemoIfNeeded==="function"){loadDemoIfNeeded();}' +
   '}' +
   '});' +
-  '},10000);' +
+  '},2000);' +
   '});' +
   '})();' +
   '<' + '/script>';
@@ -547,9 +547,13 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '{sel:"#kpis",title:"Live KPIs",text:"See exactly what is outstanding, overdue, and needs attention today, updated in real time."},' +
   '{sel:"#search",title:"Search and filter",text:"Find any invoice instantly by office, department, payer, or status."},' +
   '{sel:"#queue",title:"Your prioritized queue",text:"clAIms automatically ranks every open invoice so your team always knows who to follow up with next, and why."},' +
-  '{sel:"#report-age",nav:"report",title:"Aging, at a glance",text:"See exactly how much AR is sitting in each aging bucket, broken down by payer, so nothing slips through the cracks."},' +
-  '{sel:"#automation-feed",nav:"automations",title:"Automated follow-ups",text:"Set your cadence once. Follow-ups go out automatically, with a full activity trail for every action taken."},' +
-  '{sel:"#custom-integrations",nav:"integrations",title:"Connects to what you already use",text:"Plug clAIms into your restoration and accounting software so data flows in and payments flow back out, with no manual re-entry."},' +
+  '{sel:"#view-sheet .topbar",nav:"sheet",title:"A/R Spreadsheet",text:"Your full accounts receivable ledger in one place, with autonomous contact tracking. Notes update automatically as customers reply to follow-up emails or as records change in your account and homeowner database."},' +
+  '{sel:"#view-report .topbar",nav:"report",title:"Aging, at a glance",text:"See exactly how much AR is sitting in each aging bucket, broken down by payer, so nothing slips through the cracks."},' +
+  '{sel:"#view-invoicedmtd .topbar",nav:"invoicedmtd",title:"Invoiced Month to Date",text:"Synced automatically from your accounting and CRM systems, sorted by office and broken down by department, so you always know what went out this month."},' +
+  '{sel:"#view-collectedmtd .topbar",nav:"collectedmtd",title:"Collected This Month",text:"Updates in real time as payments post, with notes and statuses refreshed automatically from customer email responses and your account database."},' +
+  '{sel:"#view-collected .topbar",nav:"collected",title:"Collected",text:"All-time payments received, organized by year and month and filterable by office and department, always current thanks to automated updates pulled from customer responses and your homeowner records."},' +
+  '{sel:"#view-automations",nav:"automations",title:"Automated follow-ups",text:"Set your cadence once. Follow-ups go out automatically, with a full activity trail for every action taken."},' +
+  '{sel:"#view-integrations .topbar",nav:"integrations",title:"Connects to what you already use",text:"Plug clAIms into your restoration and accounting software so data flows in and payments flow back out, with no manual re-entry."},' +
   '{sel:"#money-wrap",nav:"queue",title:"Track cash collected in real time",text:"Watch your recovered revenue tick up as payments come in. That is the whole point."}' +
   '];' +
   'var idx=-1;' +
