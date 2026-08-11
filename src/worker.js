@@ -427,16 +427,18 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'ready(function(){' +
   'var tiersRow=document.getElementById("tiersRow");' +
   'if(!tiersRow){return;}' +
-  'var stripeLinks=tiersRow.querySelectorAll(\'a[href^="https://buy.stripe.com"]\');' +
-  'for(var i=0;i<stripeLinks.length;i++){' +
+  'var tierBtns=tiersRow.querySelectorAll("a.btn-tier");' +
+  'for(var i=0;i<tierBtns.length;i++){' +
   '(function(a){' +
   'a.removeAttribute("href");' +
+  'a.removeAttribute("onclick");' +
+  'a.textContent="Get started";' +
   'a.style.cursor="pointer";' +
   'a.addEventListener("click",function(e){' +
   'e.preventDefault();' +
   'if(typeof openSignup==="function"){openSignup();}' +
   '});' +
-  '})(stripeLinks[i]);' +
+  '})(tierBtns[i]);' +
   '}' +
   '});' +
   '})();' +
