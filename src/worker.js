@@ -439,6 +439,12 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'if(entPrice){entPrice.innerHTML="$1,650<span class=\\"per\\">/mo flat</span>";}' +
   'var entImpl=tiersRow.querySelector(".tier.enterprise .tier-impl b");' +
   'if(entImpl){entImpl.textContent="$4,250";}' +
+  'var startFit=tiersRow.querySelector(".tier.starter .tier-fit");' +
+  'if(startFit){startFit.textContent="Under $500K in annual revenue";}' +
+  'var growFit=tiersRow.querySelector(".tier.growth .tier-fit");' +
+  'if(growFit){growFit.textContent="$500K–$5M in annual revenue";}' +
+  'var entFit=tiersRow.querySelector(".tier.enterprise .tier-fit");' +
+  'if(entFit){entFit.textContent="$5M+ in annual revenue, multiple offices or entities";}' +
   'var tierBtns=tiersRow.querySelectorAll("a.btn-tier");' +
   'for(var i=0;i<tierBtns.length;i++){' +
   '(function(a){' +
