@@ -448,6 +448,21 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const COMPARE_COPY_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var ps=document.querySelectorAll("p");' +
+  'for(var i=0;i<ps.length;i++){' +
+  'if(ps[i].textContent.indexOf("sit exactly in between")!==-1){' +
+  'ps[i].textContent="Restoration platforms don\'t automate collections. Collections platforms don\'t integrate restoration knowledge. clAIms is built to sit exactly in between.";' +
+  'break;' +
+  '}' +
+  '}' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -536,6 +551,7 @@ async function injectHelpWidget(response) {
         el.append(CONTACT_FORM_SCRIPT, { html: true });
         el.append(GET_STARTED_FORM_SCRIPT, { html: true });
         el.append(PRICING_LINKS_SCRIPT, { html: true });
+        el.append(COMPARE_COPY_SCRIPT, { html: true });
       }
     })
     .on('#tiersRow', {
