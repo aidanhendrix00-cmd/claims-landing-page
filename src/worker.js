@@ -427,10 +427,18 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'ready(function(){' +
   'var tiersRow=document.getElementById("tiersRow");' +
   'if(!tiersRow){return;}' +
+  'var startPrice=tiersRow.querySelector(".tier.starter .tier-price");' +
+  'if(startPrice){startPrice.innerHTML="$249<span class=\\"per\\">–$409/mo</span>";}' +
+  'var startImpl=tiersRow.querySelector(".tier.starter .tier-impl b");' +
+  'if(startImpl){startImpl.textContent="$1,250–$2,050";}' +
+  'var growPrice=tiersRow.querySelector(".tier.growth .tier-price");' +
+  'if(growPrice){growPrice.innerHTML="$739<span class=\\"per\\">–$1,649/mo</span>";}' +
+  'var growImpl=tiersRow.querySelector(".tier.growth .tier-impl b");' +
+  'if(growImpl){growImpl.textContent="$2,900–$6,200";}' +
   'var entPrice=tiersRow.querySelector(".tier.enterprise .tier-price");' +
-  'if(entPrice){entPrice.innerHTML="$2,000<span class=\\"per\\">–$5,500+/mo</span>";}' +
+  'if(entPrice){entPrice.innerHTML="$1,650<span class=\\"per\\">/mo flat</span>";}' +
   'var entImpl=tiersRow.querySelector(".tier.enterprise .tier-impl b");' +
-  'if(entImpl){entImpl.textContent="$4,000–$10,000+";}' +
+  'if(entImpl){entImpl.textContent="$4,250";}' +
   'var tierBtns=tiersRow.querySelectorAll("a.btn-tier");' +
   'for(var i=0;i<tierBtns.length;i++){' +
   '(function(a){' +
@@ -458,6 +466,28 @@ const COMPARE_COPY_SCRIPT = '<script>' +
   'ps[i].textContent="Restoration platforms don\'t automate collections. Collections platforms don\'t integrate restoration knowledge. clAIms is built to sit exactly in between.";' +
   'break;' +
   '}' +
+  '}' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
+const ROI_CALC_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var labels=document.querySelectorAll("label");' +
+  'for(var i=0;i<labels.length;i++){' +
+  'if(labels[i].textContent.indexOf("Credit Sales")!==-1){' +
+  'labels[i].textContent="Annual Revenue";' +
+  'break;' +
+  '}' +
+  '}' +
+  'var revenueInput=document.getElementById("revenue");' +
+  'if(revenueInput){' +
+  'setTimeout(function(){' +
+  'revenueInput.value="10,000,000";' +
+  'revenueInput.dispatchEvent(new Event("input",{bubbles:true}));' +
+  '},50);' +
   '}' +
   '});' +
   '})();' +
@@ -552,6 +582,7 @@ async function injectHelpWidget(response) {
         el.append(GET_STARTED_FORM_SCRIPT, { html: true });
         el.append(PRICING_LINKS_SCRIPT, { html: true });
         el.append(COMPARE_COPY_SCRIPT, { html: true });
+        el.append(ROI_CALC_SCRIPT, { html: true });
       }
     })
     .on('#tiersRow', {
