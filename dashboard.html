@@ -497,7 +497,7 @@
       <div class="section-head">
         <h2>Priority Follow-Ups</h2>
         <div class="toolbar">
-          <input class="search" id="search" placeholder="Search customer or property..." oninput="renderQueue()">
+          <input class="search" id="search" placeholder="Search customer or property..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="renderQueue()">
           <select class="sort" id="sort" onchange="renderQueue()">
             <option value="days-desc">Sort: Days (High-Low)</option>
             <option value="amount-desc">Sort: Amount (High-Low)</option>
@@ -1278,6 +1278,7 @@
 
   async function init(){
     state = await loadState();
+    var searchFieldEl=document.getElementById('search');if(searchFieldEl){searchFieldEl.value='';}
     renderAll();
     await runCadenceForAll(); // catch up any checkpoints on load
     saveState();
