@@ -421,6 +421,528 @@ const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-
   '</div>' +
   '</body></html>';
 
+const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-8"> ' +
+  '<meta name="viewport" content="width=device-width, initial-scale=1"> ' +
+  '<title>My Account — clAIms</title> ' +
+  '<link rel="icon" href="/favicon.ico"> ' +
+  '<style> ' +
+  '*{box-sizing:border-box;} ' +
+  'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;color:#171717;} ' +
+  '.acct-topbar{background:#171717;color:#fff;padding:16px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;} ' +
+  '.acct-brand{font-weight:700;font-size:18px;letter-spacing:.02em;} ' +
+  '.acct-topbar-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap;} ' +
+  '.acct-user-chip{font-size:13px;color:#D8D4C8;} ' +
+  '.acct-user-chip b{color:#fff;} ' +
+  '.acct-role-badge{display:inline-block;margin-left:8px;padding:2px 9px;border-radius:20px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;} ' +
+  '.acct-role-badge.admin{background:#C29B57;color:#171717;} ' +
+  '.acct-role-badge.manager{background:#3E5C8A;color:#fff;} ' +
+  '.acct-role-badge.employee{background:#4A4A46;color:#fff;} ' +
+  '.btn-to-dashboard{display:inline-flex;align-items:center;gap:8px;background:#C29B57;color:#171717;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;box-shadow:0 8px 22px -6px rgba(194,155,87,0.65);transition:transform .15s ease, box-shadow .15s ease;white-space:nowrap;} ' +
+  '.btn-to-dashboard:hover{transform:translateY(-1px);box-shadow:0 12px 28px -6px rgba(194,155,87,0.8);} ' +
+  '.acct-wrap{max-width:1080px;margin:0 auto;padding:28px 24px 80px;} ' +
+  '.acct-tabs{display:flex;gap:4px;border-bottom:1px solid #E5E0D2;margin-bottom:24px;overflow-x:auto;} ' +
+  '.acct-tab{background:none;border:none;font-family:inherit;font-size:14px;font-weight:600;color:#615D53;padding:12px 18px;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;} ' +
+  '.acct-tab:hover{color:#171717;} ' +
+  '.acct-tab.active{color:#171717;border-bottom-color:#C29B57;} ' +
+  '.acct-panel{display:none;} ' +
+  '.acct-panel.active{display:block;} ' +
+  '.acct-card{background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:22px 24px;margin-bottom:18px;box-shadow:0 12px 30px -18px rgba(23,23,23,0.15);} ' +
+  '.acct-card h3{margin:0 0 4px;font-size:16px;} ' +
+  '.acct-card .acct-card-sub{font-size:12.5px;color:#615D53;margin-bottom:16px;} ' +
+  '.acct-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 24px;} ' +
+  '@media (max-width:640px){.acct-grid{grid-template-columns:1fr;}} ' +
+  '.acct-field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#8A8578;font-weight:700;margin-bottom:5px;} ' +
+  '.acct-field .acct-value{font-size:14.5px;color:#171717;padding:9px 0;border-bottom:1px solid #F0EDE3;} ' +
+  '.btn-dark{background:#171717;color:#fff;border:none;font-weight:600;font-size:13px;padding:10px 18px;border-radius:8px;cursor:pointer;} ' +
+  '.btn-dark:hover{opacity:.88;} ' +
+  '.btn-outline{background:none;color:#171717;border:1.5px solid #E5E0D2;font-weight:600;font-size:13px;padding:9px 17px;border-radius:8px;cursor:pointer;} ' +
+  '.btn-outline:hover{border-color:#C29B57;color:#C29B57;} ' +
+  '.btn-sm{font-size:12px;padding:6px 12px;border-radius:7px;} ' +
+  '.restricted-box{background:#FBFAF6;border:1px dashed #E5E0D2;border-radius:12px;padding:32px 24px;text-align:center;color:#8A8578;font-size:13.5px;line-height:1.6;} ' +
+  '.restricted-box b{color:#3B3A35;} ' +
+  '.plan-banner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:#171717;color:#fff;border-radius:14px;padding:18px 22px;margin-bottom:18px;} ' +
+  '.plan-banner .plan-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#C29B57;font-weight:700;margin-bottom:4px;} ' +
+  '.plan-banner .plan-name{font-size:18px;font-weight:700;} ' +
+  '.plan-feature-list{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;} ' +
+  '.plan-feature-list li{font-size:13px;color:#3B3A35;padding-left:20px;position:relative;} ' +
+  '.plan-feature-list li:before{content:"✓";position:absolute;left:0;color:#C29B57;font-weight:700;} ' +
+  '@media (max-width:640px){.plan-feature-list{grid-template-columns:1fr;}} ' +
+  'table.acct-table{width:100%;border-collapse:collapse;font-size:13.5px;} ' +
+  'table.acct-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8A8578;font-weight:700;padding:10px 12px;border-bottom:1.5px solid #E5E0D2;} ' +
+  'table.acct-table td{padding:12px 12px;border-bottom:1px solid #F0EDE3;vertical-align:middle;} ' +
+  'table.acct-table tr:last-child td{border-bottom:none;} ' +
+  '.filters-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;} ' +
+  '.filters-row select{font-family:inherit;font-size:13px;padding:9px 12px;border:1.5px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
+  '.team-name-cell{display:flex;align-items:center;gap:10px;} ' +
+  '.team-avatar{width:32px;height:32px;border-radius:50%;background:#F0EDE3;color:#615D53;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;} ' +
+  '.role-pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;} ' +
+  '.role-pill.admin{background:#F3E7D2;color:#8A6A2F;} ' +
+  '.role-pill.manager{background:#DCE6F5;color:#2F4E80;} ' +
+  '.role-pill.employee{background:#EAE8E1;color:#57544B;} ' +
+  '.section-divider{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#8A8578;font-weight:700;padding:16px 12px 6px;} ' +
+  '.perm-matrix{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;} ' +
+  '.perm-matrix th,.perm-matrix td{padding:9px 10px;border-bottom:1px solid #F0EDE3;text-align:left;} ' +
+  '.perm-matrix th{color:#8A8578;font-size:11px;text-transform:uppercase;letter-spacing:.04em;} ' +
+  '.perm-yes{color:#1E5245;font-weight:700;} ' +
+  '.perm-no{color:#B7B2A4;} ' +
+  '.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #F0EDE3;gap:16px;} ' +
+  '.toggle-row:last-child{border-bottom:none;} ' +
+  '.toggle-row .toggle-label{font-size:13.5px;color:#171717;font-weight:600;} ' +
+  '.toggle-row .toggle-sub{font-size:12px;color:#8A8578;margin-top:2px;} ' +
+  '.switch{position:relative;width:40px;height:22px;flex-shrink:0;} ' +
+  '.switch input{opacity:0;width:0;height:0;} ' +
+  '.switch .slider{position:absolute;inset:0;background:#E5E0D2;border-radius:22px;transition:.15s;cursor:pointer;} ' +
+  '.switch .slider:before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;} ' +
+  '.switch input:checked + .slider{background:#C29B57;} ' +
+  '.switch input:checked + .slider:before{transform:translateX(18px);} ' +
+  '.loading-state{padding:60px 20px;text-align:center;color:#8A8578;font-size:14px;} ' +
+  '.edit-modal-backdrop{position:fixed;inset:0;background:rgba(23,23,23,0.55);display:none;align-items:center;justify-content:center;z-index:999;padding:20px;} ' +
+  '.edit-modal-backdrop.open{display:flex;} ' +
+  '.edit-modal{background:#fff;border-radius:14px;padding:26px;max-width:420px;width:100%;} ' +
+  '.edit-modal h4{margin:0 0 16px;} ' +
+  '.edit-modal .acct-field{margin-bottom:14px;} ' +
+  '.edit-modal select,.edit-modal input{width:100%;font-family:inherit;font-size:14px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;} ' +
+  '.edit-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;} ' +
+  '.mock-flag{display:inline-block;font-size:10px;color:#B08A3E;background:#FBF3E4;border:1px solid #EEDDB6;padding:2px 8px;border-radius:6px;margin-left:8px;font-weight:600;vertical-align:middle;} ' +
+  '</style></head> ' +
+  '<body> ' +
+  '<div class="acct-topbar"> ' +
+  '<div class="acct-brand">clAIms</div> ' +
+  '<div class="acct-topbar-right"> ' +
+  '<div class="acct-user-chip" id="acctUserChip">Loading account…</div> ' +
+  '<a href="/dashboard" class="btn-to-dashboard" id="toDashboardBtn">To my Dashboard →</a> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-wrap"> ' +
+  '<div class="acct-tabs" id="acctTabs"> ' +
+  '<button class="acct-tab active" data-tab="account">Account</button> ' +
+  '<button class="acct-tab" data-tab="billing">Payment &amp; Billing</button> ' +
+  '<button class="acct-tab" data-tab="team">My Team</button> ' +
+  '<button class="acct-tab" data-tab="settings">Settings &amp; Permissions</button> ' +
+  '</div> ' +
+  ' ' +
+  '<div id="acctLoading" class="loading-state">Loading your account…</div> ' +
+  ' ' +
+  '<div id="acctPanels" style="display:none;"> ' +
+  ' ' +
+  '<div class="acct-panel active" id="panel-account"> ' +
+  '<div class="acct-card"> ' +
+  '<h3>Account information</h3> ' +
+  '<div class="acct-card-sub">Your login and profile details.</div> ' +
+  '<div class="acct-grid"> ' +
+  '<div class="acct-field"><label>Full name</label><div class="acct-value" id="acctFullName">—</div></div> ' +
+  '<div class="acct-field"><label>Username / Email</label><div class="acct-value" id="acctEmail">—</div></div> ' +
+  '<div class="acct-field"><label>Company</label><div class="acct-value" id="acctCompany">—</div></div> ' +
+  '<div class="acct-field"><label>Account type</label><div class="acct-value" id="acctRoleValue">—</div></div> ' +
+  '<div class="acct-field"><label>Password</label><div class="acct-value">••••••••••• <a href="/#login" onclick="location.hash=\'login\';" style="color:#C29B57;font-weight:600;text-decoration:none;font-size:12.5px;">Change password</a></div></div> ' +
+  '<div class="acct-field"><label>Member since</label><div class="acct-value" id="acctJoined">—<span class="mock-flag">sample</span></div></div> ' +
+  '</div> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-panel" id="panel-billing"> ' +
+  '<div id="billingRestricted" class="restricted-box" style="display:none;">Payment &amp; Billing is available to <b>managers</b> and <b>admins</b>. Contact your company admin if you need access.</div> ' +
+  '<div id="billingContent" style="display:none;"> ' +
+  '<div class="plan-banner"> ' +
+  '<div> ' +
+  '<div class="plan-label">Current plan</div> ' +
+  '<div class="plan-name" id="billingPlanName">—</div> ' +
+  '</div> ' +
+  '<button class="btn-dark btn-sm" id="manageSubBtn">Manage Subscription</button> ' +
+  '</div> ' +
+  '<div class="acct-card"> ' +
+  '<h3>Plan features<span class="mock-flag">sample</span></h3> ' +
+  '<ul class="plan-feature-list" id="planFeatureList"></ul> ' +
+  '</div> ' +
+  '<div class="acct-card"> ' +
+  '<h3>Payment method<span class="mock-flag">sample</span></h3> ' +
+  '<div class="acct-grid"> ' +
+  '<div class="acct-field"><label>Card on file</label><div class="acct-value">Visa •••• 4242, exp 08/28</div></div> ' +
+  '<div class="acct-field"><label>Business address</label><div class="acct-value" id="billingAddress">—</div></div> ' +
+  '</div> ' +
+  '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;" id="billingAdminActions"> ' +
+  '<button class="btn-outline btn-sm">Update payment method</button> ' +
+  '</div> ' +
+  '</div> ' +
+  '<div class="acct-card"> ' +
+  '<h3>Transaction history<span class="mock-flag">sample</span></h3> ' +
+  '<table class="acct-table"> ' +
+  '<thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead> ' +
+  '<tbody id="billingTxRows"></tbody> ' +
+  '</table> ' +
+  '<div style="margin-top:14px;" id="billingManagerActions"> ' +
+  '<button class="btn-outline btn-sm">Apply a payment</button> ' +
+  '</div> ' +
+  '</div> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-panel" id="panel-team"> ' +
+  '<div class="acct-card"> ' +
+  '<h3>My Team<span class="mock-flag">sample data</span></h3> ' +
+  '<div class="acct-card-sub">Everyone at your company with a clAIms account.</div> ' +
+  '<div class="filters-row"> ' +
+  '<select id="filterOffice"><option value="">All offices</option></select> ' +
+  '<select id="filterDept"><option value="">All departments</option></select> ' +
+  '<select id="filterType"><option value="">All account types</option><option value="admin">Admin</option><option value="manager">Manager</option><option value="employee">Employee</option></select> ' +
+  '</div> ' +
+  '<table class="acct-table"> ' +
+  '<thead><tr> ' +
+  '<th>Name</th><th>Email</th><th>Department</th><th>Office</th><th>Account type</th><th id="teamCredHeader" style="display:none;">Credentials</th><th id="teamEditHeader" style="display:none;">Actions</th> ' +
+  '</tr></thead> ' +
+  '<tbody id="teamRows"></tbody> ' +
+  '</table> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-panel" id="panel-settings"> ' +
+  '<div class="acct-card"> ' +
+  '<h3>Automation settings</h3> ' +
+  '<div class="acct-card-sub">Applies to your personal follow-up activity.<span class="mock-flag">sample</span></div> ' +
+  '<div class="toggle-row"><div><div class="toggle-label">Autonomous follow-up cadence</div><div class="toggle-sub">Send scheduled reminders automatically on your behalf.</div></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div> ' +
+  '<div class="toggle-row"><div><div class="toggle-label">AI drafting</div><div class="toggle-sub">Let clAIms draft follow-up emails for your review.</div></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div> ' +
+  '<div class="toggle-row"><div><div class="toggle-label">Daily digest email</div><div class="toggle-sub">Get a morning summary of what needs attention.</div></div><label class="switch"><input type="checkbox"><span class="slider"></span></label></div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-card" id="permissionsCard" style="display:none;"> ' +
+  '<h3>Permissions<span class="mock-flag">sample</span></h3> ' +
+  '<div class="acct-card-sub">What each account type can do at your company.</div> ' +
+  '<table class="perm-matrix"> ' +
+  '<thead><tr><th>Capability</th><th>Employee</th><th>Manager</th><th>Admin</th></tr></thead> ' +
+  '<tbody id="permMatrixRows"></tbody> ' +
+  '</table> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-card"> ' +
+  '<h3>Integrations<span class="mock-flag">sample</span></h3> ' +
+  '<div class="acct-card-sub" id="integrationsSub">Software connected to your dashboard.</div> ' +
+  '<div id="integrationsRestricted" class="restricted-box" style="display:none;">Only admins can add or change integrations. Ask your company admin to make changes here.</div> ' +
+  '<div id="integrationsContent" style="display:none;"> ' +
+  '<div class="acct-grid"> ' +
+  '<div class="acct-field"><label>QuickBooks</label><div class="acct-value">Connected</div></div> ' +
+  '<div class="acct-field"><label>Salesforce</label><div class="acct-value">Not connected</div></div> ' +
+  '</div> ' +
+  '<div style="margin-top:14px;"><button class="btn-outline btn-sm">Manage integrations</button></div> ' +
+  '</div> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="edit-modal-backdrop" id="editModalBackdrop"> ' +
+  '<div class="edit-modal"> ' +
+  '<h4 id="editModalTitle">Edit team member</h4> ' +
+  '<div class="acct-field"><label>Name</label><input type="text" id="editModalName" disabled></div> ' +
+  '<div class="acct-field"><label>Department</label><input type="text" id="editModalDept"></div> ' +
+  '<div class="acct-field"><label>Office</label><input type="text" id="editModalOffice"></div> ' +
+  '<div class="acct-field"><label>Account type</label> ' +
+  '<select id="editModalRole"> ' +
+  '<option value="employee">Employee</option> ' +
+  '<option value="manager">Manager</option> ' +
+  '<option value="admin">Admin</option> ' +
+  '</select> ' +
+  '</div> ' +
+  '<div class="acct-card-sub" id="editModalNote" style="margin-top:-6px;"></div> ' +
+  '<div class="edit-modal-actions"> ' +
+  '<button class="btn-outline btn-sm" id="editModalCancel">Cancel</button> ' +
+  '<button class="btn-outline btn-sm" id="editModalRemove" style="color:#B0473F;border-color:#F0C9C4;">Remove user</button> ' +
+  '<button class="btn-dark btn-sm" id="editModalSave">Save changes</button> ' +
+  '</div> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<script>(function(){ ' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}} ' +
+  ' ' +
+  'var ROLE_RANK={admin:0,manager:1,employee:2}; ' +
+  'var ROLE_LABEL={admin:"Admin",manager:"Manager",employee:"Employee"}; ' +
+  ' ' +
+  'var PLAN_FEATURES={ ' +
+  '  starter:{name:"Starter",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]}, ' +
+  '  growth:{name:"Growth",features:["5–8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]}, ' +
+  '  enterprise:{name:"Enterprise",features:["Unlimited seats","All integrations","Everything in Growth","Multi-office & multi-entity support","Dedicated account manager"]} ' +
+  '}; ' +
+  ' ' +
+  'var MOCK_TEAM=[ ' +
+  '  {id:1,name:"Dana Whitfield",email:"dana.whitfield@example.com",dept:"Collections",office:"Dallas HQ",role:"admin"}, ' +
+  '  {id:2,name:"Marcus Ojeda",email:"marcus.ojeda@example.com",dept:"Operations",office:"Austin",role:"manager"}, ' +
+  '  {id:3,name:"Priya Chandran",email:"priya.chandran@example.com",dept:"Collections",office:"Dallas HQ",role:"manager"}, ' +
+  '  {id:4,name:"Sam Fielding",email:"sam.fielding@example.com",dept:"Accounting",office:"Austin",role:"employee"}, ' +
+  '  {id:5,name:"Leah Buckner",email:"leah.buckner@example.com",dept:"Collections",office:"Houston",role:"employee"}, ' +
+  '  {id:6,name:"Reese Alvarado",email:"reese.alvarado@example.com",dept:"Operations",office:"Houston",role:"employee"}, ' +
+  '  {id:7,name:"Tyler Nakamura",email:"tyler.nakamura@example.com",dept:"Accounting",office:"Dallas HQ",role:"employee"} ' +
+  ']; ' +
+  ' ' +
+  'var MOCK_TX=[ ' +
+  '  {date:"Aug 1, 2026",desc:"Monthly subscription",amount:"$899.00",status:"Paid"}, ' +
+  '  {date:"Jul 1, 2026",desc:"Monthly subscription",amount:"$899.00",status:"Paid"}, ' +
+  '  {date:"Jun 1, 2026",desc:"Monthly subscription",amount:"$899.00",status:"Paid"}, ' +
+  '  {date:"May 12, 2026",desc:"Implementation fee",amount:"$4,900.00",status:"Paid"} ' +
+  ']; ' +
+  ' ' +
+  'var PERM_ROWS=[ ' +
+  '  {label:"View own account info",employee:true,manager:true,admin:true}, ' +
+  '  {label:"View all team members",employee:true,manager:true,admin:true}, ' +
+  '  {label:"Add / remove team members",employee:false,manager:true,admin:true}, ' +
+  '  {label:"Edit team member permissions",employee:false,manager:true,admin:true}, ' +
+  '  {label:"View team credentials / reset passwords",employee:false,manager:false,admin:true}, ' +
+  '  {label:"Manually apply a payment",employee:false,manager:true,admin:true}, ' +
+  '  {label:"Manage subscription & payment method",employee:false,manager:false,admin:true}, ' +
+  '  {label:"Add / change integrations",employee:false,manager:false,admin:true} ' +
+  ']; ' +
+  ' ' +
+  'function initials(name){ ' +
+  '  var parts=String(name||"").trim().split(/\\s+/); ' +
+  '  return ((parts[0]||"")[0]||"")+((parts[1]||"")[0]||""); ' +
+  '} ' +
+  ' ' +
+  'ready(function(){ ' +
+  '  var state={me:null,team:MOCK_TEAM.slice(),editingId:null}; ' +
+  ' ' +
+  '  fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(data){ ' +
+  '    if(!data||!data.ok){ ' +
+  '      window.location.href="/?login=1"; ' +
+  '      return; ' +
+  '    } ' +
+  '    state.me=data; ' +
+  '    render(); ' +
+  '  }).catch(function(){ ' +
+  '    window.location.href="/?login=1"; ' +
+  '  }); ' +
+  ' ' +
+  '  function role(){ return (state.me && state.me.role) || "employee"; } ' +
+  '  function plan(){ return (state.me && (state.me.selectedPlan || state.me.recommendedPlan)) || "growth"; } ' +
+  ' ' +
+  '  function render(){ ' +
+  '    document.getElementById("acctLoading").style.display="none"; ' +
+  '    document.getElementById("acctPanels").style.display="block"; ' +
+  ' ' +
+  '    var r=role(); ' +
+  '    document.getElementById("acctUserChip").innerHTML= ' +
+  '      "<b>"+(state.me.email||"")+"</b>"+ ' +
+  '      "<span class=\\"acct-role-badge "+r+"\\">"+ROLE_LABEL[r]+"</span>"; ' +
+  ' ' +
+  '    renderAccountTab(); ' +
+  '    renderBillingTab(); ' +
+  '    renderTeamTab(); ' +
+  '    renderSettingsTab(); ' +
+  '    wireTabs(); ' +
+  '    wireEditModal(); ' +
+  '  } ' +
+  ' ' +
+  '  function renderAccountTab(){ ' +
+  '    document.getElementById("acctFullName").textContent=state.me.email.split("@")[0].replace(/[._]/g," ").replace(/\\b\\w/g,function(c){return c.toUpperCase();}); ' +
+  '    document.getElementById("acctEmail").textContent=state.me.email; ' +
+  '    document.getElementById("acctCompany").textContent=state.me.companyName||"—"; ' +
+  '    document.getElementById("acctRoleValue").innerHTML="<span class=\\"role-pill "+role()+"\\">"+ROLE_LABEL[role()]+"</span>"; ' +
+  '    document.getElementById("acctJoined").innerHTML="March 2025 <span class=\\"mock-flag\\">sample</span>"; ' +
+  '  } ' +
+  ' ' +
+  '  function renderBillingTab(){ ' +
+  '    var r=role(); ' +
+  '    var canView=(r==="admin"||r==="manager"); ' +
+  '    document.getElementById("billingRestricted").style.display=canView?"none":"block"; ' +
+  '    document.getElementById("billingContent").style.display=canView?"block":"none"; ' +
+  '    if(!canView){ return; } ' +
+  ' ' +
+  '    var p=plan(); ' +
+  '    var planInfo=PLAN_FEATURES[p]||PLAN_FEATURES.growth; ' +
+  '    document.getElementById("billingPlanName").textContent=planInfo.name; ' +
+  '    var list=document.getElementById("planFeatureList"); ' +
+  '    list.innerHTML=""; ' +
+  '    planInfo.features.forEach(function(f){ ' +
+  '      var li=document.createElement("li"); ' +
+  '      li.textContent=f; ' +
+  '      list.appendChild(li); ' +
+  '    }); ' +
+  '    document.getElementById("billingAddress").textContent="123 Main St, Dallas, TX 75201"; ' +
+  ' ' +
+  '    var txRows=document.getElementById("billingTxRows"); ' +
+  '    txRows.innerHTML=""; ' +
+  '    MOCK_TX.forEach(function(tx){ ' +
+  '      var tr=document.createElement("tr"); ' +
+  '      tr.innerHTML="<td>"+tx.date+"</td><td>"+tx.desc+"</td><td>"+tx.amount+"</td><td>"+tx.status+"</td>"; ' +
+  '      txRows.appendChild(tr); ' +
+  '    }); ' +
+  ' ' +
+  '    document.getElementById("manageSubBtn").style.display=(r==="admin")?"inline-block":"none"; ' +
+  '    document.getElementById("billingAdminActions").style.display=(r==="admin")?"flex":"none"; ' +
+  '    document.getElementById("billingManagerActions").style.display=(r!=="admin")?"block":"none"; ' +
+  '  } ' +
+  ' ' +
+  '  function populateFilterOptions(){ ' +
+  '    var offices={},depts={}; ' +
+  '    state.team.forEach(function(u){ offices[u.office]=1; depts[u.dept]=1; }); ' +
+  '    var officeSel=document.getElementById("filterOffice"); ' +
+  '    var deptSel=document.getElementById("filterDept"); ' +
+  '    officeSel.innerHTML="<option value=\\"\\">All offices</option>"+Object.keys(offices).sort().map(function(o){return "<option value=\\""+o+"\\">"+o+"</option>";}).join(""); ' +
+  '    deptSel.innerHTML="<option value=\\"\\">All departments</option>"+Object.keys(depts).sort().map(function(d){return "<option value=\\""+d+"\\">"+d+"</option>";}).join(""); ' +
+  '  } ' +
+  ' ' +
+  '  function renderTeamTab(){ ' +
+  '    var r=role(); ' +
+  '    populateFilterOptions(); ' +
+  ' ' +
+  '    var canSeeCreds=(r==="admin"); ' +
+  '    var canEdit=(r==="admin"||r==="manager"); ' +
+  '    document.getElementById("teamCredHeader").style.display=canSeeCreds?"table-cell":"none"; ' +
+  '    document.getElementById("teamEditHeader").style.display=canEdit?"table-cell":"none"; ' +
+  ' ' +
+  '    var officeVal=document.getElementById("filterOffice").value; ' +
+  '    var deptVal=document.getElementById("filterDept").value; ' +
+  '    var typeVal=document.getElementById("filterType").value; ' +
+  ' ' +
+  '    var rows=state.team.filter(function(u){ ' +
+  '      if(officeVal&&u.office!==officeVal) return false; ' +
+  '      if(deptVal&&u.dept!==deptVal) return false; ' +
+  '      if(typeVal&&u.role!==typeVal) return false; ' +
+  '      return true; ' +
+  '    }).sort(function(a,b){ ' +
+  '      if(ROLE_RANK[a.role]!==ROLE_RANK[b.role]) return ROLE_RANK[a.role]-ROLE_RANK[b.role]; ' +
+  '      return a.name.localeCompare(b.name); ' +
+  '    }); ' +
+  ' ' +
+  '    var tbody=document.getElementById("teamRows"); ' +
+  '    tbody.innerHTML=""; ' +
+  '    var lastRank=-1; ' +
+  '    rows.forEach(function(u){ ' +
+  '      if(ROLE_RANK[u.role]!==lastRank){ ' +
+  '        lastRank=ROLE_RANK[u.role]; ' +
+  '        var divider=document.createElement("tr"); ' +
+  '        var colCount=5+(canSeeCreds?1:0)+(canEdit?1:0); ' +
+  '        divider.innerHTML="<td colspan=\\""+colCount+"\\" class=\\"section-divider\\">"+ROLE_LABEL[u.role]+"s</td>"; ' +
+  '        tbody.appendChild(divider); ' +
+  '      } ' +
+  '      var tr=document.createElement("tr"); ' +
+  '      var credsCell=canSeeCreds?"<td><button class=\\"btn-outline btn-sm\\" data-reset=\\""+u.id+"\\">Reset password</button></td>":""; ' +
+  '      var canEditThisRow=canEdit&&!(r==="manager"&&u.role==="admin"); ' +
+  '      var editCell=canEdit?("<td>"+(canEditThisRow?"<button class=\\"btn-outline btn-sm\\" data-edit=\\""+u.id+"\\">Edit</button>":"<span style=\\"color:#B7B2A4;font-size:12px;\\">Locked</span>")+"</td>"):""; ' +
+  '      tr.innerHTML= ' +
+  '        "<td><div class=\\"team-name-cell\\"><div class=\\"team-avatar\\">"+initials(u.name)+"</div>"+u.name+"</div></td>"+ ' +
+  '        "<td>"+u.email+"</td>"+ ' +
+  '        "<td>"+u.dept+"</td>"+ ' +
+  '        "<td>"+u.office+"</td>"+ ' +
+  '        "<td><span class=\\"role-pill "+u.role+"\\">"+ROLE_LABEL[u.role]+"</span></td>"+ ' +
+  '        credsCell+editCell; ' +
+  '      tbody.appendChild(tr); ' +
+  '    }); ' +
+  ' ' +
+  '    if(canEdit && !document.getElementById("addUserBtnWrap")){ ' +
+  '      var wrap=document.createElement("div"); ' +
+  '      wrap.id="addUserBtnWrap"; ' +
+  '      wrap.style.marginTop="16px"; ' +
+  '      wrap.innerHTML="<button class=\\"btn-dark btn-sm\\" id=\\"addUserBtn\\">+ Add user</button>"; ' +
+  '      tbody.parentNode.parentNode.appendChild(wrap); ' +
+  '      document.getElementById("addUserBtn").addEventListener("click",function(){ openEditModal(null); }); ' +
+  '    } ' +
+  ' ' +
+  '    tbody.querySelectorAll("[data-edit]").forEach(function(btn){ ' +
+  '      btn.addEventListener("click",function(){ openEditModal(parseInt(btn.getAttribute("data-edit"),10)); }); ' +
+  '    }); ' +
+  '    tbody.querySelectorAll("[data-reset]").forEach(function(btn){ ' +
+  '      btn.addEventListener("click",function(){ ' +
+  '        btn.textContent="Reset link sent"; ' +
+  '        btn.disabled=true; ' +
+  '      }); ' +
+  '    }); ' +
+  ' ' +
+  '    ["filterOffice","filterDept","filterType"].forEach(function(id){ ' +
+  '      var el=document.getElementById(id); ' +
+  '      el.onchange=renderTeamTab; ' +
+  '    }); ' +
+  '  } ' +
+  ' ' +
+  '  function renderSettingsTab(){ ' +
+  '    var r=role(); ' +
+  '    document.getElementById("permissionsCard").style.display=(r==="admin")?"block":"none"; ' +
+  '    if(r==="admin"){ ' +
+  '      var body=document.getElementById("permMatrixRows"); ' +
+  '      body.innerHTML=""; ' +
+  '      PERM_ROWS.forEach(function(row){ ' +
+  '        var tr=document.createElement("tr"); ' +
+  '        tr.innerHTML="<td>"+row.label+"</td>"+ ' +
+  '          "<td class=\\""+(row.employee?"perm-yes":"perm-no")+"\\">"+(row.employee?"Yes":"No")+"</td>"+ ' +
+  '          "<td class=\\""+(row.manager?"perm-yes":"perm-no")+"\\">"+(row.manager?"Yes":"No")+"</td>"+ ' +
+  '          "<td class=\\""+(row.admin?"perm-yes":"perm-no")+"\\">"+(row.admin?"Yes":"No")+"</td>"; ' +
+  '        body.appendChild(tr); ' +
+  '      }); ' +
+  '    } ' +
+  '    document.getElementById("integrationsRestricted").style.display=(r==="admin")?"none":"none"; ' +
+  '    document.getElementById("integrationsContent").style.display="block"; ' +
+  '    var integActionsWrap=document.querySelector("#integrationsContent > div:last-child"); ' +
+  '    if(integActionsWrap){ integActionsWrap.style.display=(r==="admin")?"block":"none"; } ' +
+  '    document.getElementById("integrationsSub").textContent=(r==="admin")?"Software connected to your dashboard.":"Software connected to your dashboard. Ask your admin to make changes."; ' +
+  '  } ' +
+  ' ' +
+  '  function wireTabs(){ ' +
+  '    var tabs=document.querySelectorAll(".acct-tab"); ' +
+  '    tabs.forEach(function(tab){ ' +
+  '      tab.addEventListener("click",function(){ ' +
+  '        tabs.forEach(function(t){ t.classList.remove("active"); }); ' +
+  '        tab.classList.add("active"); ' +
+  '        document.querySelectorAll(".acct-panel").forEach(function(p){ p.classList.remove("active"); }); ' +
+  '        document.getElementById("panel-"+tab.getAttribute("data-tab")).classList.add("active"); ' +
+  '      }); ' +
+  '    }); ' +
+  '  } ' +
+  ' ' +
+  '  function openEditModal(id){ ' +
+  '    state.editingId=id; ' +
+  '    var backdrop=document.getElementById("editModalBackdrop"); ' +
+  '    var isNew=(id===null); ' +
+  '    var user=isNew?{name:"",dept:"",office:"",role:"employee"}:state.team.filter(function(u){return u.id===id;})[0]; ' +
+  '    document.getElementById("editModalTitle").textContent=isNew?"Add team member":"Edit team member"; ' +
+  '    document.getElementById("editModalName").value=isNew?"":user.name; ' +
+  '    document.getElementById("editModalName").disabled=!isNew; ' +
+  '    document.getElementById("editModalName").placeholder=isNew?"Full name":""; ' +
+  '    document.getElementById("editModalDept").value=user.dept; ' +
+  '    document.getElementById("editModalOffice").value=user.office; ' +
+  '    document.getElementById("editModalRole").value=user.role; ' +
+  '    var roleSelect=document.getElementById("editModalRole"); ' +
+  '    Array.prototype.forEach.call(roleSelect.options,function(opt){ ' +
+  '      opt.disabled=(role()==="manager"&&opt.value==="admin"); ' +
+  '    }); ' +
+  '    document.getElementById("editModalNote").textContent=(role()==="manager")?"Managers cannot promote a user to Admin.":""; ' +
+  '    document.getElementById("editModalRemove").style.display=isNew?"none":"inline-block"; ' +
+  '    backdrop.classList.add("open"); ' +
+  '  } ' +
+  ' ' +
+  '  function wireEditModal(){ ' +
+  '    document.getElementById("editModalCancel").addEventListener("click",function(){ ' +
+  '      document.getElementById("editModalBackdrop").classList.remove("open"); ' +
+  '    }); ' +
+  '    document.getElementById("editModalSave").addEventListener("click",function(){ ' +
+  '      var name=document.getElementById("editModalName").value.trim(); ' +
+  '      var dept=document.getElementById("editModalDept").value.trim(); ' +
+  '      var office=document.getElementById("editModalOffice").value.trim(); ' +
+  '      var newRole=document.getElementById("editModalRole").value; ' +
+  '      if(state.editingId===null){ ' +
+  '        if(!name){ return; } ' +
+  '        var nextId=Math.max.apply(null,state.team.map(function(u){return u.id;}))+1; ' +
+  '        state.team.push({id:nextId,name:name,email:name.toLowerCase().replace(/\\s+/g,".")+"@example.com",dept:dept,office:office,role:newRole}); ' +
+  '      }else{ ' +
+  '        state.team=state.team.map(function(u){ ' +
+  '          if(u.id!==state.editingId) return u; ' +
+  '          return Object.assign({},u,{dept:dept,office:office,role:newRole}); ' +
+  '        }); ' +
+  '      } ' +
+  '      document.getElementById("editModalBackdrop").classList.remove("open"); ' +
+  '      renderTeamTab(); ' +
+  '    }); ' +
+  '    document.getElementById("editModalRemove").addEventListener("click",function(){ ' +
+  '      state.team=state.team.filter(function(u){ return u.id!==state.editingId; }); ' +
+  '      document.getElementById("editModalBackdrop").classList.remove("open"); ' +
+  '      renderTeamTab(); ' +
+  '    }); ' +
+  '  } ' +
+  '}); ' +
+  '})(); ' +
+  '</script> ' +
+  '</body></html> ' +
+  ' ';
+
 const PRICING_LINKS_SCRIPT = '<script>' +
   '(function(){' +
   'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
@@ -1116,6 +1638,17 @@ async function handleThankYou(request, env) {
   return injectHelpWidget(new Response(THANK_YOU_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
 }
 
+async function handleAccountPage(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) {
+    return new Response(null, {
+      status: 302,
+      headers: { 'Location': new URL('/', request.url).toString() + '?login=1', 'Cache-Control': NO_STORE }
+    });
+  }
+  return injectHelpWidget(new Response(ACCOUNT_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
+}
+
 async function handleVerifyEmail(request, env) {
   const url = new URL(request.url);
   const token = url.searchParams.get('token') || '';
@@ -1282,7 +1815,7 @@ async function handleLogin(request, env) {
   await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').bind(token, user.id, expiresAt).run();
 
   const cookie = SESSION_COOKIE + '=' + token + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
-  return new Response(JSON.stringify({ ok: true, redirect: '/dashboard' }), {
+  return new Response(JSON.stringify({ ok: true, redirect: '/account' }), {
     status: 200,
     headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
   });
@@ -1301,6 +1834,19 @@ async function handleLogout(request, env) {
   });
 }
 
+const MY_ACCOUNT_LINK_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var a=document.createElement("a");' +
+  'a.href="/account";' +
+  'a.textContent="My Account";' +
+  'a.style.cssText="position:fixed;top:16px;right:16px;z-index:99997;background:#171717;color:#fff;text-decoration:none;font-family:\'IBM Plex Sans\',Arial,sans-serif;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);";' +
+  'document.body.appendChild(a);' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 async function handleDashboard(request, env) {
   const user = await getSessionUser(request, env);
   if (!user) {
@@ -1314,7 +1860,8 @@ async function handleDashboard(request, env) {
   const safeName = String(user.company_name || '').replace(/"/g, '&quot;');
   html = html
     .replace(/data-company-name="[^"]*"/, 'data-company-name="' + safeName + '"')
-    .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"');
+    .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"')
+    .replace('</body>', MY_ACCOUNT_LINK_SCRIPT + '</body>');
   return injectHelpWidget(new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
 }
 
@@ -1382,6 +1929,9 @@ export default {
     }
     if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
       return handleStripeWebhook(request, env);
+    }
+    if (url.pathname === '/account') {
+      return handleAccountPage(request, env);
     }
     if (url.pathname === '/dashboard') {
       return handleDashboard(request, env);
