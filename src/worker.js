@@ -2192,6 +2192,25 @@ async function handleMe(request, env) {
   });
 }
 
+async function handleAdminAccountsExport(request, env) {
+  const url = new URL(request.url);
+  const key = url.searchParams.get('key') || request.headers.get('X-Export-Key') || '';
+  if (!env.ADMIN_EXPORT_KEY || key !== env.ADMIN_EXPORT_KEY) {
+    return json({ ok: false, error: 'Not authorized' }, 401);
+  }
+  const results = await env.DB.prepare(
+    `SELECT t.id AS tenant_id, t.slug, t.company_name, t.created_at AS company_created_at, t.domain, t.address, t.city, t.state, t.zip, t.country, t.company_size, t.recommended_plan, t.selected_plan, t.status AS tenant_status, t.integration_status,
+            u.id AS user_id, u.email, u.full_name, u.role AS user_role, u.status AS user_status, u.email_verified, u.created_at AS user_created_at
+     FROM tenants t
+     LEFT JOIN users u ON u.tenant_id = t.id
+     ORDER BY t.id, u.id`
+  ).all();
+  return new Response(JSON.stringify({ ok: true, generated_at: new Date().toISOString(), rows: results.results }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE, 'Access-Control-Allow-Origin': '*' }
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -2204,6 +2223,9 @@ export default {
     }
     if (url.pathname === '/api/me' && request.method === 'GET') {
       return handleMe(request, env);
+    }
+    if (url.pathname === '/api/admin/accounts-export' && request.method === 'GET') {
+      return handleAdminAccountsExport(request, env);
     }
     if (url.pathname === '/api/signup' && request.method === 'POST') {
       return handleSignup(request, env);
