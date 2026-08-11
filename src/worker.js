@@ -427,6 +427,8 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'ready(function(){' +
   'var tiersRow=document.getElementById("tiersRow");' +
   'if(!tiersRow){return;}' +
+  'var entPrice=tiersRow.querySelector(".tier.enterprise .tier-price");' +
+  'if(entPrice){entPrice.innerHTML="$2,000<span class=\\"per\\">–$5,500/mo</span>";}' +
   'var tierBtns=tiersRow.querySelectorAll("a.btn-tier");' +
   'for(var i=0;i<tierBtns.length;i++){' +
   '(function(a){' +
