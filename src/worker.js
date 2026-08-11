@@ -500,6 +500,7 @@ const DEMO_POPUP_SCRIPT = '<script>' +
   'if(sessionStorage.getItem("clmsDemoPopupShown")){return;}' +
   'setTimeout(function(){' +
   'if(sessionStorage.getItem("clmsDemoPopupShown")){return;}' +
+  'if(location.hash==="#demo"){return;}' +
   'sessionStorage.setItem("clmsDemoPopupShown","1");' +
   'var wrap=document.createElement("div");' +
   'wrap.id="clms-demo-popup";' +
