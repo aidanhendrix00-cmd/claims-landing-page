@@ -504,6 +504,24 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '.edit-modal select,.edit-modal input{width:100%;font-family:inherit;font-size:14px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;} ' +
   '.edit-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;} ' +
   '.mock-flag{display:inline-block;font-size:10px;color:#B08A3E;background:#FBF3E4;border:1px solid #EEDDB6;padding:2px 8px;border-radius:6px;margin-left:8px;font-weight:600;vertical-align:middle;} ' +
+  '.freq-day-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:14px;} ' +
+  '@media (max-width:640px){.freq-day-grid{grid-template-columns:repeat(4,1fr);}} ' +
+  '.freq-day-chip{border:1.5px solid #E5E0D2;border-radius:8px;padding:8px 4px;text-align:center;font-size:11.5px;font-weight:600;color:#8A8578;cursor:pointer;background:#FBFAF6;user-select:none;} ' +
+  '.freq-day-chip .freq-day-num{display:block;font-size:13px;font-weight:700;color:#171717;margin-bottom:2px;} ' +
+  '.freq-day-chip.on{background:#FBF3E4;border-color:#C29B57;color:#8A6A2F;} ' +
+  '.freq-day-chip.on .freq-day-num{color:#171717;} ' +
+  '.freq-day-chip.readonly{cursor:default;} ' +
+  '.freq-legend{display:flex;gap:18px;margin-top:12px;font-size:11.5px;color:#8A8578;} ' +
+  '.freq-legend span{display:inline-flex;align-items:center;gap:6px;} ' +
+  '.freq-legend .dot{width:10px;height:10px;border-radius:3px;display:inline-block;} ' +
+  '.freq-legend .dot.on{background:#C29B57;} ' +
+  '.freq-legend .dot.off{background:#E5E0D2;} ' +
+  '.freq-inline-field{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;} ' +
+  '.freq-inline-field label{font-size:12.5px;color:#615D53;} ' +
+  '.freq-inline-field input[type=number]{width:70px;font-family:inherit;font-size:13px;padding:7px 9px;border:1.5px solid #E5E0D2;border-radius:7px;} ' +
+  '.freq-inline-field input[type=time]{font-family:inherit;font-size:13px;padding:7px 9px;border:1.5px solid #E5E0D2;border-radius:7px;} ' +
+  '.freq-inline-field select{font-family:inherit;font-size:13px;padding:7px 9px;border:1.5px solid #E5E0D2;border-radius:7px;} ' +
+  '.freq-note{font-size:12px;color:#615D53;background:#F5F2EA;border-radius:8px;padding:10px 12px;margin-top:12px;line-height:1.5;} ' +
   '</style></head> ' +
   '<body> ' +
   '<div class="acct-topbar"> ' +
@@ -519,6 +537,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<button class="acct-tab active" data-tab="account">Account</button> ' +
   '<button class="acct-tab" data-tab="billing">Payment &amp; Billing</button> ' +
   '<button class="acct-tab" data-tab="team">My Team</button> ' +
+  '<button class="acct-tab" data-tab="frequency">Contact Frequency</button> ' +
   '<button class="acct-tab" data-tab="settings">Settings &amp; Permissions</button> ' +
   '</div> ' +
   ' ' +
@@ -594,6 +613,50 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<tbody id="teamRows"></tbody> ' +
   '</table> ' +
   '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-panel" id="panel-frequency"> ' +
+  '<div class="acct-card"> ' +
+  '<h3>Follow-up cadence (Day 1&ndash;30)<span class="mock-flag">sample</span></h3> ' +
+  '<div class="acct-card-sub">Choose which days after Day 1 your automated follow-ups go out. Turn any day off to create a quiet period.</div> ' +
+  '<div class="freq-day-grid" id="freqDayGrid"></div> ' +
+  '<div class="freq-legend"><span><span class="dot on"></span>Follow-up scheduled</span><span><span class="dot off"></span>Automation off</span></div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-card"> ' +
+  '<h3>Notice of Intent to Lien (NOIL)</h3> ' +
+  '<div class="acct-card-sub">Draft a NOIL for review once an invoice reaches a set age.</div> ' +
+  '<div class="toggle-row"><div><div class="toggle-label">Enable NOIL automation</div><div class="toggle-sub">clAIms drafts a NOIL for review; nothing sends without your approval.</div></div><label class="switch"><input type="checkbox" id="noilEnabled"><span class="slider"></span></label></div> ' +
+  '<div class="freq-inline-field"><label for="noilDay">Draft NOIL on day</label><input type="number" id="noilDay" min="1" max="120"><span style="font-size:12.5px;color:#615D53;">since Day 1</span></div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-card"> ' +
+  '<h3>Demand Letter</h3> ' +
+  '<div class="acct-card-sub">Draft a formal demand letter for review once an invoice reaches a set age.</div> ' +
+  '<div class="toggle-row"><div><div class="toggle-label">Enable Demand Letter automation</div><div class="toggle-sub">clAIms drafts a demand letter for review; nothing sends without your approval.</div></div><label class="switch"><input type="checkbox" id="demandEnabled"><span class="slider"></span></label></div> ' +
+  '<div class="freq-inline-field"><label for="demandDay">Draft demand letter on day</label><input type="number" id="demandDay" min="1" max="120"><span style="font-size:12.5px;color:#615D53;">since Day 1</span></div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-card"> ' +
+  '<h3>Guardrails<span class="mock-flag">sample</span></h3> ' +
+  '<div class="acct-card-sub">Limits that keep automation respectful of customers, regardless of the cadence configured above.</div> ' +
+  '<div class="freq-inline-field"><label>Quiet hours &mdash; no sends between</label><input type="time" id="quietStart"><span style="font-size:12.5px;color:#615D53;">and</span><input type="time" id="quietEnd"></div> ' +
+  '<div class="freq-inline-field"><label for="maxPerWeek">Maximum automated contacts per customer, per week</label><input type="number" id="maxPerWeek" min="1" max="14"></div> ' +
+  '<div class="toggle-row"><div><div class="toggle-label">Escalate to a human</div><div class="toggle-sub">Hand a customer off to a teammate after repeated unanswered contact.</div></div><label class="switch"><input type="checkbox" id="escalateEnabled"><span class="slider"></span></label></div> ' +
+  '<div class="freq-inline-field"><label for="escalateAfter">Escalate after</label><input type="number" id="escalateAfter" min="1" max="10"><span style="font-size:12.5px;color:#615D53;">unanswered follow-ups, assign to</span><select id="escalateAssignee"></select></div> ' +
+  '<div class="freq-note">Every automated message includes a one-click opt-out. Customers who opt out are removed from all future automation immediately and flagged here for manual follow-up. This cannot be overridden by the cadence settings above.</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-card"> ' +
+  '<h3>Messaging identity</h3> ' +
+  '<div class="acct-card-sub">What customers see when a message arrives.</div> ' +
+  '<div class="acct-field"><label>Sender name</label><input type="text" id="senderName" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
+  '<div class="freq-note">Every follow-up, NOIL, and demand letter is sent and signed as your company. Customers never see the clAIms platform name in a message.</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div id="freqSavedNote" style="display:none;font-size:12.5px;color:#1E5245;margin-bottom:14px;">&#10003; Saved</div> ' +
+  '<div id="freqActions" style="display:flex;justify-content:flex-end;"><button class="btn-dark" id="freqSaveBtn">Save changes</button></div> ' +
+  '<div id="freqReadonlyNote" class="restricted-box" style="display:none;">Only admins can change contact frequency and guardrails. Below is the current configuration for your company.</div> ' +
   '</div> ' +
   ' ' +
   '<div class="acct-panel" id="panel-settings"> ' +
@@ -699,7 +762,15 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '} ' +
   ' ' +
   'ready(function(){ ' +
-  '  var state={me:null,team:MOCK_TEAM.slice(),editingId:null}; ' +
+  '  var state={me:null,team:MOCK_TEAM.slice(),editingId:null,freq:{ ' +
+  '    days:(function(){var a=[];for(var i=0;i<30;i++){a.push(i%7!==5&&i%7!==6);}return a;})(), ' +
+  '    noilEnabled:true,noilDay:45, ' +
+  '    demandEnabled:true,demandDay:60, ' +
+  '    quietStart:"18:00",quietEnd:"08:00", ' +
+  '    maxPerWeek:2, ' +
+  '    escalateEnabled:true,escalateAfter:3, ' +
+  '    senderName:"" ' +
+  '  }}; ' +
   ' ' +
   '  fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(data){ ' +
   '    if(!data||!data.ok){ ' +
@@ -707,6 +778,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      return; ' +
   '    } ' +
   '    state.me=data; ' +
+  '    if(!state.freq.senderName){ state.freq.senderName=(data.companyName||"Your Company")+" Collections Team"; } ' +
   '    render(); ' +
   '  }).catch(function(){ ' +
   '    window.location.href="/?login=1"; ' +
@@ -727,6 +799,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    renderAccountTab(); ' +
   '    renderBillingTab(); ' +
   '    renderTeamTab(); ' +
+  '    renderFrequencyTab(); ' +
   '    renderSettingsTab(); ' +
   '    wireTabs(); ' +
   '    wireEditModal(); ' +
@@ -874,6 +947,70 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    var integActionsWrap=document.querySelector("#integrationsContent > div:last-child"); ' +
   '    if(integActionsWrap){ integActionsWrap.style.display=(r==="admin")?"block":"none"; } ' +
   '    document.getElementById("integrationsSub").textContent=(r==="admin")?"Software connected to your dashboard.":"Software connected to your dashboard. Ask your admin to make changes."; ' +
+  '  } ' +
+  ' ' +
+  '  function renderFrequencyTab(){ ' +
+  '    var r=role(); ' +
+  '    var canEdit=(r==="admin"); ' +
+  '    var grid=document.getElementById("freqDayGrid"); ' +
+  '    grid.innerHTML=""; ' +
+  '    state.freq.days.forEach(function(isOn,idx){ ' +
+  '      var day=idx+1; ' +
+  '      var chip=document.createElement("div"); ' +
+  '      chip.className="freq-day-chip"+(isOn?" on":"")+(canEdit?"":" readonly"); ' +
+  '      chip.innerHTML="<span class=\\"freq-day-num\\">"+day+"</span>"+(isOn?"On":"Off"); ' +
+  '      if(canEdit){ ' +
+  '        chip.addEventListener("click",function(){ ' +
+  '          state.freq.days[idx]=!state.freq.days[idx]; ' +
+  '          renderFrequencyTab(); ' +
+  '        }); ' +
+  '      } ' +
+  '      grid.appendChild(chip); ' +
+  '    }); ' +
+  ' ' +
+  '    document.getElementById("noilEnabled").checked=state.freq.noilEnabled; ' +
+  '    document.getElementById("noilDay").value=state.freq.noilDay; ' +
+  '    document.getElementById("demandEnabled").checked=state.freq.demandEnabled; ' +
+  '    document.getElementById("demandDay").value=state.freq.demandDay; ' +
+  '    document.getElementById("quietStart").value=state.freq.quietStart; ' +
+  '    document.getElementById("quietEnd").value=state.freq.quietEnd; ' +
+  '    document.getElementById("maxPerWeek").value=state.freq.maxPerWeek; ' +
+  '    document.getElementById("escalateEnabled").checked=state.freq.escalateEnabled; ' +
+  '    document.getElementById("escalateAfter").value=state.freq.escalateAfter; ' +
+  '    document.getElementById("senderName").value=state.freq.senderName; ' +
+  ' ' +
+  '    var assigneeSel=document.getElementById("escalateAssignee"); ' +
+  '    if(!assigneeSel.dataset.built){ ' +
+  '      assigneeSel.innerHTML=MOCK_TEAM.filter(function(u){return u.role==="admin"||u.role==="manager";}).map(function(u){return "<option value=\\""+u.id+"\\">"+u.name+"</option>";}).join(""); ' +
+  '      assigneeSel.dataset.built="1"; ' +
+  '    } ' +
+  ' ' +
+  '    ["noilEnabled","noilDay","demandEnabled","demandDay","quietStart","quietEnd","maxPerWeek","escalateEnabled","escalateAfter","escalateAssignee","senderName"].forEach(function(id){ ' +
+  '      document.getElementById(id).disabled=!canEdit; ' +
+  '    }); ' +
+  ' ' +
+  '    document.getElementById("freqActions").style.display=canEdit?"flex":"none"; ' +
+  '    document.getElementById("freqReadonlyNote").style.display=canEdit?"none":"block"; ' +
+  ' ' +
+  '    var saveBtn=document.getElementById("freqSaveBtn"); ' +
+  '    if(canEdit && !saveBtn.dataset.wired){ ' +
+  '      saveBtn.addEventListener("click",function(){ ' +
+  '        state.freq.noilEnabled=document.getElementById("noilEnabled").checked; ' +
+  '        state.freq.noilDay=parseInt(document.getElementById("noilDay").value,10)||45; ' +
+  '        state.freq.demandEnabled=document.getElementById("demandEnabled").checked; ' +
+  '        state.freq.demandDay=parseInt(document.getElementById("demandDay").value,10)||60; ' +
+  '        state.freq.quietStart=document.getElementById("quietStart").value; ' +
+  '        state.freq.quietEnd=document.getElementById("quietEnd").value; ' +
+  '        state.freq.maxPerWeek=parseInt(document.getElementById("maxPerWeek").value,10)||2; ' +
+  '        state.freq.escalateEnabled=document.getElementById("escalateEnabled").checked; ' +
+  '        state.freq.escalateAfter=parseInt(document.getElementById("escalateAfter").value,10)||3; ' +
+  '        state.freq.senderName=document.getElementById("senderName").value; ' +
+  '        var note=document.getElementById("freqSavedNote"); ' +
+  '        note.style.display="block"; ' +
+  '        setTimeout(function(){ note.style.display="none"; },2200); ' +
+  '      }); ' +
+  '      saveBtn.dataset.wired="1"; ' +
+  '    } ' +
   '  } ' +
   ' ' +
   '  function wireTabs(){ ' +
