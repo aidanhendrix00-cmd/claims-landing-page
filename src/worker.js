@@ -1220,6 +1220,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '{click:"#clmsAcctTriggerBtn",sel:"#clmsAcctOverlay .cdap-topbar",title:"Your account page",text:"Every teammate lands here after logging in. It is where you manage your profile, billing, team, and settings without leaving clAIms."},' +
   '{click:\'#clmsAcctOverlay [data-tab="billing"]\',sel:"#cdap-panel-billing",title:"Payment & Billing",text:"Admins and managers can see the plan, payment method, and transaction history, and admins can manage the subscription right from here."},' +
   '{click:\'#clmsAcctOverlay [data-tab="team"]\',sel:"#cdap-panel-team",title:"My Team",text:"Filter your roster by office, department, or account type. Admins and managers can add, edit, or remove teammates and adjust their permissions here."},' +
+  '{click:\'#clmsAcctOverlay [data-tab="frequency"]\',sel:"#cdap-panel-frequency",title:"Contact Frequency",text:"Set exactly which days automation runs, when a NOIL or demand letter gets drafted, and guardrails like quiet hours, weekly contact caps, and human escalation — all sent under your company name, never clAIms."},' +
   '{click:\'#clmsAcctOverlay [data-tab="settings"]\',sel:"#cdap-panel-settings",title:"Settings & Permissions",text:"Everyone controls their own automation preferences here, and admins can see exactly what each account type — employee, manager, admin — is allowed to do."},' +
   '{click:"#cdapCloseBtn",nav:"queue",sel:"#queue",title:"Back to your dashboard",text:"Close your account page any time to jump back into your queue."}' +
   '];' +
@@ -1381,6 +1382,23 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '.cdap-switch input:checked + .cdap-slider{background:#C29B57;} ' +
   '.cdap-switch input:checked + .cdap-slider:before{transform:translateX(18px);} ' +
   '.cdap-mock-flag{display:inline-block;font-size:10px;color:#B08A3E;background:#FBF3E4;border:1px solid #EEDDB6;padding:2px 8px;border-radius:6px;margin-left:8px;font-weight:600;vertical-align:middle;} ' +
+  '.cdap-freq-day-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:14px;} ' +
+  '@media (max-width:640px){.cdap-freq-day-grid{grid-template-columns:repeat(4,1fr);}} ' +
+  '.cdap-freq-day-chip{border:1.5px solid #E5E0D2;border-radius:8px;padding:8px 4px;text-align:center;font-size:11.5px;font-weight:600;color:#8A8578;cursor:pointer;background:#FBFAF6;user-select:none;} ' +
+  '.cdap-freq-day-chip .cdap-freq-day-num{display:block;font-size:13px;font-weight:700;color:#171717;margin-bottom:2px;} ' +
+  '.cdap-freq-day-chip.on{background:#FBF3E4;border-color:#C29B57;color:#8A6A2F;} ' +
+  '.cdap-freq-day-chip.on .cdap-freq-day-num{color:#171717;} ' +
+  '.cdap-freq-legend{display:flex;gap:18px;margin-top:12px;font-size:11.5px;color:#8A8578;} ' +
+  '.cdap-freq-legend span{display:inline-flex;align-items:center;gap:6px;} ' +
+  '.cdap-freq-legend .dot{width:10px;height:10px;border-radius:3px;display:inline-block;} ' +
+  '.cdap-freq-legend .dot.on{background:#C29B57;} ' +
+  '.cdap-freq-legend .dot.off{background:#E5E0D2;} ' +
+  '.cdap-freq-inline-field{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;} ' +
+  '.cdap-freq-inline-field label{font-size:12.5px;color:#615D53;} ' +
+  '.cdap-freq-inline-field input[type=number]{width:70px;font-family:inherit;font-size:13px;padding:7px 9px;border:1.5px solid #E5E0D2;border-radius:7px;} ' +
+  '.cdap-freq-inline-field input[type=time]{font-family:inherit;font-size:13px;padding:7px 9px;border:1.5px solid #E5E0D2;border-radius:7px;} ' +
+  '.cdap-freq-inline-field select{font-family:inherit;font-size:13px;padding:7px 9px;border:1.5px solid #E5E0D2;border-radius:7px;} ' +
+  '.cdap-freq-note{font-size:12px;color:#615D53;background:#F5F2EA;border-radius:8px;padding:10px 12px;margin-top:12px;line-height:1.5;} ' +
   '</style> ' +
   ' ' +
   '<button class="cdap-trigger" id="clmsAcctTriggerBtn">My Account</button> ' +
@@ -1399,6 +1417,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<button class="cdap-tab active" data-tab="account">Account</button> ' +
   '<button class="cdap-tab" data-tab="billing">Payment &amp; Billing</button> ' +
   '<button class="cdap-tab" data-tab="team">My Team</button> ' +
+  '<button class="cdap-tab" data-tab="frequency">Contact Frequency</button> ' +
   '<button class="cdap-tab" data-tab="settings">Settings &amp; Permissions</button> ' +
   '</div> ' +
   ' ' +
@@ -1472,6 +1491,43 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<tbody id="cdapTeamRows"></tbody> ' +
   '</table> ' +
   '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="cdap-panel" id="cdap-panel-frequency"> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Follow-up cadence (Day 1&ndash;30)<span class="cdap-mock-flag">sample</span></h3> ' +
+  '<div class="cdap-card-sub">Choose which days after Day 1 your automated follow-ups go out. Turn any day off to create a quiet period.</div> ' +
+  '<div class="cdap-freq-day-grid" id="cdapFreqDayGrid"></div> ' +
+  '<div class="cdap-freq-legend"><span><span class="dot on"></span>Follow-up scheduled</span><span><span class="dot off"></span>Automation off</span></div> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Notice of Intent to Lien (NOIL)</h3> ' +
+  '<div class="cdap-card-sub">Draft a NOIL for review once an invoice reaches a set age.</div> ' +
+  '<div class="cdap-toggle-row"><div><div class="cdap-toggle-label">Enable NOIL automation</div><div class="cdap-toggle-sub">clAIms drafts a NOIL for review; nothing sends without your approval.</div></div><label class="cdap-switch"><input type="checkbox" checked><span class="cdap-slider"></span></label></div> ' +
+  '<div class="cdap-freq-inline-field"><label>Draft NOIL on day</label><input type="number" value="45" min="1" max="120"><span style="font-size:12.5px;color:#615D53;">since Day 1</span></div> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Demand Letter</h3> ' +
+  '<div class="cdap-card-sub">Draft a formal demand letter for review once an invoice reaches a set age.</div> ' +
+  '<div class="cdap-toggle-row"><div><div class="cdap-toggle-label">Enable Demand Letter automation</div><div class="cdap-toggle-sub">clAIms drafts a demand letter for review; nothing sends without your approval.</div></div><label class="cdap-switch"><input type="checkbox" checked><span class="cdap-slider"></span></label></div> ' +
+  '<div class="cdap-freq-inline-field"><label>Draft demand letter on day</label><input type="number" value="60" min="1" max="120"><span style="font-size:12.5px;color:#615D53;">since Day 1</span></div> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Guardrails<span class="cdap-mock-flag">sample</span></h3> ' +
+  '<div class="cdap-card-sub">Limits that keep automation respectful of customers, regardless of the cadence configured above.</div> ' +
+  '<div class="cdap-freq-inline-field"><label>Quiet hours &mdash; no sends between</label><input type="time" value="18:00"><span style="font-size:12.5px;color:#615D53;">and</span><input type="time" value="08:00"></div> ' +
+  '<div class="cdap-freq-inline-field"><label>Maximum automated contacts per customer, per week</label><input type="number" value="2" min="1" max="14"></div> ' +
+  '<div class="cdap-toggle-row"><div><div class="cdap-toggle-label">Escalate to a human</div><div class="cdap-toggle-sub">Hand a customer off to a teammate after repeated unanswered contact.</div></div><label class="cdap-switch"><input type="checkbox" checked><span class="cdap-slider"></span></label></div> ' +
+  '<div class="cdap-freq-inline-field"><label>Escalate after</label><input type="number" value="3" min="1" max="10"><span style="font-size:12.5px;color:#615D53;">unanswered follow-ups, assign to</span><select id="cdapEscalateAssignee"></select></div> ' +
+  '<div class="cdap-freq-note">Every automated message includes a one-click opt-out. Customers who opt out are removed from all future automation immediately and flagged here for manual follow-up. This cannot be overridden by the cadence settings above.</div> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Messaging identity</h3> ' +
+  '<div class="cdap-card-sub">What customers see when a message arrives.</div> ' +
+  '<div class="cdap-field"><label>Sender name</label><div class="cdap-value">Your Company Name Collections Team</div></div> ' +
+  '<div class="cdap-freq-note">Every follow-up, NOIL, and demand letter is sent and signed as your company. Customers never see the clAIms platform name in a message.</div> ' +
+  '</div> ' +
+  '<div style="display:flex;justify-content:flex-end;"><button class="cdap-btn-dark">Save changes</button></div> ' +
   '</div> ' +
   ' ' +
   '<div class="cdap-panel" id="cdap-panel-settings"> ' +
@@ -1608,8 +1664,35 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '    }); ' +
   '  } ' +
   ' ' +
+  '  function renderFreqDays(){ ' +
+  '    var grid=document.getElementById("cdapFreqDayGrid"); ' +
+  '    if(!grid){return;} ' +
+  '    var days=[]; ' +
+  '    for(var i=0;i<30;i++){ days.push(i%7!==5&&i%7!==6); } ' +
+  '    grid.innerHTML=""; ' +
+  '    days.forEach(function(isOn,idx){ ' +
+  '      var day=idx+1; ' +
+  '      var chip=document.createElement("div"); ' +
+  '      chip.className="cdap-freq-day-chip"+(isOn?" on":""); ' +
+  '      chip.innerHTML="<span class=\\"cdap-freq-day-num\\">"+day+"</span>"+(isOn?"On":"Off"); ' +
+  '      chip.addEventListener("click",function(){ ' +
+  '        chip.classList.toggle("on"); ' +
+  '        chip.innerHTML="<span class=\\"cdap-freq-day-num\\">"+day+"</span>"+(chip.classList.contains("on")?"On":"Off"); ' +
+  '      }); ' +
+  '      grid.appendChild(chip); ' +
+  '    }); ' +
+  '  } ' +
+  ' ' +
+  '  function populateEscalateAssignee(){ ' +
+  '    var sel=document.getElementById("cdapEscalateAssignee"); ' +
+  '    if(!sel){return;} ' +
+  '    sel.innerHTML=CDAP_TEAM.filter(function(u){return u.role==="admin"||u.role==="manager";}).map(function(u){return "<option>"+u.name+"</option>";}).join(""); ' +
+  '  } ' +
+  ' ' +
   '  populateFilters(); ' +
   '  renderTeam(); ' +
+  '  renderFreqDays(); ' +
+  '  populateEscalateAssignee(); ' +
   '  ["cdapFilterOffice","cdapFilterDept","cdapFilterType"].forEach(function(id){ ' +
   '    document.getElementById(id).addEventListener("change",renderTeam); ' +
   '  }); ' +
