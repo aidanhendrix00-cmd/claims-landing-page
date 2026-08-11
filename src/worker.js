@@ -1079,7 +1079,12 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '{sel:"#view-collected .topbar",nav:"collected",title:"Collected",text:"All-time payments received, organized by year and month and filterable by office and department, always current thanks to automated updates pulled from customer responses and your homeowner records."},' +
   '{sel:"#view-automations",nav:"automations",title:"Automated follow-ups",text:"Set your cadence once. Follow-ups go out automatically, with a full activity trail for every action taken."},' +
   '{sel:"#view-integrations .topbar",nav:"integrations",title:"Connects to what you already use",text:"Plug clAIms into your restoration and accounting software so data flows in and payments flow back out, with no manual re-entry."},' +
-  '{sel:"#money-wrap",nav:"queue",title:"Track cash collected in real time",text:"Watch your recovered revenue tick up as payments come in. That is the whole point."}' +
+  '{sel:"#money-wrap",nav:"queue",title:"Track cash collected in real time",text:"Watch your recovered revenue tick up as payments come in. That is the whole point."},' +
+  '{click:"#clmsAcctTriggerBtn",sel:"#clmsAcctOverlay .cdap-topbar",title:"Your account page",text:"Every teammate lands here after logging in. It is where you manage your profile, billing, team, and settings without leaving clAIms."},' +
+  '{click:\'#clmsAcctOverlay [data-tab="billing"]\',sel:"#cdap-panel-billing",title:"Payment & Billing",text:"Admins and managers can see the plan, payment method, and transaction history, and admins can manage the subscription right from here."},' +
+  '{click:\'#clmsAcctOverlay [data-tab="team"]\',sel:"#cdap-panel-team",title:"My Team",text:"Filter your roster by office, department, or account type. Admins and managers can add, edit, or remove teammates and adjust their permissions here."},' +
+  '{click:\'#clmsAcctOverlay [data-tab="settings"]\',sel:"#cdap-panel-settings",title:"Settings & Permissions",text:"Everyone controls their own automation preferences here, and admins can see exactly what each account type — employee, manager, admin — is allowed to do."},' +
+  '{click:"#cdapCloseBtn",nav:"queue",sel:"#queue",title:"Back to your dashboard",text:"Close your account page any time to jump back into your queue."}' +
   '];' +
   'var idx=-1;' +
   'var spot,tip,replayBtn;' +
@@ -1152,12 +1157,16 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   'var btn=document.querySelector(\'.nav-item[data-view="\'+step.nav+\'"]\');' +
   'if(btn){btn.click();}' +
   '}' +
+  'if(step.click){' +
+  'var cbtn=document.querySelector(step.click);' +
+  'if(cbtn){cbtn.click();}' +
+  '}' +
   'setTimeout(function(){' +
   'var el=document.querySelector(step.sel);' +
   'if(!el){nextStep();return;}' +
   'el.scrollIntoView({block:"center"});' +
   'setTimeout(function(){place(el);renderTip(step,idx);},80);' +
-  '},step.nav?320:0);' +
+  '},(step.nav||step.click)?320:0);' +
   '}' +
   'function endTour(){' +
   'if(spot){spot.style.display="none";}' +
@@ -1169,6 +1178,308 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '});' +
   '})();' +
   '<' + '/script>';
+
+const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
+  '.cdap-trigger{position:fixed;top:16px;right:16px;z-index:99996;background:#171717;color:#fff;border:none;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);cursor:pointer;} ' +
+  '#clmsAcctOverlay{display:none;position:fixed;inset:0;background:#F5F2EA;z-index:999995;overflow-y:auto;font-family:"IBM Plex Sans",Arial,sans-serif;color:#171717;} ' +
+  '#clmsAcctOverlay *{box-sizing:border-box;} ' +
+  '.cdap-topbar{background:#171717;color:#fff;padding:16px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;} ' +
+  '.cdap-brand{font-weight:700;font-size:18px;letter-spacing:.02em;} ' +
+  '.cdap-topbar-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap;} ' +
+  '.cdap-user-chip{font-size:13px;color:#D8D4C8;} ' +
+  '.cdap-user-chip b{color:#fff;} ' +
+  '.cdap-role-badge{display:inline-block;margin-left:8px;padding:2px 9px;border-radius:20px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:#C29B57;color:#171717;} ' +
+  '.cdap-close-btn{background:none;border:1.5px solid #4A4A46;color:#fff;font-weight:700;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer;} ' +
+  '.cdap-close-btn:hover{border-color:#C29B57;color:#C29B57;} ' +
+  '.cdap-wrap{max-width:1080px;margin:0 auto;padding:28px 24px 80px;} ' +
+  '.cdap-tabs{display:flex;gap:4px;border-bottom:1px solid #E5E0D2;margin-bottom:24px;overflow-x:auto;} ' +
+  '.cdap-tab{background:none;border:none;font-family:inherit;font-size:14px;font-weight:600;color:#615D53;padding:12px 18px;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;} ' +
+  '.cdap-tab:hover{color:#171717;} ' +
+  '.cdap-tab.active{color:#171717;border-bottom-color:#C29B57;} ' +
+  '.cdap-panel{display:none;} ' +
+  '.cdap-panel.active{display:block;} ' +
+  '.cdap-card{background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:22px 24px;margin-bottom:18px;box-shadow:0 12px 30px -18px rgba(23,23,23,0.15);} ' +
+  '.cdap-card h3{margin:0 0 4px;font-size:16px;} ' +
+  '.cdap-card-sub{font-size:12.5px;color:#615D53;margin-bottom:16px;} ' +
+  '.cdap-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 24px;} ' +
+  '@media (max-width:640px){.cdap-grid{grid-template-columns:1fr;}} ' +
+  '.cdap-field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#8A8578;font-weight:700;margin-bottom:5px;} ' +
+  '.cdap-field .cdap-value{font-size:14.5px;color:#171717;padding:9px 0;border-bottom:1px solid #F0EDE3;} ' +
+  '.cdap-btn-dark{background:#171717;color:#fff;border:none;font-weight:600;font-size:13px;padding:10px 18px;border-radius:8px;cursor:pointer;} ' +
+  '.cdap-btn-outline{background:none;color:#171717;border:1.5px solid #E5E0D2;font-weight:600;font-size:13px;padding:9px 17px;border-radius:8px;cursor:pointer;} ' +
+  '.cdap-btn-sm{font-size:12px;padding:6px 12px;border-radius:7px;} ' +
+  '.cdap-plan-banner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:#171717;color:#fff;border-radius:14px;padding:18px 22px;margin-bottom:18px;} ' +
+  '.cdap-plan-banner .cdap-plan-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#C29B57;font-weight:700;margin-bottom:4px;} ' +
+  '.cdap-plan-banner .cdap-plan-name{font-size:18px;font-weight:700;} ' +
+  '.cdap-feature-list{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;} ' +
+  '.cdap-feature-list li{font-size:13px;color:#3B3A35;padding-left:20px;position:relative;} ' +
+  '.cdap-feature-list li:before{content:"✓";position:absolute;left:0;color:#C29B57;font-weight:700;} ' +
+  '@media (max-width:640px){.cdap-feature-list{grid-template-columns:1fr;}} ' +
+  'table.cdap-table{width:100%;border-collapse:collapse;font-size:13.5px;} ' +
+  'table.cdap-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8A8578;font-weight:700;padding:10px 12px;border-bottom:1.5px solid #E5E0D2;} ' +
+  'table.cdap-table td{padding:12px 12px;border-bottom:1px solid #F0EDE3;vertical-align:middle;} ' +
+  'table.cdap-table tr:last-child td{border-bottom:none;} ' +
+  '.cdap-filters-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;} ' +
+  '.cdap-filters-row select{font-family:inherit;font-size:13px;padding:9px 12px;border:1.5px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
+  '.cdap-team-name-cell{display:flex;align-items:center;gap:10px;} ' +
+  '.cdap-avatar{width:32px;height:32px;border-radius:50%;background:#F0EDE3;color:#615D53;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;} ' +
+  '.cdap-role-pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;} ' +
+  '.cdap-role-pill.admin{background:#F3E7D2;color:#8A6A2F;} ' +
+  '.cdap-role-pill.manager{background:#DCE6F5;color:#2F4E80;} ' +
+  '.cdap-role-pill.employee{background:#EAE8E1;color:#57544B;} ' +
+  '.cdap-section-divider{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#8A8578;font-weight:700;padding:16px 12px 6px;} ' +
+  '.cdap-perm-matrix{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;} ' +
+  '.cdap-perm-matrix th,.cdap-perm-matrix td{padding:9px 10px;border-bottom:1px solid #F0EDE3;text-align:left;} ' +
+  '.cdap-perm-matrix th{color:#8A8578;font-size:11px;text-transform:uppercase;letter-spacing:.04em;} ' +
+  '.cdap-perm-yes{color:#1E5245;font-weight:700;} ' +
+  '.cdap-perm-no{color:#B7B2A4;} ' +
+  '.cdap-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #F0EDE3;gap:16px;} ' +
+  '.cdap-toggle-row:last-child{border-bottom:none;} ' +
+  '.cdap-toggle-row .cdap-toggle-label{font-size:13.5px;color:#171717;font-weight:600;} ' +
+  '.cdap-toggle-row .cdap-toggle-sub{font-size:12px;color:#8A8578;margin-top:2px;} ' +
+  '.cdap-switch{position:relative;width:40px;height:22px;flex-shrink:0;} ' +
+  '.cdap-switch input{opacity:0;width:0;height:0;} ' +
+  '.cdap-switch .cdap-slider{position:absolute;inset:0;background:#E5E0D2;border-radius:22px;transition:.15s;cursor:pointer;} ' +
+  '.cdap-switch .cdap-slider:before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;} ' +
+  '.cdap-switch input:checked + .cdap-slider{background:#C29B57;} ' +
+  '.cdap-switch input:checked + .cdap-slider:before{transform:translateX(18px);} ' +
+  '.cdap-mock-flag{display:inline-block;font-size:10px;color:#B08A3E;background:#FBF3E4;border:1px solid #EEDDB6;padding:2px 8px;border-radius:6px;margin-left:8px;font-weight:600;vertical-align:middle;} ' +
+  '</style> ' +
+  ' ' +
+  '<button class="cdap-trigger" id="clmsAcctTriggerBtn">My Account</button> ' +
+  ' ' +
+  '<div id="clmsAcctOverlay"> ' +
+  '<div class="cdap-topbar"> ' +
+  '<div class="cdap-brand">clAIms</div> ' +
+  '<div class="cdap-topbar-right"> ' +
+  '<div class="cdap-user-chip"><b>demo.admin@yourcompany.com</b><span class="cdap-role-badge">Admin</span></div> ' +
+  '<button class="cdap-close-btn" id="cdapCloseBtn">Close ✕</button> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="cdap-wrap"> ' +
+  '<div class="cdap-tabs" id="cdapTabs"> ' +
+  '<button class="cdap-tab active" data-tab="account">Account</button> ' +
+  '<button class="cdap-tab" data-tab="billing">Payment &amp; Billing</button> ' +
+  '<button class="cdap-tab" data-tab="team">My Team</button> ' +
+  '<button class="cdap-tab" data-tab="settings">Settings &amp; Permissions</button> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="cdap-panel active" id="cdap-panel-account"> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Account information</h3> ' +
+  '<div class="cdap-card-sub">Your login and profile details.<span class="cdap-mock-flag">sample</span></div> ' +
+  '<div class="cdap-grid"> ' +
+  '<div class="cdap-field"><label>Full name</label><div class="cdap-value">Jordan Avery</div></div> ' +
+  '<div class="cdap-field"><label>Username / Email</label><div class="cdap-value">demo.admin@yourcompany.com</div></div> ' +
+  '<div class="cdap-field"><label>Company</label><div class="cdap-value">Your Company Name</div></div> ' +
+  '<div class="cdap-field"><label>Account type</label><div class="cdap-value"><span class="cdap-role-pill admin">Admin</span></div></div> ' +
+  '<div class="cdap-field"><label>Password</label><div class="cdap-value">••••••••••• <span style="color:#C29B57;font-weight:600;font-size:12.5px;">Change password</span></div></div> ' +
+  '<div class="cdap-field"><label>Member since</label><div class="cdap-value">March 2025</div></div> ' +
+  '</div> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="cdap-panel" id="cdap-panel-billing"> ' +
+  '<div class="cdap-plan-banner"> ' +
+  '<div> ' +
+  '<div class="cdap-plan-label">Current plan</div> ' +
+  '<div class="cdap-plan-name">Growth</div> ' +
+  '</div> ' +
+  '<button class="cdap-btn-dark cdap-btn-sm">Manage Subscription</button> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Plan features<span class="cdap-mock-flag">sample</span></h3> ' +
+  '<ul class="cdap-feature-list"> ' +
+  '<li>5–8 user seats</li> ' +
+  '<li>QuickBooks, Dash, Salesforce, NetSuite, and more</li> ' +
+  '<li>Everything in Starter</li> ' +
+  '<li>Invoiced MTD &amp; Collected reporting by office</li> ' +
+  '<li>Priority support</li> ' +
+  '</ul> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Payment method<span class="cdap-mock-flag">sample</span></h3> ' +
+  '<div class="cdap-grid"> ' +
+  '<div class="cdap-field"><label>Card on file</label><div class="cdap-value">Visa •••• 4242, exp 08/28</div></div> ' +
+  '<div class="cdap-field"><label>Business address</label><div class="cdap-value">123 Main St, Dallas, TX 75201</div></div> ' +
+  '</div> ' +
+  '<div style="margin-top:14px;"><button class="cdap-btn-outline cdap-btn-sm">Update payment method</button></div> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Transaction history<span class="cdap-mock-flag">sample</span></h3> ' +
+  '<table class="cdap-table"> ' +
+  '<thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead> ' +
+  '<tbody> ' +
+  '<tr><td>Aug 1, 2026</td><td>Monthly subscription</td><td>$899.00</td><td>Paid</td></tr> ' +
+  '<tr><td>Jul 1, 2026</td><td>Monthly subscription</td><td>$899.00</td><td>Paid</td></tr> ' +
+  '<tr><td>May 12, 2026</td><td>Implementation fee</td><td>$4,900.00</td><td>Paid</td></tr> ' +
+  '</tbody> ' +
+  '</table> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="cdap-panel" id="cdap-panel-team"> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>My Team<span class="cdap-mock-flag">sample data</span></h3> ' +
+  '<div class="cdap-card-sub">Everyone at your company with a clAIms account.</div> ' +
+  '<div class="cdap-filters-row"> ' +
+  '<select id="cdapFilterOffice"><option value="">All offices</option></select> ' +
+  '<select id="cdapFilterDept"><option value="">All departments</option></select> ' +
+  '<select id="cdapFilterType"><option value="">All account types</option><option value="admin">Admin</option><option value="manager">Manager</option><option value="employee">Employee</option></select> ' +
+  '</div> ' +
+  '<table class="cdap-table"> ' +
+  '<thead><tr> ' +
+  '<th>Name</th><th>Email</th><th>Department</th><th>Office</th><th>Account type</th><th>Credentials</th><th>Actions</th> ' +
+  '</tr></thead> ' +
+  '<tbody id="cdapTeamRows"></tbody> ' +
+  '</table> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="cdap-panel" id="cdap-panel-settings"> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Automation settings</h3> ' +
+  '<div class="cdap-card-sub">Applies to your personal follow-up activity.<span class="cdap-mock-flag">sample</span></div> ' +
+  '<div class="cdap-toggle-row"><div><div class="cdap-toggle-label">Autonomous follow-up cadence</div><div class="cdap-toggle-sub">Send scheduled reminders automatically on your behalf.</div></div><label class="cdap-switch"><input type="checkbox" checked><span class="cdap-slider"></span></label></div> ' +
+  '<div class="cdap-toggle-row"><div><div class="cdap-toggle-label">AI drafting</div><div class="cdap-toggle-sub">Let clAIms draft follow-up emails for your review.</div></div><label class="cdap-switch"><input type="checkbox" checked><span class="cdap-slider"></span></label></div> ' +
+  '<div class="cdap-toggle-row"><div><div class="cdap-toggle-label">Daily digest email</div><div class="cdap-toggle-sub">Get a morning summary of what needs attention.</div></div><label class="cdap-switch"><input type="checkbox"><span class="cdap-slider"></span></label></div> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Permissions<span class="cdap-mock-flag">sample</span></h3> ' +
+  '<div class="cdap-card-sub">What each account type can do at your company.</div> ' +
+  '<table class="cdap-perm-matrix"> ' +
+  '<thead><tr><th>Capability</th><th>Employee</th><th>Manager</th><th>Admin</th></tr></thead> ' +
+  '<tbody> ' +
+  '<tr><td>View own account info</td><td class="cdap-perm-yes">Yes</td><td class="cdap-perm-yes">Yes</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '<tr><td>View all team members</td><td class="cdap-perm-yes">Yes</td><td class="cdap-perm-yes">Yes</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '<tr><td>Add / remove team members</td><td class="cdap-perm-no">No</td><td class="cdap-perm-yes">Yes</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '<tr><td>Edit team member permissions</td><td class="cdap-perm-no">No</td><td class="cdap-perm-yes">Yes</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '<tr><td>Reset teammate passwords</td><td class="cdap-perm-no">No</td><td class="cdap-perm-no">No</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '<tr><td>Manually apply a payment</td><td class="cdap-perm-no">No</td><td class="cdap-perm-yes">Yes</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '<tr><td>Manage subscription &amp; payment method</td><td class="cdap-perm-no">No</td><td class="cdap-perm-no">No</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '<tr><td>Add / change integrations</td><td class="cdap-perm-no">No</td><td class="cdap-perm-no">No</td><td class="cdap-perm-yes">Yes</td></tr> ' +
+  '</tbody> ' +
+  '</table> ' +
+  '</div> ' +
+  '<div class="cdap-card"> ' +
+  '<h3>Integrations<span class="cdap-mock-flag">sample</span></h3> ' +
+  '<div class="cdap-card-sub">Software connected to your dashboard.</div> ' +
+  '<div class="cdap-grid"> ' +
+  '<div class="cdap-field"><label>QuickBooks</label><div class="cdap-value">Connected</div></div> ' +
+  '<div class="cdap-field"><label>Salesforce</label><div class="cdap-value">Not connected</div></div> ' +
+  '</div> ' +
+  '<div style="margin-top:14px;"><button class="cdap-btn-outline cdap-btn-sm">Manage integrations</button></div> ' +
+  '</div> ' +
+  '</div> ' +
+  ' ' +
+  '</div> ' +
+  '</div> ' +
+  '<script>(function(){ ' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}} ' +
+  ' ' +
+  'var CDAP_TEAM=[ ' +
+  '  {name:"Jordan Avery",email:"demo.admin@yourcompany.com",dept:"Collections",office:"Dallas HQ",role:"admin"}, ' +
+  '  {name:"Marcus Ojeda",email:"marcus.ojeda@example.com",dept:"Operations",office:"Austin",role:"manager"}, ' +
+  '  {name:"Priya Chandran",email:"priya.chandran@example.com",dept:"Collections",office:"Dallas HQ",role:"manager"}, ' +
+  '  {name:"Sam Fielding",email:"sam.fielding@example.com",dept:"Accounting",office:"Austin",role:"employee"}, ' +
+  '  {name:"Leah Buckner",email:"leah.buckner@example.com",dept:"Collections",office:"Houston",role:"employee"}, ' +
+  '  {name:"Reese Alvarado",email:"reese.alvarado@example.com",dept:"Operations",office:"Houston",role:"employee"} ' +
+  ']; ' +
+  'var CDAP_ROLE_RANK={admin:0,manager:1,employee:2}; ' +
+  'var CDAP_ROLE_LABEL={admin:"Admin",manager:"Manager",employee:"Employee"}; ' +
+  ' ' +
+  'function cdapInitials(name){ ' +
+  '  var parts=String(name||"").trim().split(/\\s+/); ' +
+  '  return ((parts[0]||"")[0]||"")+((parts[1]||"")[0]||""); ' +
+  '} ' +
+  ' ' +
+  'ready(function(){ ' +
+  '  var overlay=document.getElementById("clmsAcctOverlay"); ' +
+  '  var trigger=document.getElementById("clmsAcctTriggerBtn"); ' +
+  '  if(!overlay||!trigger){return;} ' +
+  ' ' +
+  '  function openOverlay(){ ' +
+  '    overlay.style.display="block"; ' +
+  '    document.body.style.overflow="hidden"; ' +
+  '  } ' +
+  '  function closeOverlay(){ ' +
+  '    overlay.style.display="none"; ' +
+  '    document.body.style.overflow=""; ' +
+  '  } ' +
+  '  trigger.addEventListener("click",openOverlay); ' +
+  '  var closeBtn=document.getElementById("cdapCloseBtn"); ' +
+  '  if(closeBtn){closeBtn.addEventListener("click",closeOverlay);} ' +
+  '  window.clmsOpenAccountOverlay=openOverlay; ' +
+  '  window.clmsCloseAccountOverlay=closeOverlay; ' +
+  ' ' +
+  '  var tabs=overlay.querySelectorAll(".cdap-tab"); ' +
+  '  tabs.forEach(function(tab){ ' +
+  '    tab.addEventListener("click",function(){ ' +
+  '      tabs.forEach(function(t){ t.classList.remove("active"); }); ' +
+  '      tab.classList.add("active"); ' +
+  '      overlay.querySelectorAll(".cdap-panel").forEach(function(p){ p.classList.remove("active"); }); ' +
+  '      var panel=document.getElementById("cdap-panel-"+tab.getAttribute("data-tab")); ' +
+  '      if(panel){panel.classList.add("active");} ' +
+  '    }); ' +
+  '  }); ' +
+  ' ' +
+  '  function populateFilters(){ ' +
+  '    var offices={},depts={}; ' +
+  '    CDAP_TEAM.forEach(function(u){ offices[u.office]=1; depts[u.dept]=1; }); ' +
+  '    var officeSel=document.getElementById("cdapFilterOffice"); ' +
+  '    var deptSel=document.getElementById("cdapFilterDept"); ' +
+  '    officeSel.innerHTML="<option value=\\"\\">All offices</option>"+Object.keys(offices).sort().map(function(o){return "<option value=\\""+o+"\\">"+o+"</option>";}).join(""); ' +
+  '    deptSel.innerHTML="<option value=\\"\\">All departments</option>"+Object.keys(depts).sort().map(function(d){return "<option value=\\""+d+"\\">"+d+"</option>";}).join(""); ' +
+  '  } ' +
+  ' ' +
+  '  function renderTeam(){ ' +
+  '    var officeVal=document.getElementById("cdapFilterOffice").value; ' +
+  '    var deptVal=document.getElementById("cdapFilterDept").value; ' +
+  '    var typeVal=document.getElementById("cdapFilterType").value; ' +
+  ' ' +
+  '    var rows=CDAP_TEAM.filter(function(u){ ' +
+  '      if(officeVal&&u.office!==officeVal) return false; ' +
+  '      if(deptVal&&u.dept!==deptVal) return false; ' +
+  '      if(typeVal&&u.role!==typeVal) return false; ' +
+  '      return true; ' +
+  '    }).sort(function(a,b){ ' +
+  '      if(CDAP_ROLE_RANK[a.role]!==CDAP_ROLE_RANK[b.role]) return CDAP_ROLE_RANK[a.role]-CDAP_ROLE_RANK[b.role]; ' +
+  '      return a.name.localeCompare(b.name); ' +
+  '    }); ' +
+  ' ' +
+  '    var tbody=document.getElementById("cdapTeamRows"); ' +
+  '    tbody.innerHTML=""; ' +
+  '    var lastRank=-1; ' +
+  '    rows.forEach(function(u){ ' +
+  '      if(CDAP_ROLE_RANK[u.role]!==lastRank){ ' +
+  '        lastRank=CDAP_ROLE_RANK[u.role]; ' +
+  '        var divider=document.createElement("tr"); ' +
+  '        divider.innerHTML="<td colspan=\\"7\\" class=\\"cdap-section-divider\\">"+CDAP_ROLE_LABEL[u.role]+"s</td>"; ' +
+  '        tbody.appendChild(divider); ' +
+  '      } ' +
+  '      var tr=document.createElement("tr"); ' +
+  '      tr.innerHTML= ' +
+  '        "<td><div class=\\"cdap-team-name-cell\\"><div class=\\"cdap-avatar\\">"+cdapInitials(u.name)+"</div>"+u.name+"</div></td>"+ ' +
+  '        "<td>"+u.email+"</td>"+ ' +
+  '        "<td>"+u.dept+"</td>"+ ' +
+  '        "<td>"+u.office+"</td>"+ ' +
+  '        "<td><span class=\\"cdap-role-pill "+u.role+"\\">"+CDAP_ROLE_LABEL[u.role]+"</span></td>"+ ' +
+  '        "<td><button class=\\"cdap-btn-outline cdap-btn-sm\\">Reset password</button></td>"+ ' +
+  '        "<td><button class=\\"cdap-btn-outline cdap-btn-sm\\">Edit</button></td>"; ' +
+  '      tbody.appendChild(tr); ' +
+  '    }); ' +
+  '  } ' +
+  ' ' +
+  '  populateFilters(); ' +
+  '  renderTeam(); ' +
+  '  ["cdapFilterOffice","cdapFilterDept","cdapFilterType"].forEach(function(id){ ' +
+  '    document.getElementById(id).addEventListener("change",renderTeam); ' +
+  '  }); ' +
+  '}); ' +
+  '})(); ' +
+  '</script> ' +
+  ' ';
 
 function planForSize(size) {
   if (size === '1-10') return 'starter';
@@ -1275,8 +1586,8 @@ async function handleDemoDashboard(request, env) {
   const assetResponse = await env.ASSETS.fetch(new URL('/dashboard.html', request.url));
   const html = await assetResponse.text();
   const injected = html.indexOf('</body>') !== -1
-    ? html.replace('</body>', DEMO_TOUR_SCRIPT + '</body>')
-    : html + DEMO_TOUR_SCRIPT;
+    ? html.replace('</body>', DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + '</body>')
+    : html + DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT;
   return new Response(injected, {
     status: assetResponse.status,
     headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' }
