@@ -240,6 +240,78 @@ const PROCESS_EXPLAINER_HTML = '<div class="clms-process-explainer">' +
   '</div>' +
   '</div>';
 
+const CONTACT_FORM_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var headerBtns=document.querySelectorAll(\'a.btn-header-primary[href="#contact"]\');' +
+  'for(var i=0;i<headerBtns.length;i++){headerBtns[i].textContent="Contact Us";}' +
+  'var card=document.querySelector(".contact-card");' +
+  'if(!card){return;}' +
+  'card.innerHTML=' +
+  '\'<div class="c-field">\'+' +
+  '\'<label>Full Name</label>\'+' +
+  '\'<input type="text" id="c-name" placeholder="Jane Smith">\'+' +
+  '\'</div>\'+' +
+  '\'<div class="c-field">\'+' +
+  '\'<label>Work Email</label>\'+' +
+  '\'<input type="email" id="c-email" placeholder="jane@yourcompany.com">\'+' +
+  '\'</div>\'+' +
+  '\'<div class="c-field">\'+' +
+  '\'<label>Company</label>\'+' +
+  '\'<input type="text" id="c-company" placeholder="Your Company Name">\'+' +
+  '\'</div>\'+' +
+  '\'<div class="c-field">\'+' +
+  '\'<label>What can we help you with?</label>\'+' +
+  '\'<select id="c-help-topic">\'+' +
+  '\'<option value="login">Login help</option>\'+' +
+  '\'<option value="account">Account help</option>\'+' +
+  '\'<option value="status">Check status of my account set up</option>\'+' +
+  '\'<option value="other">Other</option>\'+' +
+  '\'</select>\'+' +
+  '\'</div>\'+' +
+  '\'<div class="c-field" id="c-help-other-wrap" style="display:none;">\'+' +
+  '\'<label>Please tell us more</label>\'+' +
+  '\'<textarea id="c-help-other" placeholder="Tell us what you need help with..."></textarea>\'+' +
+  '\'</div>\'+' +
+  '\'<div class="c-field">\'+' +
+  '\'<label>Anything you\\\'d like us to know? <span style="text-transform:none;font-weight:400;">(optional)</span></label>\'+' +
+  '\'<textarea id="c-message" placeholder="Anything else we should know..."></textarea>\'+' +
+  '\'</div>\'+' +
+  '\'<button class="btn-primary contact-submit" onclick="submitContact()">Send inquiry →</button>\'+' +
+  '\'<div class="contact-note">This opens your email client with these details filled in, addressed to <b id="contactEmailDisplay">info@claims-collection.net</b>.</div>\';' +
+  'var topicSelect=document.getElementById("c-help-topic");' +
+  'var otherWrap=document.getElementById("c-help-other-wrap");' +
+  'function syncOther(){otherWrap.style.display=(topicSelect.value==="other")?"block":"none";}' +
+  'topicSelect.addEventListener("change",syncOther);' +
+  'syncOther();' +
+  'var TOPIC_LABELS={login:"Login help",account:"Account help",status:"Check status of my account set up",other:"Other"};' +
+  'window.submitContact=function(){' +
+  'var name=document.getElementById("c-name").value.trim();' +
+  'var email=document.getElementById("c-email").value.trim();' +
+  'var company=document.getElementById("c-company").value.trim();' +
+  'var topic=document.getElementById("c-help-topic").value;' +
+  'var otherEl=document.getElementById("c-help-other");' +
+  'var otherDetail=otherEl?otherEl.value.trim():"";' +
+  'var messageEl=document.getElementById("c-message");' +
+  'var message=messageEl?messageEl.value.trim():"";' +
+  'if(!name||!email){alert("Please enter your name and work email so we know who to follow up with.");return;}' +
+  'var topicLabel=TOPIC_LABELS[topic]||topic;' +
+  'var subject="New inquiry — "+topicLabel+" — "+(company||name);' +
+  'var bodyLines=["Name: "+name,"Email: "+email,"Company: "+(company||"(not provided)"),"What can we help with: "+topicLabel];' +
+  'if(topic==="other"&&otherDetail){bodyLines.push("Details: "+otherDetail);}' +
+  'bodyLines.push("");' +
+  'bodyLines.push("Anything else: "+(message||"(none)"));' +
+  'var body=bodyLines.join("\\n");' +
+  'var contactEmail="info@claims-collection.net";' +
+  'try{if(typeof CONTACT_EMAIL!=="undefined"&&CONTACT_EMAIL){contactEmail=CONTACT_EMAIL;}}catch(e){}' +
+  'var mailto="mailto:"+contactEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body);' +
+  'window.location.href=mailto;' +
+  '};' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -325,6 +397,7 @@ async function injectHelpWidget(response) {
         el.append(HELP_WIDGET_HTML, { html: true });
         el.append(RESET_PASSWORD_SCRIPT, { html: true });
         el.append(DEMO_FIX_SCRIPT, { html: true });
+        el.append(CONTACT_FORM_SCRIPT, { html: true });
       }
     })
     .on('#tiersRow', {
