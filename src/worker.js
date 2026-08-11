@@ -493,6 +493,50 @@ const ROI_CALC_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const DEMO_POPUP_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'if(sessionStorage.getItem("clmsDemoPopupShown")){return;}' +
+  'setTimeout(function(){' +
+  'if(sessionStorage.getItem("clmsDemoPopupShown")){return;}' +
+  'sessionStorage.setItem("clmsDemoPopupShown","1");' +
+  'var wrap=document.createElement("div");' +
+  'wrap.id="clms-demo-popup";' +
+  'wrap.innerHTML=' +
+  '\'<style>\'+' +
+  '\'#clms-demo-popup{position:fixed;bottom:24px;left:24px;max-width:300px;background:#D32F2F;color:#fff;padding:16px 18px;border-radius:14px;box-shadow:0 20px 50px -15px rgba(179,25,25,0.55);z-index:99998;font-family:"IBM Plex Sans",Arial,sans-serif;cursor:pointer;animation:clmsPopIn .35s ease;}\'+' +
+  '\'@keyframes clmsPopIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}\'+' +
+  '\'@keyframes clmsBangPulse{0%,100%{opacity:1;}50%{opacity:.55;}}\'+' +
+  '\'#clms-demo-popup .cdp-close{position:absolute;top:6px;right:10px;background:none;border:none;color:#fff;font-size:16px;cursor:pointer;opacity:.8;line-height:1;}\'+' +
+  '\'#clms-demo-popup .cdp-close:hover{opacity:1;}\'+' +
+  '\'#clms-demo-popup .cdp-bang{font-weight:800;font-size:15px;letter-spacing:.04em;margin-bottom:4px;animation:clmsBangPulse 1.1s ease-in-out infinite;}\'+' +
+  '\'#clms-demo-popup .cdp-text{font-size:13.5px;line-height:1.5;font-weight:500;padding-right:14px;}\'+' +
+  '\'@media (max-width:420px){#clms-demo-popup{left:16px;bottom:16px;max-width:calc(100vw - 32px);}}\'+' +
+  '\'</style>\'+' +
+  '\'<button class="cdp-close" aria-label="Dismiss">&times;</button>\'+' +
+  '\'<div class="cdp-bang">!!!</div>\'+' +
+  '\'<div class="cdp-text">Try out the interactive demo! Let us show you how everything works!</div>\';' +
+  'document.body.appendChild(wrap);' +
+  'wrap.addEventListener("click",function(e){' +
+  'if(e.target&&e.target.className==="cdp-close"){' +
+  'e.stopPropagation();' +
+  'wrap.remove();' +
+  'return;' +
+  '}' +
+  'wrap.remove();' +
+  'var demoLink=document.querySelector(\'a[href="#demo"]\')||document.querySelector(\'a[href$="#demo"]\');' +
+  'if(demoLink){demoLink.click();}' +
+  'else{' +
+  'location.hash="demo";' +
+  'if(typeof loadDemoIfNeeded==="function"){loadDemoIfNeeded();}' +
+  '}' +
+  '});' +
+  '},10000);' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -583,6 +627,7 @@ async function injectHelpWidget(response) {
         el.append(PRICING_LINKS_SCRIPT, { html: true });
         el.append(COMPARE_COPY_SCRIPT, { html: true });
         el.append(ROI_CALC_SCRIPT, { html: true });
+        el.append(DEMO_POPUP_SCRIPT, { html: true });
       }
     })
     .on('#tiersRow', {
