@@ -537,6 +537,109 @@ const DEMO_POPUP_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const DEMO_TOUR_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var steps=[' +
+  '{sel:"#nav",title:"Your command center",text:"Every stage of your AR lifecycle — from new invoices to collected cash — is one click away."},' +
+  '{sel:"#kpis",title:"Live KPIs",text:"See exactly what is outstanding, overdue, and needs attention today, updated in real time."},' +
+  '{sel:"#search",title:"Search and filter",text:"Find any invoice instantly by office, department, payer, or status."},' +
+  '{sel:"#queue",title:"Your prioritized queue",text:"clAIms automatically ranks every open invoice so your team always knows who to follow up with next, and why."},' +
+  '{sel:"#report-age",nav:"report",title:"Aging, at a glance",text:"See exactly how much AR is sitting in each aging bucket, broken down by payer, so nothing slips through the cracks."},' +
+  '{sel:"#automation-feed",nav:"automations",title:"Automated follow-ups",text:"Set your cadence once. Follow-ups go out automatically, with a full activity trail for every action taken."},' +
+  '{sel:"#custom-integrations",nav:"integrations",title:"Connects to what you already use",text:"Plug clAIms into your restoration and accounting software so data flows in and payments flow back out, with no manual re-entry."},' +
+  '{sel:"#money-wrap",nav:"queue",title:"Track cash collected in real time",text:"Watch your recovered revenue tick up as payments come in. That is the whole point."}' +
+  '];' +
+  'var idx=-1;' +
+  'var spot,tip,replayBtn;' +
+  'function ensureUI(){' +
+  'if(spot){return;}' +
+  'var style=document.createElement("style");' +
+  'style.textContent=' +
+  '".clms-tour-spot{position:fixed;pointer-events:none;box-shadow:0 0 0 9999px rgba(10,10,10,.62);border-radius:10px;transition:top .25s ease,left .25s ease,width .25s ease,height .25s ease;z-index:999998;}" +' +
+  '".clms-tour-tip{position:fixed;z-index:999999;background:#171717;color:#fff;border-radius:12px;padding:16px 18px;width:300px;box-shadow:0 20px 50px -15px rgba(0,0,0,.55);font-family:\\"IBM Plex Sans\\",Arial,sans-serif;}" +' +
+  '".clms-tour-tip .ctt-step{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#C29B57;font-weight:700;margin-bottom:6px;}" +' +
+  '".clms-tour-tip h4{margin:0 0 6px;font-size:15px;}" +' +
+  '".clms-tour-tip p{margin:0 0 14px;font-size:13px;line-height:1.5;color:#D8D4C8;}" +' +
+  '".clms-tour-tip .ctt-row{display:flex;justify-content:space-between;align-items:center;gap:8px;}" +' +
+  '".clms-tour-tip button{font-family:inherit;font-size:12.5px;font-weight:600;border-radius:7px;padding:7px 12px;cursor:pointer;border:none;}" +' +
+  '".clms-tour-tip .ctt-skip{background:none;color:#B7B2A4;padding:7px 4px;}" +' +
+  '".clms-tour-tip .ctt-back{background:#2b2b2b;color:#fff;}" +' +
+  '".clms-tour-tip .ctt-next{background:#C29B57;color:#171717;}" +' +
+  '".clms-tour-replay{position:fixed;bottom:16px;left:16px;background:#171717;color:#fff;font-size:12px;font-weight:600;padding:9px 14px;border-radius:20px;cursor:pointer;z-index:999997;box-shadow:0 10px 24px -8px rgba(0,0,0,.4);font-family:\\"IBM Plex Sans\\",Arial,sans-serif;display:none;}" +' +
+  '"@media (max-width:520px){.clms-tour-tip{width:calc(100vw - 32px);}}";' +
+  'document.head.appendChild(style);' +
+  'spot=document.createElement("div");spot.className="clms-tour-spot";spot.style.display="none";document.body.appendChild(spot);' +
+  'tip=document.createElement("div");tip.className="clms-tour-tip";tip.style.display="none";document.body.appendChild(tip);' +
+  'replayBtn=document.createElement("button");replayBtn.className="clms-tour-replay";replayBtn.innerHTML="&#8635; Replay tour";' +
+  'replayBtn.addEventListener("click",function(){replayBtn.style.display="none";idx=-1;nextStep();});' +
+  'document.body.appendChild(replayBtn);' +
+  '}' +
+  'function place(el){' +
+  'var r=el.getBoundingClientRect();' +
+  'var pad=6;' +
+  'spot.style.top=(r.top-pad)+"px";' +
+  'spot.style.left=(r.left-pad)+"px";' +
+  'spot.style.width=(r.width+pad*2)+"px";' +
+  'spot.style.height=(r.height+pad*2)+"px";' +
+  'spot.style.display="block";' +
+  'tip.style.visibility="hidden";' +
+  'tip.style.display="block";' +
+  'var th=tip.offsetHeight,tw=tip.offsetWidth;' +
+  'var top=r.bottom+14;' +
+  'if(top+th>window.innerHeight-10){top=r.top-th-14;}' +
+  'if(top<10){top=10;}' +
+  'var left=r.left;' +
+  'if(left+tw>window.innerWidth-10){left=window.innerWidth-tw-10;}' +
+  'if(left<10){left=10;}' +
+  'tip.style.top=top+"px";' +
+  'tip.style.left=left+"px";' +
+  'tip.style.visibility="visible";' +
+  '}' +
+  'function renderTip(step,i){' +
+  'tip.innerHTML=' +
+  '"<div class=\\"ctt-step\\">Step "+(i+1)+" of "+steps.length+"</div>"+' +
+  '"<h4>"+step.title+"</h4>"+' +
+  '"<p>"+step.text+"</p>"+' +
+  '"<div class=\\"ctt-row\\"><button class=\\"ctt-skip\\" id=\\"clmsTourSkip\\">Skip tour</button>"+' +
+  '"<div style=\\"display:flex;gap:8px;\\">"+' +
+  '(i>0?"<button class=\\"ctt-back\\" id=\\"clmsTourBack\\">Back</button>":"")+' +
+  '"<button class=\\"ctt-next\\" id=\\"clmsTourNext\\">"+(i===steps.length-1?"Finish":"Next")+"</button>"+' +
+  '"</div></div>";' +
+  'document.getElementById("clmsTourSkip").addEventListener("click",endTour);' +
+  'var backBtn=document.getElementById("clmsTourBack");' +
+  'if(backBtn){backBtn.addEventListener("click",function(){idx-=2;nextStep();});}' +
+  'document.getElementById("clmsTourNext").addEventListener("click",function(){' +
+  'if(i===steps.length-1){endTour();}else{nextStep();}' +
+  '});' +
+  '}' +
+  'function nextStep(){' +
+  'idx++;' +
+  'if(idx>=steps.length){endTour();return;}' +
+  'var step=steps[idx];' +
+  'if(step.nav){' +
+  'var btn=document.querySelector(\'.nav-item[data-view="\'+step.nav+\'"]\');' +
+  'if(btn){btn.click();}' +
+  '}' +
+  'setTimeout(function(){' +
+  'var el=document.querySelector(step.sel);' +
+  'if(!el){nextStep();return;}' +
+  'el.scrollIntoView({block:"center"});' +
+  'setTimeout(function(){place(el);renderTip(step,idx);},80);' +
+  '},step.nav?320:0);' +
+  '}' +
+  'function endTour(){' +
+  'if(spot){spot.style.display="none";}' +
+  'if(tip){tip.style.display="none";}' +
+  'if(replayBtn){replayBtn.style.display="block";}' +
+  '}' +
+  'ensureUI();' +
+  'setTimeout(function(){nextStep();},900);' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -641,7 +744,10 @@ async function injectHelpWidget(response) {
 async function handleDemoDashboard(request, env) {
   const assetResponse = await env.ASSETS.fetch(new URL('/dashboard.html', request.url));
   const html = await assetResponse.text();
-  return new Response(html, {
+  const injected = html.indexOf('</body>') !== -1
+    ? html.replace('</body>', DEMO_TOUR_SCRIPT + '</body>')
+    : html + DEMO_TOUR_SCRIPT;
+  return new Response(injected, {
     status: assetResponse.status,
     headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' }
   });
