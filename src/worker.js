@@ -312,6 +312,115 @@ const CONTACT_FORM_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const GET_STARTED_FORM_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var headerBtns=document.querySelectorAll(\'[onclick="openSignup()"]\');' +
+  'for(var i=0;i<headerBtns.length;i++){headerBtns[i].textContent="Get Started";}' +
+  'var eyebrow=document.querySelector("#signupOverlay .auth-eyebrow");' +
+  'if(eyebrow){eyebrow.textContent="Get Started";}' +
+  'var formFields=document.getElementById("signupFormFields");' +
+  'if(!formFields){return;}' +
+  'var pwField=document.getElementById("su-password");' +
+  'if(pwField){var pwWrap=pwField.closest(".auth-field");if(pwWrap&&pwWrap.parentNode){pwWrap.parentNode.removeChild(pwWrap);}}' +
+  'var cpwField=document.getElementById("su-confirm-password");' +
+  'if(cpwField){var cpwWrap=cpwField.closest(".auth-field");if(cpwWrap&&cpwWrap.parentNode){cpwWrap.parentNode.removeChild(cpwWrap);}}' +
+  'var sizeField=document.getElementById("su-size");' +
+  'var sizeWrap=sizeField?sizeField.closest(".auth-field"):null;' +
+  'var planWrap=document.createElement("div");' +
+  'planWrap.className="auth-field";' +
+  'planWrap.innerHTML=' +
+  '\'<label>Desired Plan</label>\'+' +
+  '\'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;">\'+' +
+  '\'<label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:0;font-size:14px;"><input type="radio" name="su-plan-choice" value="starter" style="width:auto;">Starter</label>\'+' +
+  '\'<label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:0;font-size:14px;"><input type="radio" name="su-plan-choice" value="growth" style="width:auto;">Growth</label>\'+' +
+  '\'<label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:0;font-size:14px;"><input type="radio" name="su-plan-choice" value="enterprise" style="width:auto;">Enterprise</label>\'+' +
+  '\'</div>\';' +
+  'if(sizeWrap&&sizeWrap.parentNode){sizeWrap.parentNode.insertBefore(planWrap,sizeWrap.nextSibling);}else{formFields.appendChild(planWrap);}' +
+  'var submitBtn=document.getElementById("su-submit-btn");' +
+  'if(!submitBtn){return;}' +
+  'submitBtn.textContent="Get Started";' +
+  'submitBtn.style.display="none";' +
+  'function fieldVal(id){var el=document.getElementById(id);return el?el.value.trim():"";}' +
+  'function checkComplete(){' +
+  'var complete=!!(' +
+  'fieldVal("su-fullname")&&' +
+  'fieldVal("su-email")&&' +
+  'fieldVal("su-company")&&' +
+  'fieldVal("su-address")&&' +
+  'fieldVal("su-city")&&' +
+  'fieldVal("su-state")&&' +
+  'fieldVal("su-zip")&&' +
+  'fieldVal("su-size")&&' +
+  'document.querySelector(\'input[name="su-plan-choice"]:checked\')&&' +
+  '(document.getElementById("su-terms")&&document.getElementById("su-terms").checked)' +
+  ');' +
+  'submitBtn.style.display=complete?"inline-block":"none";' +
+  '}' +
+  'formFields.addEventListener("input",checkComplete);' +
+  'formFields.addEventListener("change",checkComplete);' +
+  'checkComplete();' +
+  'window.submitSignup=function(){' +
+  'var note=document.getElementById("signupNote");' +
+  'var planEl=document.querySelector(\'input[name="su-plan-choice"]:checked\');' +
+  'var payload={' +
+  'fullName:fieldVal("su-fullname"),' +
+  'email:fieldVal("su-email"),' +
+  'companyName:fieldVal("su-company"),' +
+  'address:fieldVal("su-address"),' +
+  'city:fieldVal("su-city"),' +
+  'state:fieldVal("su-state"),' +
+  'zip:fieldVal("su-zip"),' +
+  'companySize:fieldVal("su-size"),' +
+  'desiredPlan:planEl?planEl.value:"",' +
+  'agreeToTerms:(document.getElementById("su-terms")?document.getElementById("su-terms").checked:false)' +
+  '};' +
+  'if(!payload.fullName||!payload.email||!payload.companyName||!payload.desiredPlan||!payload.agreeToTerms){' +
+  'if(note){note.classList.add("show");note.textContent="Please complete all fields and agree to the Terms & Conditions.";}' +
+  'return;' +
+  '}' +
+  'submitBtn.disabled=true;submitBtn.textContent="Submitting...";' +
+  'fetch("/api/get-started",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})' +
+  '.then(function(r){return r.json().then(function(d){return {ok:r.ok,data:d};});})' +
+  '.then(function(res){' +
+  'if(res.ok&&res.data&&res.data.ok){' +
+  'window.location.href="/thank-you";' +
+  '}else{' +
+  'submitBtn.disabled=false;submitBtn.textContent="Get Started";' +
+  'if(note){note.classList.add("show");note.textContent=(res.data&&res.data.error)||"Something went wrong. Please try again.";}' +
+  '}' +
+  '})' +
+  '.catch(function(){' +
+  'submitBtn.disabled=false;submitBtn.textContent="Get Started";' +
+  'if(note){note.classList.add("show");note.textContent="Network error. Please try again.";}' +
+  '});' +
+  '};' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
+const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-8">' +
+  '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+  '<title>Thank you — clAIms</title>' +
+  '<link rel="icon" href="/favicon.ico">' +
+  '<style>' +
+  'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;box-sizing:border-box;}' +
+  '.ty-card{background:#fff;border:1px solid #E5E0D2;border-radius:16px;padding:48px 40px;max-width:520px;text-align:center;box-shadow:0 24px 60px -20px rgba(23,23,23,0.15);}' +
+  '.ty-card .ty-mark{font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#C29B57;margin-bottom:18px;}' +
+  '.ty-card h1{font-size:26px;margin:0 0 16px;}' +
+  '.ty-card p{font-size:15px;line-height:1.6;color:#3B3A35;margin:0 0 28px;}' +
+  '.ty-card a{display:inline-block;background:#171717;color:#fff;text-decoration:none;font-weight:600;padding:12px 26px;border-radius:8px;}' +
+  '.ty-card a:hover{opacity:.88;}' +
+  '</style></head><body>' +
+  '<div class="ty-card">' +
+  '<div class="ty-mark">clAIms</div>' +
+  '<h1>Thank you for your submission!</h1>' +
+  '<p>Please allow adequate time for the clAIms collection team to reach out to you to begin the setup process.</p>' +
+  '<a href="/">Back to home</a>' +
+  '</div>' +
+  '</body></html>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -398,6 +507,7 @@ async function injectHelpWidget(response) {
         el.append(RESET_PASSWORD_SCRIPT, { html: true });
         el.append(DEMO_FIX_SCRIPT, { html: true });
         el.append(CONTACT_FORM_SCRIPT, { html: true });
+        el.append(GET_STARTED_FORM_SCRIPT, { html: true });
       }
     })
     .on('#tiersRow', {
@@ -719,6 +829,59 @@ async function handleSignup(request, env) {
   return json({ ok: true, message: 'Check your email to verify your account.', joinedExisting: !isNewTenant });
 }
 
+async function handleGetStarted(request, env) {
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+
+  const fullName = (body.fullName || '').trim();
+  const email = (body.email || '').trim().toLowerCase();
+  const companyName = (body.companyName || '').trim();
+  const address = (body.address || '').trim();
+  const city = (body.city || '').trim();
+  const state = (body.state || '').trim();
+  const zip = (body.zip || '').trim();
+  const companySize = (body.companySize || '').trim();
+  const desiredPlan = (body.desiredPlan || '').trim();
+
+  if (!fullName || !email || !companyName || !desiredPlan) {
+    return json({ ok: false, error: 'Please fill out all required fields.' }, 400);
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
+  }
+  if (['starter', 'growth', 'enterprise'].indexOf(desiredPlan) === -1) {
+    return json({ ok: false, error: 'Please select a valid plan.' }, 400);
+  }
+  if (!body.agreeToTerms) {
+    return json({ ok: false, error: 'You must agree to the Terms & Conditions to continue.' }, 400);
+  }
+
+  const notifyHtml =
+    '<div style="font-family:sans-serif;max-width:560px;margin:0 auto;">' +
+    '<h2>New Get Started submission</h2>' +
+    '<table style="border-collapse:collapse;width:100%;">' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Full name</td><td style="padding:4px 8px;">' + escapeHtml(fullName) + '</td></tr>' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Email</td><td style="padding:4px 8px;">' + escapeHtml(email) + '</td></tr>' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Company</td><td style="padding:4px 8px;">' + escapeHtml(companyName) + '</td></tr>' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Address</td><td style="padding:4px 8px;">' + escapeHtml(address) + ', ' + escapeHtml(city) + ', ' + escapeHtml(state) + ' ' + escapeHtml(zip) + '</td></tr>' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Company size</td><td style="padding:4px 8px;">' + escapeHtml(companySize) + '</td></tr>' +
+    '<tr><td style="padding:4px 8px;font-weight:600;">Desired plan</td><td style="padding:4px 8px;">' + escapeHtml(desiredPlan) + '</td></tr>' +
+    '</table>' +
+    '</div>';
+  const result = await sendEmail(env, {
+    to: 'info@claims-collection.net',
+    subject: 'NEW CUSTOMER ' + companyName,
+    html: notifyHtml,
+    kind: 'get_started_lead'
+  });
+
+  return json({ ok: true, message: 'Thanks — our team will be in touch shortly.', emailSent: !!result.ok });
+}
+
+async function handleThankYou(request, env) {
+  return injectHelpWidget(new Response(THANK_YOU_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
+}
+
 async function handleVerifyEmail(request, env) {
   const url = new URL(request.url);
   const token = url.searchParams.get('token') || '';
@@ -976,6 +1139,12 @@ export default {
     }
     if (url.pathname === '/api/demo-dashboard' && request.method === 'GET') {
       return handleDemoDashboard(request, env);
+    }
+    if (url.pathname === '/api/get-started' && request.method === 'POST') {
+      return handleGetStarted(request, env);
+    }
+    if (url.pathname === '/thank-you' && request.method === 'GET') {
+      return handleThankYou(request, env);
     }
     if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
       return handleStripeWebhook(request, env);
