@@ -421,6 +421,27 @@ const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-
   '</div>' +
   '</body></html>';
 
+const PRICING_LINKS_SCRIPT = '<script>' +
+  '(function(){' +
+  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+  'ready(function(){' +
+  'var tiersRow=document.getElementById("tiersRow");' +
+  'if(!tiersRow){return;}' +
+  'var stripeLinks=tiersRow.querySelectorAll(\'a[href^="https://buy.stripe.com"]\');' +
+  'for(var i=0;i<stripeLinks.length;i++){' +
+  '(function(a){' +
+  'a.removeAttribute("href");' +
+  'a.style.cursor="pointer";' +
+  'a.addEventListener("click",function(e){' +
+  'e.preventDefault();' +
+  'if(typeof openSignup==="function"){openSignup();}' +
+  '});' +
+  '})(stripeLinks[i]);' +
+  '}' +
+  '});' +
+  '})();' +
+  '<' + '/script>';
+
 function planForSize(size) {
   if (size === '1-10') return 'starter';
   if (size === '11-50') return 'growth';
@@ -508,6 +529,7 @@ async function injectHelpWidget(response) {
         el.append(DEMO_FIX_SCRIPT, { html: true });
         el.append(CONTACT_FORM_SCRIPT, { html: true });
         el.append(GET_STARTED_FORM_SCRIPT, { html: true });
+        el.append(PRICING_LINKS_SCRIPT, { html: true });
       }
     })
     .on('#tiersRow', {
