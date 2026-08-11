@@ -434,7 +434,7 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'var growPrice=tiersRow.querySelector(".tier.growth .tier-price");' +
   'if(growPrice){growPrice.innerHTML="$739<span class=\\"per\\">–$1,649/mo</span>";}' +
   'var growImpl=tiersRow.querySelector(".tier.growth .tier-impl b");' +
-  'if(growImpl){growImpl.textContent="$2,900–$6,200";}' +
+  'if(growImpl){growImpl.textContent="$2,900–$3,750";}' +
   'var entPrice=tiersRow.querySelector(".tier.enterprise .tier-price");' +
   'if(entPrice){entPrice.innerHTML="$1,650<span class=\\"per\\">/mo flat</span>";}' +
   'var entImpl=tiersRow.querySelector(".tier.enterprise .tier-impl b");' +
@@ -442,9 +442,9 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'var startFit=tiersRow.querySelector(".tier.starter .tier-fit");' +
   'if(startFit){startFit.textContent="Under $500K in annual revenue";}' +
   'var growFit=tiersRow.querySelector(".tier.growth .tier-fit");' +
-  'if(growFit){growFit.textContent="$500K–$5M in annual revenue";}' +
+  'if(growFit){growFit.textContent="$500K–$2M in annual revenue";}' +
   'var entFit=tiersRow.querySelector(".tier.enterprise .tier-fit");' +
-  'if(entFit){entFit.textContent="$5M+ in annual revenue, multiple offices or entities";}' +
+  'if(entFit){entFit.textContent="$2M+ in annual revenue, multiple offices or entities";}' +
   'var tierBtns=tiersRow.querySelectorAll("a.btn-tier");' +
   'for(var i=0;i<tierBtns.length;i++){' +
   '(function(a){' +
