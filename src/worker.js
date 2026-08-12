@@ -581,7 +581,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-field"><label>Business address</label><div class="acct-value" id="billingAddress">—</div></div> ' +
   '</div> ' +
   '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;" id="billingAdminActions"> ' +
-  '<button class="btn-outline btn-sm">Update payment method</button> ' +
+  '<button class="btn-outline btn-sm" id="updatePaymentBtn" onclick="openUpdatePaymentMethod()">Update payment method</button> ' +
   '</div> ' +
   '</div> ' +
   '<div class="acct-card"> ' +
@@ -2351,6 +2351,22 @@ ready(function(){
     if(data.role!=="admin"){ window.location.href="/account"; return; }
     me=data;
     return fetch("/api/subscription",{credentials:"same-origin"}).then(function(r){return r.json();});
+  function openUpdatePaymentMethod(){
+    var btn = document.getElementById("updatePaymentBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "Opening..."; }
+    fetch("/api/billing-portal", { method: "POST", credentials: "same-origin" })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d && d.ok && d.url) { window.location.href = d.url; return; }
+        alert((d && d.error) || "Unable to open billing portal right now.");
+        if (btn) { btn.disabled = false; btn.textContent = "Update payment method"; }
+      })
+      .catch(function(){
+        alert("Unable to open billing portal right now.");
+        if (btn) { btn.disabled = false; btn.textContent = "Update payment method"; }
+      });
+  }
+
   }).then(function(info){
     if(!info) return;
     if(!info.ok){ wrap.innerHTML="<div class=\\"sub-banner err\\">We couldn't load your subscription right now. Please refresh, or contact us if this keeps happening.</div>"; return; }
@@ -2497,6 +2513,21 @@ async function getActiveStripeSubscription(env, customerId) {
   const trialing = await stripeRequest(env, 'GET', '/subscriptions', { customer: customerId, status: 'trialing', limit: 1 });
   if (trialing.ok && trialing.data.data && trialing.data.data[0]) return { ok: true, data: trialing.data.data[0] };
   return { ok: true, data: null };
+}
+
+async function handleBillingPortal(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ ok: false }, 401);
+  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+  if (!user.stripe_customer_id) return json({ ok: false, error: 'This account is not connected to Stripe yet. Contact support to set up billing.' });
+  const result = await stripeRequest(env, 'POST', 'billing_portal/sessions', {
+    customer: user.stripe_customer_id,
+    return_url: SITE_URL + '/dashboard'
+  });
+  if (!result || !result.ok || !result.data || !result.data.url) {
+    return json({ ok: false, error: (result && result.error) || 'Unable to open billing portal right now.' });
+  }
+  return json({ ok: true, url: result.data.url });
 }
 
 async function handleSubscriptionInfo(request, env) {
@@ -3021,6 +3052,9 @@ export default {
     }
     if (url.pathname === '/api/subscription' && request.method === 'GET') {
       return handleSubscriptionInfo(request, env);
+    }
+    if (url.pathname === '/api/billing-portal' && request.method === 'POST') {
+      return handleBillingPortal(request, env);
     }
     if (url.pathname === '/api/subscription/cancel' && request.method === 'POST') {
       return handleSubscriptionCancel(request, env);
