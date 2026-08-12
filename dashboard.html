@@ -32,6 +32,11 @@
   .gh-logo{height:38px;width:auto;display:block;}
   .gh-sub{font-family:var(--font-mono);font-weight:400;font-size:10px;color:#B7BCD4;letter-spacing:0.06em;margin-left:2px;}
   .gh-right{display:flex;align-items:center;gap:10px;}
+.gh-account{display:flex;align-items:center;gap:10px;padding-left:12px;margin-left:2px;border-left:1px solid rgba(255,255,255,0.16);}
+.gh-account-link{font-family:var(--font-body);font-weight:600;font-size:12.5px;color:var(--brand-rust);text-decoration:none;}
+.gh-account-link:hover{text-decoration:underline;}
+.gh-logout-btn{font-family:var(--font-body);font-weight:600;font-size:12px;color:#EDEFF1;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);border-radius:7px;padding:6px 12px;cursor:pointer;}
+.gh-logout-btn:hover{background:rgba(255,255,255,0.16);border-color:var(--brand-rust);color:var(--brand-rust);}
   .notif-wrap{position:relative;}
   .money-wrap{position:relative;}
   .money-bell{font-family:var(--font-display);font-weight:700;font-size:16px;}
@@ -418,6 +423,10 @@
       <div class="notif-section-label">Recent Activity</div>
       <div id="notif-recent"></div>
     </div>
+  </div>
+  <div class="gh-account" id="gh-account" style="display:none;">
+    <a href="/account" class="gh-account-link">My Account</a>
+    <button class="gh-logout-btn" id="gh-logout-btn" type="button">Logout</button>
   </div>
   </div>
 </div>
