@@ -661,15 +661,6 @@
 
       <div class="rule-card">
         <div>
-          <div class="rname">Work Authorization Auto-Send</div>
-          <div class="rdesc">Automatically emails the Work Authorization to the account owner the moment Salesforce reports a job's status as <b>Pending Start</b>.</div>
-          <div class="rtrigger">TRIGGER: Salesforce Job Status &#8594; Pending Start</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="auto-wa" checked="" onchange="toggleAutomation('wa', this.checked)"><span class="slider"></span></label>
-      </div>
-
-      <div class="rule-card">
-        <div>
           <div class="rname">Certificate of Satisfaction (COS) Auto-Send</div>
           <div class="rdesc">Automatically emails a COS to the account owner the moment Salesforce reports a job's status as <b>Work Completed</b>.</div>
           <div class="rtrigger">TRIGGER: Salesforce Job Status &#8594; Work Completed</div>
@@ -1375,13 +1366,97 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
 
   async function init(){
     state = await loadState();
+  await loadRealAccounts();
     var searchFieldEl=document.getElementById('search');if(searchFieldEl){searchFieldEl.value='';}
     renderAll();
     await runCadenceForAll(); // catch up any checkpoints on load
     saveState();
     renderAll();
   }
+
+  async function loadRealAccounts(){
+    try {
+      const res = await fetch('/api/accounts', { credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = Array.isArray(data.accounts) ? data.accounts : [];
+      if (!list.length && !data.ok) return;
+      const invoices = [];
+      const paymentsLog = [];
+      list.forEach(a => {
+        const isPaid = !!a.paidDate;
+        const inv = {
+          id: a.id,
+          name: a.name,
+          payer: a.payer || 'insurance',
+          amount: a.amount || 0,
+          officeLocation: a.officeLocation,
+          department: a.department || 'mitigation',
+          category: a.category || 'water-mitigation',
+          invoiceDate: a.invoicedDate,
+          invoiceNumber: a.invoiceNumber,
+          followups: a.followups || 0,
+          note: a.note || '',
+          jobStatus: isPaid ? 'paid' : (a.jobStatus || 'in_progress'),
+          docsComplete: false,
+          waSent: !!a.waSent,
+          cosSent: false,
+          paymentEmailSent: false,
+          noilSent: !!a.noilSentAt,
+          noilSentAt: a.noilSentAt || null,
+          demandLetterSentAt: a.demandLetterSentAt || null,
+          lienFiled: false,
+          amountPaid: isPaid ? (a.paidAmount || a.amount || 0) : 0,
+          paymentType: null,
+          waSignedDate: a.waSignedDate || null,
+          cosSignedDate: null,
+          documents: [],
+          activity: {},
+          escalated: !!a.escalated,
+          cadenceSent: {},
+          needsAttention: false,
+          lastUpdatedAtDay: a.days || 0,
+          jobNumber: '',
+          claimNumber: null,
+          scopeOfWork: '',
+          currentlyWith: '',
+          lastOnSiteDate: a.invoicedDate
+        };
+        invoices.push(inv);
+        if (isPaid) {
+          paymentsLog.push({
+            id: a.id,
+            invoiceId: a.id,
+            invoiceName: a.name,
+            amount: a.paidAmount || a.amount || 0,
+            remainingBalance: 0,
+            paidDate: String(a.paidDate).slice(0, 10),
+            officeLocation: a.officeLocation,
+            department: a.department || 'mitigation',
+            category: a.category || 'water-mitigation',
+            paymentMethod: 'integration',
+            checkNumber: null,
+            referenceNumber: a.externalId || null,
+            payerName: a.payer || a.name,
+            bankName: null,
+            memo: 'Synced automatically from accounting integration',
+            invoiceDateSnapshot: a.invoicedDate,
+            source: 'integration'
+          });
+        }
+      });
+      state.invoices = invoices;
+      state.paymentsLog = paymentsLog;
+      if (typeof saveState === 'function') saveState();
+      if (typeof renderAll === 'function') renderAll();
+    } catch (err) {
+      console.error('loadRealAccounts failed', err);
+    }
+  }
+
   init();
+
+  setInterval(loadRealAccounts, 60000);
 
   function renderAll(){
     const steps = [
@@ -2771,12 +2846,6 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
 
   function runAutomationChecks(inv){
-    if(state.automationSettings.wa && inv.jobStatus === 'pending_start' && !inv.waSent){
-      inv.waSent = true;
-      inv.documents.push({ id:'auto'+(state.nextDocId++), name:'Work Authorization.pdf', kind:'WorkAuth', auto:true });
-      addActivity(inv, 'Work Authorization automatically emailed to account owner.', 'automation');
-      logAutomation(inv, 'Work Authorization');
-    }
     if(state.automationSettings.cos && inv.jobStatus === 'work_completed' && !inv.cosSent){
       inv.cosSent = true;
       inv.documents.push({ id:'auto'+(state.nextDocId++), name:'Certificate of Satisfaction.pdf', kind:'COS', auto:true });
