@@ -445,6 +445,7 @@
       <button class="nav-item" data-view="escalations"><span class="left"><span class="ic">E</span> Escalations</span><span class="count" id="nav-count-esc"></span></button>
       <button class="nav-item" data-view="automations"><span class="left"><span class="ic">A</span> Automations</span></button>
       <button class="nav-item" data-view="integrations"><span class="left"><span class="ic">I</span> Integrations</span></button>
+      <button class="nav-item" data-view="team" data-admin-only="1"><span class="left"><span class="ic">T</span> Team</span></button>
     </nav>
 
     <div class="dept-filter-box">
@@ -700,6 +701,13 @@
 
       
     </section>
+  <section class="view" id="view-team">
+    <div class="topbar">
+      <div><h1>Team</h1><p>Manage who has access to this dashboard</p></div>
+      <div class="topbar-actions"><button class="btn-primary" onclick="openInviteTeamMember()">+ Invite Team Member</button></div>
+    </div>
+    <div id="team-list-wrap"></div>
+  </section>
   </main>
 </div>
 
@@ -986,6 +994,17 @@
   </div>
 </div>
 
+<div class="overlay" id="overlay-invite">
+  <div class="drawer">
+    <div class="drawer-head"><h3>Invite Team Member</h3><button class="close" onclick="closeInviteTeamMember()">Close &times;</button></div>
+    <div class="drawer-sub">New team members receive an email to set their password. Manager and employee accounts are scoped to a single office.</div>
+    <div class="form-row"><label>New User&#39;s Email *</label><input id="invite-email" type="email" placeholder="name@company.com" required></div>
+    <div class="form-row"><label>Full Name</label><input id="invite-name" type="text" placeholder="Jane Smith"></div>
+    <div class="form-row"><label>Role</label><select id="invite-role"><option value="employee">Employee</option><option value="manager">Manager</option></select></div>
+    <div class="form-row"><label>Office</label><select id="invite-office"><option value="arizona">Arizona</option><option value="dallas">Dallas</option><option value="houston">Houston</option><option value="hillcountry">Hill Country</option></select></div>
+    <button class="btn-primary" onclick="submitInviteTeamMember()">Send Invite</button>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1367,6 +1386,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   async function init(){
     state = await loadState();
   await loadRealAccounts();
+  await loadCurrentUser();
     var searchFieldEl=document.getElementById('search');if(searchFieldEl){searchFieldEl.value='';}
     renderAll();
     await runCadenceForAll(); // catch up any checkpoints on load
@@ -1374,7 +1394,119 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
     renderAll();
   }
 
-  async function loadRealAccounts(){
+  async function loadCurrentUser() {
+  try {
+    const res = await fetch('/api/me', { credentials: 'include' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ok) return;
+    state.currentUser = { email: data.email, role: data.role, office: data.office || null };
+    document.querySelectorAll('[data-admin-only]').forEach(function(el){
+      el.style.display = (state.currentUser.role === 'admin') ? '' : 'none';
+    });
+    if (state.currentUser.role === 'admin') renderTeam();
+  } catch (err) { console.error('loadCurrentUser failed', err); }
+}
+
+async function renderTeam() {
+  const wrap = document.getElementById('team-list-wrap');
+  if (!wrap) return;
+  try {
+    const res = await fetch('/api/team', { credentials: 'include' });
+    const data = await res.json();
+    const team = (data && data.team) || [];
+    if (!team.length) {
+      wrap.innerHTML = '<p style="color:#5B6B73;font-size:13px;">No team members yet.</p>';
+      return;
+    }
+    const officeLabel = function(o){ return ({ arizona:'Arizona', dallas:'Dallas', houston:'Houston', hillcountry:'Hill Country' })[o] || o || String.fromCharCode(8212); };
+    wrap.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>' +
+      '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Name</th>' +
+      '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Email</th>' +
+      '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Role</th>' +
+      '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Office</th>' +
+      '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Status</th>' +
+      '<th style="padding:8px;border-bottom:2px solid #16233A;"></th></tr></thead><tbody>' +
+      team.map(function(m){
+        return '<tr>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + (m.full_name || String.fromCharCode(8212)) + '</td>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + m.email + '</td>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-transform:capitalize;">' + m.role + '</td>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + officeLabel(m.office) + '</td>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-transform:capitalize;">' + (m.status || '') + '</td>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:right;">' +
+            (m.role === 'admin' ? '' : ('<button class="btn-small" onclick="removeTeamMember(' + m.id + ')">Remove</button>')) +
+          '</td></tr>';
+      }).join('') + '</tbody></table>';
+  } catch (err) {
+    wrap.innerHTML = '<p style="color:#B23A2E;font-size:13px;">Unable to load team.</p>';
+  }
+}
+
+function openInviteTeamMember() {
+  const emailEl = document.getElementById('invite-email');
+  const nameEl = document.getElementById('invite-name');
+  const roleEl = document.getElementById('invite-role');
+  const officeEl = document.getElementById('invite-office');
+  if (emailEl) emailEl.value = '';
+  if (nameEl) nameEl.value = '';
+  if (roleEl) roleEl.value = 'employee';
+  if (officeEl) officeEl.value = 'arizona';
+  const overlay = document.getElementById('overlay-invite');
+  if (overlay) overlay.classList.add('open');
+}
+
+function closeInviteTeamMember() {
+  const overlay = document.getElementById('overlay-invite');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function submitInviteTeamMember() {
+  const emailEl = document.getElementById('invite-email');
+  const email = emailEl ? emailEl.value.trim() : '';
+  if (!email) {
+    if (emailEl) emailEl.focus();
+    if (typeof showToast === 'function') showToast("New User's Email is required."); else alert("New User's Email is required.");
+    return;
+  }
+  const fullName = (document.getElementById('invite-name') || {}).value || '';
+  const role = (document.getElementById('invite-role') || {}).value || 'employee';
+  const office = (document.getElementById('invite-office') || {}).value || 'arizona';
+  try {
+    const res = await fetch('/api/team/invite', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, fullName: fullName, role: role, office: office })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (typeof showToast === 'function') showToast(data.error || 'Unable to add team member.'); else alert(data.error || 'Unable to add team member.');
+      return;
+    }
+    closeInviteTeamMember();
+    renderTeam();
+    if (typeof showToast === 'function') showToast(email + ' has been invited.');
+  } catch (err) {
+    if (typeof showToast === 'function') showToast('Unable to add team member.'); else alert('Unable to add team member.');
+  }
+}
+
+async function removeTeamMember(id) {
+  if (!confirm('Remove this team member?')) return;
+  try {
+    const res = await fetch('/api/team/remove', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id })
+    });
+    const data = await res.json();
+    if (data.ok) renderTeam();
+  } catch (err) {}
+}
+
+async function loadRealAccounts(){
     try {
       const res = await fetch('/api/accounts', { credentials: 'include' });
       if (!res.ok) return;
