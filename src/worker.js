@@ -594,7 +594,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '</div> ' +
   '</div> ' +
   '<div class="acct-card"> ' +
-  '<h3>Transaction history<span class="mock-flag">sample</span></h3> ' +
+  '<h3>Transaction history</h3> ' +
   '<table class="acct-table"> ' +
   '<thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead> ' +
   '<tbody id="billingTxRows"></tbody> ' +
@@ -760,107 +760,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  {id:7,name:"Tyler Nakamura",email:"tyler.nakamura@example.com",dept:"Accounting",office:"Dallas HQ",role:"employee"} ' +
   ']; ' +
   ' ' +
-  'var MOCK_TX=[ ' +
-  '  {date:"Aug 1, 2026",desc:"Monthly subscription",amount:"$899.00",status:"Paid"}, ' +
-  '  {date:"Jul 1, 2026",desc:"Monthly subscription",amount:"$899.00",status:"Paid"}, ' +
-  '  {date:"Jun 1, 2026",desc:"Monthly subscription",amount:"$899.00",status:"Paid"}, ' +
-  '  {date:"May 12, 2026",desc:"Implementation fee",amount:"$4,900.00",status:"Paid"} ' +
-  ']; ' +
-  ' ' +
-  'var PERM_ROWS=[ ' +
-  '  {label:"View own account info",employee:true,manager:true,admin:true}, ' +
-  '  {label:"View all team members",employee:true,manager:true,admin:true}, ' +
-  '  {label:"Add / remove team members",employee:false,manager:true,admin:true}, ' +
-  '  {label:"Edit team member permissions",employee:false,manager:true,admin:true}, ' +
-  '  {label:"View team credentials / reset passwords",employee:false,manager:false,admin:true}, ' +
-  '  {label:"Manually apply a payment",employee:false,manager:true,admin:true}, ' +
-  '  {label:"Manage subscription & payment method",employee:false,manager:false,admin:true}, ' +
-  '  {label:"Add / change integrations",employee:false,manager:false,admin:true} ' +
-  ']; ' +
-  ' ' +
-  'function initials(name){ ' +
-  '  var parts=String(name||"").trim().split(/\\s+/); ' +
-  '  return ((parts[0]||"")[0]||"")+((parts[1]||"")[0]||""); ' +
-  '} ' +
-  ' ' +
-  'ready(function(){ ' +
-  '  var state={me:null,team:MOCK_TEAM.slice(),editingId:null,freq:{ ' +
-  '    days:(function(){var a=[];for(var i=0;i<30;i++){a.push(i%7!==5&&i%7!==6);}return a;})(), ' +
-  '    noilEnabled:true,noilDay:45, ' +
-  '    demandEnabled:true,demandDay:60, ' +
-  '    quietStart:"18:00",quietEnd:"08:00", ' +
-  '    maxPerWeek:2, ' +
-  '    escalateEnabled:true,escalateAfter:3, ' +
-  '    senderName:"" ' +
-  '  }}; ' +
-  ' ' +
-  '  fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(data){ ' +
-  '    if(!data||!data.ok){ ' +
-  '      window.location.href="/?login=1"; ' +
-  '      return; ' +
-  '    } ' +
-  '    state.me=data; ' +
-  '    if(!state.freq.senderName){ state.freq.senderName=(data.companyName||"Your Company")+" Collections Team"; } ' +
-  '    render(); ' +
-  '  }).catch(function(){ ' +
-  '    window.location.href="/?login=1"; ' +
-  '  }); ' +
-  ' ' +
-  '  function role(){ return (state.me && state.me.role) || "employee"; } ' +
-  '  function plan(){ return (state.me && (state.me.selectedPlan || state.me.recommendedPlan)) || "growth"; } ' +
-  ' ' +
-  '  function render(){ ' +
-  '    document.getElementById("acctLoading").style.display="none"; ' +
-  '    document.getElementById("acctPanels").style.display="block"; ' +
-  ' ' +
-  '    var r=role(); ' +
-  '    document.getElementById("acctUserChip").innerHTML= ' +
-  '      "<b>"+(state.me.email||"")+"</b>"+ ' +
-  '      "<span class=\\"acct-role-badge "+r+"\\">"+ROLE_LABEL[r]+"</span>"; ' +
-  ' ' +
-  '    renderAccountTab(); ' +
-  '    renderBillingTab(); ' +
-  '    renderTeamTab(); ' +
-  '    renderFrequencyTab(); ' +
-  '    renderSettingsTab(); ' +
-  '    wireTabs(); ' +
-  '    wireEditModal(); ' +
-  '  } ' +
-  ' ' +
-  '  function renderAccountTab(){ ' +
-  '    document.getElementById("acctFullName").textContent=state.me.email.split("@")[0].replace(/[._]/g," ").replace(/\\b\\w/g,function(c){return c.toUpperCase();}); ' +
-  '    document.getElementById("acctEmail").textContent=state.me.email; ' +
-  '    document.getElementById("acctCompany").textContent=state.me.companyName||"—"; ' +
-  '    document.getElementById("acctRoleValue").innerHTML="<span class=\\"role-pill "+role()+"\\">"+ROLE_LABEL[role()]+"</span>"; ' +
-  '    document.getElementById("acctJoined").innerHTML="March 2025 <span class=\\"mock-flag\\">sample</span>"; ' +
-  '  } ' +
-  ' ' +
-  '  function renderBillingTab(){ ' +
-  '    var r=role(); ' +
-  '    var canView=(r==="admin"||r==="manager"); ' +
-  '    document.getElementById("billingRestricted").style.display=canView?"none":"block"; ' +
-  '    document.getElementById("billingContent").style.display=canView?"block":"none"; ' +
-  '    if(!canView){ return; } ' +
-  ' ' +
-  '    var p=plan(); ' +
-  '    var planInfo=PLAN_FEATURES[p]||PLAN_FEATURES.growth; ' +
-  '    document.getElementById("billingPlanName").textContent=planInfo.name; ' +
-  '    var list=document.getElementById("planFeatureList"); ' +
-  '    list.innerHTML=""; ' +
-  '    planInfo.features.forEach(function(f){ ' +
-  '      var li=document.createElement("li"); ' +
-  '      li.textContent=f; ' +
-  '      list.appendChild(li); ' +
-  '    }); ' +
-  '    document.getElementById("billingAddress").textContent="123 Main St, Dallas, TX 75201"; ' +
-  ' ' +
-  '    var txRows=document.getElementById("billingTxRows"); ' +
-  '    txRows.innerHTML=""; ' +
-  '    MOCK_TX.forEach(function(tx){ ' +
-  '      var tr=document.createElement("tr"); ' +
-  '      tr.innerHTML="<td>"+tx.date+"</td><td>"+tx.desc+"</td><td>"+tx.amount+"</td><td>"+tx.status+"</td>"; ' +
-  '      txRows.appendChild(tr); ' +
-  '    }); ' +
+  'fetch("/api/transactions",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ var rows=(d&&d.ok&&d.transactions)||[]; if(!rows.length){ txRows.innerHTML="<tr><td colspan=\"4\" style=\"color:#8a8a8a;\">No transactions yet.</td></tr>"; return; } rows.forEach(function(tx){ var tr=document.createElement("tr"); var amt="$"+Number(tx.amount||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); var amtCell=tx.url?("<a href=\""+tx.url+"\" target=\"_blank\" rel=\"noopener\">"+amt+"</a>"):amt; tr.innerHTML="<td>"+(tx.dateLabel||"")+"</td><td>"+(tx.desc||"")+"</td><td>"+amtCell+"</td><td>"+(tx.status||"")+"</td>"; txRows.appendChild(tr); }); }).catch(function(){ txRows.innerHTML="<tr><td colspan=\"4\" style=\"color:#8a8a8a;\">Unable to load transactions.</td></tr>"; }); ' +
   ' ' +
   '    document.getElementById("manageSubBtn").style.display=(r==="admin")?"inline-block":"none"; ' +
   '    document.getElementById("billingAdminActions").style.display=(r==="admin")?"flex":"none"; ' +
@@ -2563,6 +2463,32 @@ async function getActiveStripeSubscription(env, customerId) {
   return { ok: true, data: null };
 }
 
+async function handleTransactions(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ ok: false }, 401);
+  if (!user.stripe_customer_id) return json({ ok: true, transactions: [] });
+  const result = await stripeRequest(env, 'GET', 'invoices', { customer: user.stripe_customer_id, limit: '24' });
+  if (!result || !result.ok || !result.data || !result.data.data) {
+    return json({ ok: true, transactions: [] });
+  }
+  const transactions = result.data.data.map(function (inv) {
+    let dateLabel = '';
+    try {
+      const ts = (inv.status_transitions && inv.status_transitions.paid_at) || inv.created;
+      dateLabel = new Date(ts * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (e) {}
+    const firstLine = inv.lines && inv.lines.data && inv.lines.data[0];
+    return {
+      dateLabel,
+      desc: (firstLine && firstLine.description) || inv.description || 'Subscription',
+      amount: (inv.amount_paid != null ? inv.amount_paid : inv.total) / 100,
+      status: inv.status,
+      url: inv.hosted_invoice_url || null
+    };
+  });
+  return json({ ok: true, transactions });
+}
+
 async function handleChangePassword(request, env) {
   const user = await getSessionUser(request, env);
   if (!user) return json({ ok: false }, 401);
@@ -3125,6 +3051,9 @@ export default {
     }
     if (url.pathname === '/api/change-password' && request.method === 'POST') {
       return handleChangePassword(request, env);
+    }
+    if (url.pathname === '/api/transactions' && request.method === 'GET') {
+      return handleTransactions(request, env);
     }
     if (url.pathname === '/api/subscription/cancel' && request.method === 'POST') {
       return handleSubscriptionCancel(request, env);
