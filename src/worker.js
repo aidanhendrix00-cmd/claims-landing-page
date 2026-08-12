@@ -9,6 +9,7 @@ const RESET_TTL_SECONDS = 60 * 60; // 1 hour
 const NOTIFY_EMAIL = 'hndrx@claims-collection.net';
 const SUPPORT_EMAIL = 'support@claims-collection.net';
 const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
+const OPERATIONS_FROM_EMAIL = 'clAIms Operations <operations@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
@@ -1900,6 +1901,7 @@ async function uniqueSlug(env, base) {
 
 async function sendEmail(env, opts) {
   const to = opts.to, subject = opts.subject, html = opts.html, kind = opts.kind, tenantId = opts.tenantId, userId = opts.userId, replyTo = opts.replyTo;
+const fromAddr = opts.from || FROM_EMAIL;
   if (!env.RESEND_API_KEY) {
     try {
       await env.DB.prepare(
@@ -1909,7 +1911,7 @@ async function sendEmail(env, opts) {
     return { ok: false, skipped: true };
   }
   try {
-    const payload = { from: FROM_EMAIL, to: [to], subject: subject, html: html };
+    const payload = { from: fromAddr, to: [to], subject: subject, html: html };
     if (replyTo) payload.reply_to = replyTo;
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -2764,6 +2766,45 @@ async function handleLogin(request, env) {
   });
 }
 
+async function handleEscalateNotify(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) {
+return json({ ok: false, error: 'Not authorized' }, 401);
+}
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const invoiceName = String(body.invoiceName || 'An invoice').slice(0, 200);
+const amount = Number(body.amount) || 0;
+const officeLabel = String(body.officeLabel || '').slice(0, 100);
+const departmentLabel = String(body.departmentLabel || '').slice(0, 100);
+const assigneeName = String(body.assigneeName || 'Team').slice(0, 100);
+const assigneeEmail = String(body.assigneeEmail || '').trim();
+if (!assigneeEmail) {
+return json({ ok: false, error: 'Missing assignee email' }, 400);
+}
+const amountFmt = amount.toLocaleString(undefined, { minimumFractionDigits: 2 });
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+'<h2 style="margin:0 0 12px;">Escalated - Needs Your Attention</h2>' +
+'<p style="margin:0 0 10px;">Hi ' + assigneeName + ',</p>' +
+'<p style="margin:0 0 10px;"><strong>' + invoiceName + '</strong> ($' + amountFmt + ') was just escalated by ' + (user.email || 'a teammate') + ' at ' + (user.company_name || 'your company') + ' and pulled out of the autonomous follow-up cadence.</p>' +
+'<table style="border-collapse:collapse;margin:14px 0;">' +
+'<tr><td style="padding:4px 10px 4px 0;color:#615D53;">Office</td><td style="padding:4px 0;font-weight:600;">' + officeLabel + '</td></tr>' +
+'<tr><td style="padding:4px 10px 4px 0;color:#615D53;">Department</td><td style="padding:4px 0;font-weight:600;">' + departmentLabel + '</td></tr>' +
+'</table>' +
+'<p style="margin:14px 0 0;">Please review this account and follow up directly.</p>' +
+'</div>';
+const result = await sendEmail(env, {
+to: assigneeEmail,
+subject: 'Escalated - Needs Your Attention',
+html: html,
+kind: 'escalation_notify',
+tenantId: user.tenant_id,
+userId: user.id,
+from: OPERATIONS_FROM_EMAIL
+});
+return json({ ok: true, sent: !!result.ok });
+}
+
 async function handleLogout(request, env) {
   const cookies = parseCookies(request);
   const token = cookies[SESSION_COOKIE];
@@ -2876,6 +2917,9 @@ export default {
     }
     if (url.pathname === '/api/logout' && request.method === 'POST') {
       return handleLogout(request, env);
+    }
+    if (url.pathname === '/api/escalate-notify' && request.method === 'POST') {
+      return handleEscalateNotify(request, env);
     }
     if (url.pathname === '/api/me' && request.method === 'GET') {
       return handleMe(request, env);
