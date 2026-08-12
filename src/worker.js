@@ -2792,6 +2792,25 @@ const MY_ACCOUNT_LINK_SCRIPT = '<script>' +
 '})();' +
 '<' + '/script>';
 
+function dashboardRoleScript(role) {
+var safeRole = (role === 'admin') ? 'admin' : (role === 'manager' ? 'manager' : 'employee');
+return '<script>(function(){' +
+'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+'ready(function(){' +
+'var isAdmin=(' + JSON.stringify(safeRole) + '==="admin");' +
+'if(!isAdmin){' +
+'var box=document.getElementById("officeFilterBox");' +
+'if(box) box.style.display="none";' +
+'if(typeof state!=="undefined"){' +
+'state.officeFilter="dallas";' +
+'if(typeof saveState==="function") saveState();' +
+'if(typeof renderAll==="function") renderAll();' +
+'}' +
+'}' +
+'});' +
+'})();<' + '/script>';
+}
+
 async function handleDashboard(request, env) {
   const user = await getSessionUser(request, env);
   if (!user) {
@@ -2806,7 +2825,7 @@ async function handleDashboard(request, env) {
   html = html
     .replace(/data-company-name="[^"]*"/, 'data-company-name="' + safeName + '"')
     .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"')
-    .replace('</body>', MY_ACCOUNT_LINK_SCRIPT + '</body>');
+    .replace('</body>', MY_ACCOUNT_LINK_SCRIPT + dashboardRoleScript(user.role) + '</body>');
   return injectHelpWidget(new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
 
