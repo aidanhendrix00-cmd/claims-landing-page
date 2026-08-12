@@ -568,7 +568,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="plan-label">Current plan</div> ' +
   '<div class="plan-name" id="billingPlanName">—</div> ' +
   '</div> ' +
-  '<button class="btn-dark btn-sm" id="manageSubBtn">Manage Subscription</button> ' +
+  '<button class="btn-dark btn-sm" id="manageSubBtn" onclick="window.location.href=\'/account/subscription\'">Manage Subscription</button> ' +
   '</div> ' +
   '<div class="acct-card"> ' +
   '<h3>Plan features<span class="mock-flag">sample</span></h3> ' +
@@ -1442,7 +1442,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<div class="cdap-plan-label">Current plan</div> ' +
   '<div class="cdap-plan-name">Growth</div> ' +
   '</div> ' +
-  '<button class="cdap-btn-dark cdap-btn-sm">Manage Subscription</button> ' +
+  '<button class="cdap-btn-dark cdap-btn-sm" onclick="alert(\'In your real account, this opens a full subscription page where you can upgrade your plan or cancel future billing \u2014 handled securely through Stripe.\')">Manage Subscription</button> ' +
   '</div> ' +
   '<div class="cdap-card"> ' +
   '<h3>Plan features<span class="cdap-mock-flag">sample</span></h3> ' +
@@ -1869,7 +1869,8 @@ async function getSessionUser(request, env) {
   if (!token) return null;
   const row = await env.DB.prepare(
     'SELECT u.id, u.email, u.role, u.tenant_id, u.status AS user_status, u.email_verified, ' +
-    't.slug AS tenant_slug, t.company_name, t.status AS tenant_status, t.integration_status, s.expires_at ' +
+    't.slug AS tenant_slug, t.company_name, t.status AS tenant_status, t.integration_status, ' +
+    't.selected_plan, t.recommended_plan, t.stripe_customer_id, s.expires_at ' +
     'FROM sessions s ' +
     'JOIN users u ON u.id = s.user_id ' +
     'JOIN tenants t ON t.id = u.tenant_id ' +
@@ -2180,6 +2181,344 @@ async function handleAccountPage(request, env) {
   return injectHelpWidget(new Response(ACCOUNT_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
 }
 
+const SUBSCRIPTION_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manage Subscription — clAIms</title>
+<link rel="icon" href="/favicon.ico">
+<style>
+*{box-sizing:border-box;}
+body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;color:#171717;}
+.sub-topbar{background:#171717;color:#fff;padding:16px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.sub-brand{font-weight:700;font-size:18px;letter-spacing:.02em;}
+.sub-back{color:#D8D4C8;text-decoration:none;font-size:13.5px;font-weight:600;}
+.sub-back:hover{color:#fff;}
+.sub-wrap{max-width:760px;margin:0 auto;padding:32px 24px 80px;}
+.sub-wrap h1{font-size:22px;margin:0 0 6px;}
+.sub-wrap .sub-lede{color:#615D53;font-size:13.5px;margin:0 0 24px;}
+.sub-card{background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:22px 24px;margin-bottom:18px;box-shadow:0 12px 30px -18px rgba(23,23,23,0.15);}
+.sub-card h3{margin:0 0 4px;font-size:16px;}
+.sub-card .sub-card-sub{font-size:12.5px;color:#615D53;margin-bottom:16px;}
+.plan-banner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;background:#171717;color:#fff;border-radius:14px;padding:20px 24px;margin-bottom:18px;}
+.plan-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#B7BCD4;font-weight:700;}
+.plan-name{font-size:22px;font-weight:700;margin-top:4px;}
+.plan-feature-list{margin:0;padding-left:20px;}
+.plan-feature-list li{font-size:13.5px;color:#3B3A35;margin-bottom:7px;line-height:1.5;}
+.btn-dark{background:#171717;color:#fff;border:none;font-weight:600;font-size:13px;padding:10px 18px;border-radius:8px;cursor:pointer;}
+.btn-dark:hover{opacity:.88;}
+.btn-dark:disabled{opacity:.5;cursor:default;}
+.btn-outline{background:none;color:#171717;border:1.5px solid #E5E0D2;font-weight:600;font-size:13px;padding:9px 17px;border-radius:8px;cursor:pointer;}
+.btn-outline:hover{border-color:#C29B57;color:#C29B57;}
+.btn-rust{background:#B23A2E;color:#fff;border:none;font-weight:600;font-size:13px;padding:10px 18px;border-radius:8px;cursor:pointer;}
+.btn-rust:hover{opacity:.88;}
+.sub-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;}
+.sub-banner{border-radius:12px;padding:16px 18px;font-size:13.5px;line-height:1.6;margin-bottom:18px;}
+.sub-banner.warn{background:#FCEFD9;color:#7A4E12;border:1px solid #EEDDB6;}
+.sub-banner.info{background:#EFE7F6;color:#4A2E70;border:1px solid #DFD0F0;}
+.sub-banner.err{background:#F7E2DF;color:#6E3B3B;border:1px solid #EBC7C0;}
+.sub-restricted{background:#FBFAF6;border:1px dashed #E5E0D2;border-radius:12px;padding:32px 24px;text-align:center;color:#8A8578;font-size:13.5px;line-height:1.6;}
+.sub-modal-backdrop{position:fixed;inset:0;background:rgba(23,23,23,0.55);display:none;align-items:center;justify-content:center;z-index:999;padding:20px;}
+.sub-modal-backdrop.open{display:flex;}
+.sub-modal{background:#fff;border-radius:14px;padding:26px;max-width:420px;width:100%;}
+.sub-modal h4{margin:0 0 10px;}
+.sub-modal p{font-size:13.5px;color:#3B3A35;line-height:1.6;margin:0 0 16px;}
+.sub-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:6px;}
+.sub-note{font-size:11.5px;color:#8A8578;margin-top:10px;line-height:1.5;}
+.sub-loading{color:#8A8578;font-size:13.5px;padding:40px 0;text-align:center;}
+</style></head><body>
+<div class="sub-topbar">
+<div class="sub-brand">clAIms</div>
+<a class="sub-back" href="/account">&larr; Back to Account</a>
+</div>
+<div class="sub-wrap" id="subWrap">
+<div class="sub-loading">Loading your subscription…</div>
+</div>
+
+<div class="sub-modal-backdrop" id="cancelModalBackdrop">
+<div class="sub-modal">
+<h4>Cancel subscription?</h4>
+<p id="cancelModalText">Your plan will stay active through the end of the current billing period. After that, it will not renew and your team will lose access to clAIms.</p>
+<div class="sub-modal-actions">
+<button class="btn-outline" id="cancelModalNo">Never mind</button>
+<button class="btn-rust" id="cancelModalYes">Cancel subscription</button>
+</div>
+</div>
+</div>
+
+<div class="sub-modal-backdrop" id="upgradeModalBackdrop">
+<div class="sub-modal">
+<h4>Request an upgrade</h4>
+<p id="upgradeModalText">We'll notify your clAIms account team to upgrade your plan and handle proration on your next invoice. They'll follow up by email shortly.</p>
+<div class="sub-modal-actions">
+<button class="btn-outline" id="upgradeModalNo">Never mind</button>
+<button class="btn-dark" id="upgradeModalYes">Send request</button>
+</div>
+</div>
+</div>
+
+<script>
+(function(){
+function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}
+var PLAN_FEATURES={
+  starter:{name:"Starter",next:"growth",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]},
+  growth:{name:"Growth",next:"enterprise",features:["5–8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]},
+  enterprise:{name:"Enterprise",next:null,features:["Unlimited seats","All integrations","Everything in Growth","Multi-office & multi-entity support","Dedicated account manager"]}
+};
+function fmtDate(iso){
+  if(!iso) return null;
+  try{ var d=new Date(iso); return d.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"}); }catch(e){ return null; }
+}
+ready(function(){
+  var wrap=document.getElementById("subWrap");
+  var me=null, subInfo=null;
+
+  fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(data){
+    if(!data||!data.ok){ window.location.href="/?login=1"; return; }
+    if(data.role!=="admin"){ window.location.href="/account"; return; }
+    me=data;
+    return fetch("/api/subscription",{credentials:"same-origin"}).then(function(r){return r.json();});
+  }).then(function(info){
+    if(!info) return;
+    if(!info.ok){ wrap.innerHTML="<div class=\\"sub-banner err\\">We couldn't load your subscription right now. Please refresh, or contact us if this keeps happening.</div>"; return; }
+    subInfo=info;
+    render();
+  }).catch(function(){
+    wrap.innerHTML="<div class=\\"sub-banner err\\">We couldn't load your subscription right now. Please refresh, or contact us if this keeps happening.</div>";
+  });
+
+  function render(){
+    var plan=subInfo.plan||"growth";
+    var info=PLAN_FEATURES[plan]||PLAN_FEATURES.growth;
+    var isEnterprise=(plan==="enterprise");
+    var sub=subInfo.subscription;
+    var html="";
+
+    html+="<h1>Manage Subscription</h1><p class=\\"sub-lede\\">Review your plan, update it, or cancel future billing.</p>";
+
+    if(sub&&sub.cancelAtPeriodEnd){
+      var d=fmtDate(sub.currentPeriodEnd);
+      html+="<div class=\\"sub-banner warn\\">Your subscription is set to cancel"+(d?(" on <b>"+d+"</b>"):"")+". You'll keep access until then. Changed your mind? <button class=\\"btn-outline\\" id=\\"reactivateBtn\\" style=\\"margin-left:8px;\\">Keep my subscription</button></div>";
+    }
+
+    html+="<div class=\\"plan-banner\\"><div><div class=\\"plan-label\\">Current plan</div><div class=\\"plan-name\\">"+info.name+"</div></div></div>";
+
+    html+="<div class=\\"sub-card\\"><h3>Plan features</h3><ul class=\\"plan-feature-list\\">"+info.features.map(function(f){return "<li>"+f+"</li>";}).join("")+"</ul></div>";
+
+    if(!subInfo.hasBilling){
+      html+="<div class=\\"sub-banner info\\">No billing account is on file for this company yet, so there's nothing to cancel. Once you complete checkout, you'll be able to manage your subscription here.</div>";
+    } else if(isEnterprise){
+      html+="<div class=\\"sub-restricted\\">Enterprise plans are managed by your dedicated account team. <a href=\\"mailto:hndrx@claims-collection.net\\">Contact us</a> to make changes to your plan.</div>";
+    } else {
+      html+="<div class=\\"sub-actions\\">";
+      if(info.next){
+        html+="<button class=\\"btn-dark\\" id=\\"upgradeBtn\\">Upgrade to "+(PLAN_FEATURES[info.next]?PLAN_FEATURES[info.next].name:"the next plan")+"</button>";
+      }
+      if(!(sub&&sub.cancelAtPeriodEnd)){
+        html+="<button class=\\"btn-outline\\" id=\\"cancelBtn\\">Cancel subscription</button>";
+      }
+      html+="</div>";
+      html+="<div class=\\"sub-note\\">Cancelling stops your next automatic payment. Your plan stays active through the end of the current billing period.</div>";
+    }
+
+    wrap.innerHTML=html;
+    wireActions();
+  }
+
+  function wireActions(){
+    var cancelBtn=document.getElementById("cancelBtn");
+    var upgradeBtn=document.getElementById("upgradeBtn");
+    var reactivateBtn=document.getElementById("reactivateBtn");
+    if(cancelBtn){ cancelBtn.addEventListener("click",function(){ openModal("cancelModalBackdrop"); }); }
+    if(upgradeBtn){ upgradeBtn.addEventListener("click",function(){ openModal("upgradeModalBackdrop"); }); }
+    if(reactivateBtn){ reactivateBtn.addEventListener("click",function(){ doReactivate(reactivateBtn); }); }
+  }
+
+  function openModal(id){ document.getElementById(id).classList.add("open"); }
+  function closeModal(id){ document.getElementById(id).classList.remove("open"); }
+
+  document.getElementById("cancelModalNo").addEventListener("click",function(){ closeModal("cancelModalBackdrop"); });
+  document.getElementById("upgradeModalNo").addEventListener("click",function(){ closeModal("upgradeModalBackdrop"); });
+
+  document.getElementById("cancelModalYes").addEventListener("click",function(){
+    var btn=document.getElementById("cancelModalYes");
+    btn.disabled=true; btn.textContent="Cancelling…";
+    fetch("/api/subscription/cancel",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(res){
+      btn.disabled=false; btn.textContent="Cancel subscription";
+      closeModal("cancelModalBackdrop");
+      if(res&&res.ok){
+        subInfo.subscription=subInfo.subscription||{};
+        subInfo.subscription.cancelAtPeriodEnd=true;
+        subInfo.subscription.currentPeriodEnd=res.cancelAt;
+        render();
+      } else {
+        alert((res&&res.error)||"We couldn't cancel your subscription. Please try again or contact us.");
+      }
+    }).catch(function(){
+      btn.disabled=false; btn.textContent="Cancel subscription";
+      alert("We couldn't cancel your subscription. Please try again or contact us.");
+    });
+  });
+
+  document.getElementById("upgradeModalYes").addEventListener("click",function(){
+    var btn=document.getElementById("upgradeModalYes");
+    btn.disabled=true; btn.textContent="Sending…";
+    fetch("/api/subscription/upgrade-request",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(res){
+      btn.disabled=false; btn.textContent="Send request";
+      closeModal("upgradeModalBackdrop");
+      if(res&&res.ok){
+        alert("Request sent — our team will follow up by email to complete your upgrade.");
+      } else {
+        alert((res&&res.error)||"We couldn't send your upgrade request. Please email us directly.");
+      }
+    }).catch(function(){
+      btn.disabled=false; btn.textContent="Send request";
+      alert("We couldn't send your upgrade request. Please email us directly.");
+    });
+  });
+
+  function doReactivate(btn){
+    btn.disabled=true; btn.textContent="Restoring…";
+    fetch("/api/subscription/reactivate",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(res){
+      if(res&&res.ok){
+        subInfo.subscription.cancelAtPeriodEnd=false;
+        render();
+      } else {
+        btn.disabled=false; btn.textContent="Keep my subscription";
+        alert((res&&res.error)||"We couldn't undo the cancellation. Please contact us.");
+      }
+    }).catch(function(){
+      btn.disabled=false; btn.textContent="Keep my subscription";
+      alert("We couldn't undo the cancellation. Please contact us.");
+    });
+  }
+});
+})();
+<\/script>
+</body></html>`;
+
+async function stripeRequest(env, method, path, params) {
+  if (!env.STRIPE_SECRET_KEY) return { ok: false, error: 'Stripe is not configured for this environment.' };
+  const opts = { method: method, headers: { 'Authorization': 'Bearer ' + env.STRIPE_SECRET_KEY } };
+  let url = 'https://api.stripe.com/v1' + path;
+  if (params) {
+    const form = new URLSearchParams();
+    Object.keys(params).forEach(function (k) { if (params[k] !== undefined && params[k] !== null) form.append(k, params[k]); });
+    if (method === 'GET') {
+      url += '?' + form.toString();
+    } else {
+      opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      opts.body = form.toString();
+    }
+  }
+  const res = await fetch(url, opts);
+  const data = await res.json();
+  if (!res.ok) return { ok: false, error: (data && data.error && data.error.message) || 'Stripe request failed.', status: res.status };
+  return { ok: true, data: data };
+}
+
+async function getActiveStripeSubscription(env, customerId) {
+  const active = await stripeRequest(env, 'GET', '/subscriptions', { customer: customerId, status: 'active', limit: 1 });
+  if (!active.ok) return active;
+  if (active.data.data && active.data.data[0]) return { ok: true, data: active.data.data[0] };
+  const trialing = await stripeRequest(env, 'GET', '/subscriptions', { customer: customerId, status: 'trialing', limit: 1 });
+  if (trialing.ok && trialing.data.data && trialing.data.data[0]) return { ok: true, data: trialing.data.data[0] };
+  return { ok: true, data: null };
+}
+
+async function handleSubscriptionInfo(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ ok: false }, 401);
+  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+  const plan = user.selected_plan || user.recommended_plan || 'growth';
+  if (!user.stripe_customer_id) {
+    return json({ ok: true, plan: plan, hasBilling: false, subscription: null });
+  }
+  const subResult = await getActiveStripeSubscription(env, user.stripe_customer_id);
+  if (!subResult.ok) return json({ ok: true, plan: plan, hasBilling: true, subscription: null, stripeError: subResult.error });
+  const sub = subResult.data;
+  return json({
+    ok: true,
+    plan: plan,
+    hasBilling: true,
+    subscription: sub ? {
+      status: sub.status,
+      cancelAtPeriodEnd: !!sub.cancel_at_period_end,
+      currentPeriodEnd: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null
+    } : null
+  });
+}
+
+async function handleSubscriptionCancel(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ ok: false }, 401);
+  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+  const plan = user.selected_plan || user.recommended_plan || 'growth';
+  if (plan === 'enterprise') return json({ ok: false, error: 'Enterprise plans are managed by your account team. Please contact us to make changes.' }, 400);
+  if (!user.stripe_customer_id) return json({ ok: false, error: 'No billing account on file for this company yet.' }, 400);
+  const subResult = await getActiveStripeSubscription(env, user.stripe_customer_id);
+  if (!subResult.ok) return json({ ok: false, error: subResult.error }, 502);
+  if (!subResult.data) return json({ ok: false, error: 'No active subscription found to cancel.' }, 404);
+  const upd = await stripeRequest(env, 'POST', '/subscriptions/' + subResult.data.id, { cancel_at_period_end: 'true' });
+  if (!upd.ok) return json({ ok: false, error: upd.error }, 502);
+  const cancelAt = upd.data.current_period_end ? new Date(upd.data.current_period_end * 1000).toISOString() : null;
+  try {
+    await sendEmail(env, {
+      to: NOTIFY_EMAIL,
+      subject: 'Subscription cancellation requested: ' + (user.company_name || ''),
+      html: '<p>' + escapeHtml(user.company_name || '') + ' (' + escapeHtml(user.email) + ') scheduled their subscription to cancel at the end of the current billing period' + (cancelAt ? (' (' + escapeHtml(cancelAt) + ')') : '') + '.</p>',
+      kind: 'subscription_cancel',
+      tenantId: user.tenant_id,
+      userId: user.id
+    });
+  } catch (e) {}
+  return json({ ok: true, cancelAt: cancelAt });
+}
+
+async function handleSubscriptionReactivate(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ ok: false }, 401);
+  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+  if (!user.stripe_customer_id) return json({ ok: false, error: 'No billing account on file for this company yet.' }, 400);
+  const subResult = await getActiveStripeSubscription(env, user.stripe_customer_id);
+  if (!subResult.ok) return json({ ok: false, error: subResult.error }, 502);
+  if (!subResult.data) return json({ ok: false, error: 'No active subscription found.' }, 404);
+  const upd = await stripeRequest(env, 'POST', '/subscriptions/' + subResult.data.id, { cancel_at_period_end: 'false' });
+  if (!upd.ok) return json({ ok: false, error: upd.error }, 502);
+  return json({ ok: true });
+}
+
+async function handleSubscriptionUpgradeRequest(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ ok: false }, 401);
+  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+  const plan = user.selected_plan || user.recommended_plan || 'growth';
+  if (plan === 'enterprise') return json({ ok: false, error: 'You are already on the Enterprise plan.' }, 400);
+  try {
+    await sendEmail(env, {
+      to: NOTIFY_EMAIL,
+      subject: 'Upgrade requested: ' + (user.company_name || ''),
+      html: '<p>' + escapeHtml(user.company_name || '') + ' (' + escapeHtml(user.email) + ') requested an upgrade from their current plan (' + escapeHtml(plan) + ') via the account portal.</p>',
+      kind: 'subscription_upgrade_request',
+      tenantId: user.tenant_id,
+      userId: user.id,
+      replyTo: user.email
+    });
+  } catch (e) {
+    return json({ ok: false, error: 'Could not send upgrade request. Please email us directly.' }, 502);
+  }
+  return json({ ok: true });
+}
+
+async function handleSubscriptionPage(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) {
+    return new Response(null, {
+      status: 302,
+      headers: { 'Location': new URL('/', request.url).toString() + '?login=1', 'Cache-Control': NO_STORE }
+    });
+  }
+  return injectHelpWidget(new Response(SUBSCRIPTION_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
+}
+
 async function handleVerifyEmail(request, env) {
   const url = new URL(request.url);
   const token = url.searchParams.get('token') || '';
@@ -2408,7 +2747,10 @@ async function handleMe(request, env) {
     tenant: user.tenant_slug,
     companyName: user.company_name,
     tenantStatus: user.tenant_status,
-    integrationStatus: user.integration_status
+    integrationStatus: user.integration_status,
+    selectedPlan: user.selected_plan,
+    recommendedPlan: user.recommended_plan,
+    hasBilling: !!user.stripe_customer_id
   });
 }
 
@@ -2485,6 +2827,21 @@ export default {
     }
     if (url.pathname === '/account') {
       return handleAccountPage(request, env);
+    }
+    if (url.pathname === '/account/subscription') {
+      return handleSubscriptionPage(request, env);
+    }
+    if (url.pathname === '/api/subscription' && request.method === 'GET') {
+      return handleSubscriptionInfo(request, env);
+    }
+    if (url.pathname === '/api/subscription/cancel' && request.method === 'POST') {
+      return handleSubscriptionCancel(request, env);
+    }
+    if (url.pathname === '/api/subscription/reactivate' && request.method === 'POST') {
+      return handleSubscriptionReactivate(request, env);
+    }
+    if (url.pathname === '/api/subscription/upgrade-request' && request.method === 'POST') {
+      return handleSubscriptionUpgradeRequest(request, env);
     }
     if (url.pathname === '/dashboard') {
       return handleDashboard(request, env);
