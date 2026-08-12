@@ -3055,7 +3055,29 @@ Do not invent facts beyond what's given.`;
     showToast(`${integ.name} removed`);
   }
 
-  function renderCustomIntegrations(){
+  function fmtTimeAgo(ts){
+const diffMs = Date.now() - ts;
+const mins = Math.max(0, Math.round(diffMs / 60000));
+if(mins < 1) return 'just now';
+if(mins === 1) return '1 minute ago';
+if(mins < 60) return mins + ' minutes ago';
+const hrs = Math.round(mins / 60);
+if(hrs === 1) return '1 hour ago';
+if(hrs < 24) return hrs + ' hours ago';
+const days = Math.round(hrs / 24);
+return days === 1 ? '1 day ago' : days + ' days ago';
+}
+function syncIntegrationNow(id){
+const integ = state.customIntegrations.find(i => i.id === id);
+if(!integ) return;
+showToast(`Syncing ${integ.name}\u2026`);
+setTimeout(() => {
+integ.lastSyncedAt = Date.now();
+saveState(); renderCustomIntegrations();
+showToast(`${integ.name} synced successfully (simulated)`);
+}, 600);
+}
+function renderCustomIntegrations(){
     const wrap = document.getElementById('custom-integrations');
     if(!wrap) return;
     if(state.customIntegrations.length === 0){ wrap.innerHTML = ''; return; }
@@ -3064,6 +3086,7 @@ Do not invent facts beyond what's given.`;
         <div>
           <div class="name"><span class="${integ.status === 'connected' ? 'dot-live' : 'dot-pending'}"></span> ${integ.name} <span class="badge cat" style="margin-left:4px;">${INTEGRATION_CATEGORY_LABELS[integ.category]}</span> ${integ.status === 'pending' ? '<span class="badge warn">NOT VERIFIED</span>' : ''}</div>
           <div class="sub">${integ.baseUrl} &middot; ${AUTH_TYPE_LABELS[integ.authType]} &middot; ${integ.environment} &middot; sync: ${integ.syncFreq}</div>
+${integ.status === 'connected' && integ.lastSyncedAt ? `<div class="sub" style="margin-top:2px;">Last synced ${fmtTimeAgo(integ.lastSyncedAt)}</div>` : ''}
           <div class="field-map">
             Key: <span class="masked-key">${integ.keyMasked}</span>${integ.secretMasked ? ` &middot; Secret: <span class="masked-key">${integ.secretMasked}</span>` : ''}
             ${integ.notes ? ` &middot; Notes: ${integ.notes}` : ''}
@@ -3071,7 +3094,8 @@ Do not invent facts beyond what's given.`;
         </div>
         <div class="actions-col">
           ${integ.status === 'pending' ? `<button class="btn-primary" onclick="testIntegrationConnection(${integ.id})">Test Connection</button>` : `<button class="btn-small" onclick="testIntegrationConnection(${integ.id})">Re-test</button>`}
-          <button class="btn-small" onclick="removeIntegration(${integ.id})">Remove</button>
+          ${integ.status === 'connected' ? `<button class="btn-small" onclick="syncIntegrationNow(${integ.id})">Sync Now</button>` : ''}
+<button class="btn-small" onclick="removeIntegration(${integ.id})">Remove</button>
         </div>
       </div>
     `).join('');
