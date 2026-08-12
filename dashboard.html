@@ -1031,6 +1031,7 @@
   const PAYMENT_TYPE_LABELS = { payment_link: "Payment Link", check: "Check", wire: "Wire/Direct Deposit" };
   const OFFICE_LOCATIONS = ['arizona','dallas','houston','hill_country'];
   const OFFICE_LABELS = { arizona: "Arizona", dallas: "Dallas", houston: "Houston", hill_country: "Hill Country" };
+const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@example.com" }, dallas: { name: "Dana Whitfield", email: "dana.whitfield@example.com" }, houston: { name: "James Okafor", email: "james.okafor@example.com" }, hill_country: { name: "Sarah Liu", email: "sarah.liu@example.com" } };
   const DEPARTMENT_CATEGORY_MAP = {
     mitigation: ['water_mitigation','fire_mitigation','mold_remediation','asbestos'],
     contents: ['content_cleaning','textiles','pack_out','pack_back','storage'],
@@ -1634,12 +1635,29 @@ function todoRowHTML(item, num, priority){
   }
 
   function escalateInvoice(id){
-    const inv = findInv(id);
-    if(!inv) return;
-    inv.escalated = true;
-    addActivity(inv, 'Invoice escalated for manager attention; removed from autonomous cadence.', 'manual');
-    saveState(); renderAll();
-    showToast(`${inv.name} moved to Escalations`);
+const inv = findInv(id);
+if(!inv) return;
+inv.escalated = true;
+var mgr = OFFICE_MANAGERS[inv.officeLocation];
+inv.notifiedName = mgr ? mgr.name : null;
+inv.notifiedAt = new Date().toISOString();
+addActivity(inv, 'Invoice escalated for manager attention; removed from autonomous cadence.', 'manual');
+saveState(); renderAll();
+showToast(`${inv.name} moved to Escalations`);
+if(mgr){
+fetch('/api/escalate-notify', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({
+invoiceName: inv.name,
+amount: inv.amount,
+officeLabel: OFFICE_LABELS[inv.officeLocation],
+departmentLabel: DEPARTMENT_LABELS[inv.department],
+assigneeName: mgr.name,
+assigneeEmail: mgr.email
+})
+}).catch(function(){});
+}
   }
   function unescalateInvoice(id){
     const inv = findInv(id);
@@ -2069,11 +2087,13 @@ function todoRowHTML(item, num, priority){
     if(rows.length === 0){ wrap.innerHTML = `<div class="empty">Nothing sent yet${state.deptFilter!=='all' ? ' for this department' : ''}. Cadence follow-ups will appear here automatically as invoices reach each checkpoint.</div>`; return; }
     wrap.innerHTML = `
       <table class="log">
-        <thead><tr><th>Customer</th><th>Amount</th><th>Sent</th><th>Type</th><th>Sent To</th><th>Subject</th><th>Source</th><th>Status</th></tr></thead>
+        <thead><tr><th>Customer</th><th>Office</th><th>Department</th><th>Amount</th><th>Sent</th><th>Type</th><th>Sent To</th><th>Subject</th><th>Source</th><th>Status</th></tr></thead>
         <tbody>
           ${rows.map(s => `
             <tr>
               <td>${s.invoiceName}</td>
+<td>${OFFICE_LABELS[(findInv(s.invoiceId)||{}).officeLocation] || '\u2014'}</td>
+<td>${DEPARTMENT_LABELS[(findInv(s.invoiceId)||{}).department] || '\u2014'}</td>
               <td class="amt">$${s.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               <td>${s.sentAt}</td>
               <td>${s.draftType}</td>
@@ -2323,6 +2343,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
             <span class="badge dept">${DEPARTMENT_LABELS[inv.department].toUpperCase()}</span>
             <span class="badge cat">${CATEGORY_LABELS[inv.category].toUpperCase()}</span>
             <span class="badge escalated">ESCALATED</span>
+${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F5346;border-color:#BFE0D3;">NOTIFIED: ${inv.notifiedName.toUpperCase()}</span>` : ''}
           </div>
         </div>
         <div class="amount">$${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}
