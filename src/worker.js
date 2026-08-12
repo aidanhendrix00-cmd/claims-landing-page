@@ -11,6 +11,7 @@ const SUPPORT_EMAIL = 'support@claims-collection.net';
 const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
 const OPERATIONS_FROM_EMAIL = 'clAIms Operations <operations@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
+const OFFICE_LABELS = { arizona: 'Arizona', dallas: 'Dallas', houston: 'Houston', hillcountry: 'Hill Country' };
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com','yahoo.com','outlook.com','hotmail.com','icloud.com','aol.com',
@@ -2541,7 +2542,7 @@ async function handleAccountingSync(request, env) {
   let body;
   try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
   const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
-  const VALID_OFFICES = ['arizona','dallas','houston','hill_country'];
+  const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
   let processed = 0;
   for (const raw of items) {
     if (!raw || !raw.externalId || !raw.customerName) continue;
@@ -2664,7 +2665,7 @@ async function handleTeamInvite(request, env) {
   const fullName = (body.fullName || '').toString().slice(0, 120);
   const role = (body.role || '').toString();
   const office = (body.office || '').toString();
-  const VALID_OFFICES = ['arizona','dallas','houston','hill_country'];
+  const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
   if (!email || !email.includes('@')) return json({ ok: false, error: 'A valid email is required.' }, 400);
   if (role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'manager' or 'employee'." }, 400);
   if (VALID_OFFICES.indexOf(office) === -1) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
@@ -2948,50 +2949,92 @@ async function runWeeklyDigest(env) {
   try {
     const tenants = await env.DB.prepare('SELECT id, company_name FROM tenants').all();
     const tenantList = (tenants && tenants.results) || [];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
     for (const tenant of tenantList) {
       try {
-        const users = await env.DB.prepare("SELECT id, email, role FROM users WHERE tenant_id = ? AND status = 'active' AND email_verified = 1").bind(tenant.id).all();
-        const userList = (users && users.results) || [];
+        const usersRes = await env.DB.prepare("SELECT id, email, role, office FROM users WHERE tenant_id = ? AND status = 'active' AND email_verified = 1").bind(tenant.id).all();
+        const userList = (usersRes && usersRes.results) || [];
         if (!userList.length) continue;
-        let weeklyEmailCount = null;
-        try {
-          const r = await env.DB.prepare("SELECT COUNT(*) as c FROM email_log WHERE tenant_id = ? AND created_at >= datetime('now','-7 days')").bind(tenant.id).first();
-          weeklyEmailCount = r ? r.c : null;
-        } catch (e) { weeklyEmailCount = null; }
-        for (const u of userList) {
-          const html = buildWeeklyDigestHtml(tenant, u, weeklyEmailCount);
-          await sendEmail(env, {
-            to: u.email,
-            subject: 'Your Weekly clAIms Summary',
-            html,
-            kind: 'weekly_digest',
-            tenantId: tenant.id,
-            userId: u.id,
-            from: OPERATIONS_FROM_EMAIL
-          });
+
+        const accountsRes = await env.DB.prepare('SELECT * FROM accounts WHERE tenant_id = ?').bind(tenant.id).all();
+        const accounts = (accountsRes && accountsRes.results) || [];
+
+        for (const user of userList) {
+          try {
+            const officeFilter = (user.role === 'admin') ? null : (user.office || null);
+            const scoped = officeFilter ? accounts.filter(a => a.office === officeFilter) : accounts;
+
+            const collectedAccounts = scoped.filter(a => a.paid_at && a.paid_at >= weekAgo);
+            const amountCollected = collectedAccounts.reduce((sum, a) => sum + (a.paid_amount || a.amount || 0), 0);
+
+            const followUps = scoped.filter(a => a.updated_at && a.updated_at >= weekAgo && (a.follow_up_count || 0) > 0).length;
+            const noilSent = scoped.filter(a => a.noil_sent_at && a.noil_sent_at >= weekAgo).length;
+            const demandLettersSent = scoped.filter(a => a.demand_letter_sent_at && a.demand_letter_sent_at >= weekAgo).length;
+            const newEscalations = scoped.filter(a => a.escalated && a.updated_at && a.updated_at >= weekAgo).length;
+            const needsAttention = scoped
+              .filter(a => a.escalated && !a.paid_at)
+              .sort((x, y) => (y.amount || 0) - (x.amount || 0))
+              .slice(0, 10);
+
+            const html = buildWeeklyDigestHtml({
+              companyName: tenant.company_name,
+              officeLabel: officeFilter ? (OFFICE_LABELS[officeFilter] || officeFilter) : 'All Offices',
+              amountCollected,
+              collectedCount: collectedAccounts.length,
+              followUps,
+              noilSent,
+              demandLettersSent,
+              escalations: newEscalations,
+              needsAttention
+            });
+
+            await sendEmail(env, {
+              to: user.email,
+              subject: 'Weekly Digest - clAIms',
+              html,
+              kind: 'weekly_digest',
+              tenantId: tenant.id,
+              userId: user.id,
+              from: OPERATIONS_FROM_EMAIL
+            });
+          } catch (userErr) {}
         }
-      } catch (e) {}
+      } catch (tenantErr) {}
     }
   } catch (e) {}
 }
 
-function buildWeeklyDigestHtml(tenant, user, weeklyEmailCount) {
-  const name = tenant.company_name || 'your team';
-  const isAdmin = user.role === 'admin';
-  const activityLine = (weeklyEmailCount !== null)
-    ? '<p>' + weeklyEmailCount + ' communications went out from your account this week.</p>'
-    : '';
-  const scopeLine = isAdmin
-    ? '<p>As an admin, you can review outstanding claims, escalations, and comms activity across every office in your dashboard.</p>'
-    : '<p>Log in to review your outstanding claims, escalations, and recent comms activity.</p>';
-  return '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
-    '<h2 style="margin:0 0 12px;">Your weekly summary \u2014 ' + name + '</h2>' +
-    '<p>Here is your weekly digest from clAIms.</p>' +
-    activityLine +
-    scopeLine +
-    '<p style="margin-top:20px;"><a href="' + SITE_URL + '/dashboard" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Open Dashboard</a></p>' +
-    '<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">You are receiving this weekly summary because digest emails are enabled for your account.</p>' +
-    '</div>';
+function buildWeeklyDigestHtml(d) {
+  const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const rows = (d.needsAttention || []).map(a => {
+    return '<tr><td style="padding:6px 10px;border-bottom:1px solid #E5E7EB;">' + (a.customer_name || 'Unknown') + '</td>' +
+      '<td style="padding:6px 10px;border-bottom:1px solid #E5E7EB;">' + money(a.amount) + '</td>' +
+      '<td style="padding:6px 10px;border-bottom:1px solid #E5E7EB;">' + (a.office || '') + '</td></tr>';
+  }).join('');
+  const attentionTable = (d.needsAttention && d.needsAttention.length)
+    ? '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:13px;"><thead><tr>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #16233A;">Account</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #16233A;">Amount</th>' +
+      '<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #16233A;">Office</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>'
+    : '<p style="color:#5B6B73;font-size:13px;">No accounts currently need attention.</p>';
+
+  return '<div style="font-family:\'IBM Plex Sans\',Arial,sans-serif;color:#16233A;max-width:640px;margin:0 auto;">' +
+    '<div style="background:#171717;color:#EDEFF1;padding:18px 24px;"><span style="font-family:\'Space Grotesk\',sans-serif;font-weight:700;font-size:18px;">clAIms</span> &middot; Weekly Digest</div>' +
+    '<div style="padding:24px;">' +
+    '<h2 style="margin:0 0 4px;font-size:18px;">' + (d.companyName || 'Your Company') + '</h2>' +
+    '<p style="margin:0 0 20px;color:#5B6B73;font-size:13px;">' + (d.officeLabel || 'All Offices') + ' &middot; Last 7 days</p>' +
+    '<table style="width:100%;border-collapse:collapse;margin-bottom:20px;">' +
+    '<tr><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;">Amount Collected</td><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;text-align:right;font-weight:600;">' + money(d.amountCollected) + ' (' + (d.collectedCount || 0) + ')</td></tr>' +
+    '<tr><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;">Follow-Ups Made</td><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;text-align:right;font-weight:600;">' + (d.followUps || 0) + '</td></tr>' +
+    '<tr><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;">NOIL Sent</td><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;text-align:right;font-weight:600;">' + (d.noilSent || 0) + '</td></tr>' +
+    '<tr><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;">Demand Letters Sent</td><td style="padding:8px 0;border-bottom:1px solid #E5E7EB;text-align:right;font-weight:600;">' + (d.demandLettersSent || 0) + '</td></tr>' +
+    '<tr><td style="padding:8px 0;">Escalations</td><td style="padding:8px 0;text-align:right;font-weight:600;">' + (d.escalations || 0) + '</td></tr>' +
+    '</table>' +
+    '<h3 style="font-size:14px;margin:0 0 4px;">Accounts Needing Attention</h3>' +
+    attentionTable +
+    '<p style="margin-top:28px;font-size:12px;color:#9AA7AC;">This is an automated weekly summary from clAIms. Visit your dashboard at ' + SITE_URL + '/dashboard for full details.</p>' +
+    '</div></div>';
 }
 
 async function handleLogin(request, env) {
@@ -3315,7 +3358,12 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runWeeklyDigest(env));
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour12: false, weekday: 'short', hour: '2-digit' }).formatToParts(new Date());
+    const weekday = (parts.find(p => p.type === 'weekday') || {}).value;
+    const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10);
+    if (weekday === 'Wed' && hour === 18) {
+      ctx.waitUntil(runWeeklyDigest(env));
+    }
   }
 };
 
