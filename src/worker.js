@@ -676,7 +676,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '</table> ' +
   '</div> ' +
   ' ' +
-  '<div class="acct-card"> ' +
+  '<div class="acct-card" id="integrationsCardOuter"> ' +
   '<h3>Integrations<span class="mock-flag">sample</span></h3> ' +
   '<div class="acct-card-sub" id="integrationsSub">Software connected to your dashboard.</div> ' +
   '<div id="integrationsRestricted" class="restricted-box" style="display:none;">Only admins can add or change integrations. Ask your company admin to make changes here.</div> ' +
@@ -928,8 +928,9 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   ' ' +
   '  function renderSettingsTab(){ ' +
   '    var r=role(); ' +
-  '    document.getElementById("permissionsCard").style.display=(r==="admin")?"block":"none"; ' +
-  '    if(r==="admin"){ ' +
+  '    document.getElementById("integrationsCardOuter").style.display=(r==="admin")?"block":"none"; ' +
+  '    document.getElementById("permissionsCard").style.display="block"; ' +
+  '    if(true){ ' +
   '      var body=document.getElementById("permMatrixRows"); ' +
   '      body.innerHTML=""; ' +
   '      PERM_ROWS.forEach(function(row){ ' +
@@ -980,7 +981,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   ' ' +
   '    var assigneeSel=document.getElementById("escalateAssignee"); ' +
   '    if(!assigneeSel.dataset.built){ ' +
-  '      assigneeSel.innerHTML=MOCK_TEAM.filter(function(u){return u.role==="admin"||u.role==="manager";}).map(function(u){return "<option value=\\""+u.id+"\\">"+u.name+"</option>";}).join(""); ' +
+  '      assigneeSel.innerHTML=MOCK_TEAM.filter(function(u){return u.role==="admin"||u.role==="manager";}).sort(function(a,b){return a.name.localeCompare(b.name);}).map(function(u){return "<option value=\\""+u.id+"\\">"+u.name+"</option>";}).join(""); ' +
   '      assigneeSel.dataset.built="1"; ' +
   '    } ' +
   ' ' +
