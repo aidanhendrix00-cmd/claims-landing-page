@@ -7,7 +7,7 @@ const NO_STORE = 'private, no-store, no-cache, must-revalidate';
 const VERIFICATION_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 const RESET_TTL_SECONDS = 60 * 60; // 1 hour
 const NOTIFY_EMAIL = 'hndrx@claims-collection.net';
-const SUPPORT_EMAIL = 'help@claims-collection.net';
+const SUPPORT_EMAIL = 'support@claims-collection.net';
 const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
 
@@ -212,7 +212,6 @@ const DEMO_FIX_SCRIPT = '<script>' +
 
 const PROCESS_EXPLAINER_HTML = '<div class="clms-process-explainer">' +
   '<div class="section-head" style="margin-bottom:36px;">' +
-  '<div class="eyebrow">Get Started</div>' +
   '<h2 style="font-size:26px;">From sign-up to a working dashboard</h2>' +
   '<p>Here\'s exactly what happens after you click Get Started.</p>' +
   '</div>' +
@@ -279,7 +278,7 @@ const CONTACT_FORM_SCRIPT = '<script>' +
   '\'<textarea id="c-message" placeholder="Anything else we should know..."></textarea>\'+' +
   '\'</div>\'+' +
   '\'<button class="btn-primary contact-submit" onclick="submitContact()">Send inquiry →</button>\'+' +
-  '\'<div class="contact-note">This opens your email client with these details filled in, addressed to <b id="contactEmailDisplay">info@claims-collection.net</b>.</div>\';' +
+  '\'<div class="contact-note">This opens your email client with these details filled in, addressed to <b id="contactEmailDisplay">salesnmarketing@claims-collection.net</b>.</div>\';' +
   'var topicSelect=document.getElementById("c-help-topic");' +
   'var otherWrap=document.getElementById("c-help-other-wrap");' +
   'function syncOther(){otherWrap.style.display=(topicSelect.value==="other")?"block":"none";}' +
@@ -303,7 +302,7 @@ const CONTACT_FORM_SCRIPT = '<script>' +
   'bodyLines.push("");' +
   'bodyLines.push("Anything else: "+(message||"(none)"));' +
   'var body=bodyLines.join("\\n");' +
-  'var contactEmail="info@claims-collection.net";' +
+  'var contactEmail="salesnmarketing@claims-collection.net";' +
   'try{if(typeof CONTACT_EMAIL!=="undefined"&&CONTACT_EMAIL){contactEmail=CONTACT_EMAIL;}}catch(e){}' +
   'var mailto="mailto:"+contactEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body);' +
   'window.location.href=mailto;' +
@@ -651,7 +650,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<h3>Messaging identity</h3> ' +
   '<div class="acct-card-sub">What customers see when a message arrives.</div> ' +
   '<div class="acct-field"><label>Sender name</label><input type="text" id="senderName" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
-  '<div class="freq-note">Every follow-up, NOIL, and demand letter is sent and signed as your company. Customers never see the clAIms platform name in a message.</div> ' +
+  '<div class="freq-note">Every follow-up, NOIL, and demand letter is sent and signed as your company. Customers never see the clAIms platform name in a message as the signature in the footnote.</div> ' +
   '</div> ' +
   ' ' +
   '<div id="freqSavedNote" style="display:none;font-size:12.5px;color:#1E5245;margin-bottom:14px;">&#10003; Saved</div> ' +
@@ -1164,6 +1163,8 @@ const DEMO_POPUP_SCRIPT = '<script>' +
   'ready(function(){' +
   'setTimeout(function(){' +
   'if(location.hash==="#demo"){return;}' +
+'if(/[?&]login=1\\b/.test(location.search)){return;}' +
+'if(location.pathname!=="/"&&location.pathname!=="/index.html"){return;}' +
   'var wrap=document.createElement("div");' +
   'wrap.id="clms-demo-popup";' +
   'wrap.innerHTML=' +
@@ -1777,7 +1778,8 @@ function redirectTo(target) {
   return new Response(null, { status: 302, headers: { 'Location': location, 'Cache-Control': NO_STORE } });
 }
 
-async function injectHelpWidget(response) {
+async function injectHelpWidget(response, opts) {
+  opts = opts || {};
   const contentType = response.headers.get('Content-Type') || '';
   if (contentType.indexOf('text/html') === -1) return response;
   return new HTMLRewriter()
@@ -1791,7 +1793,7 @@ async function injectHelpWidget(response) {
         el.append(PRICING_LINKS_SCRIPT, { html: true });
         el.append(COMPARE_COPY_SCRIPT, { html: true });
         el.append(ROI_CALC_SCRIPT, { html: true });
-        el.append(DEMO_POPUP_SCRIPT, { html: true });
+        if (!opts.skipDemoPopup) { el.append(DEMO_POPUP_SCRIPT, { html: true }); }
       }
     })
     .on('#tiersRow', {
@@ -2178,7 +2180,7 @@ async function handleAccountPage(request, env) {
       headers: { 'Location': new URL('/', request.url).toString() + '?login=1', 'Cache-Control': NO_STORE }
     });
   }
-  return injectHelpWidget(new Response(ACCOUNT_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
+  return injectHelpWidget(new Response(ACCOUNT_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
 
 const SUBSCRIPTION_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="UTF-8">
@@ -2516,7 +2518,7 @@ async function handleSubscriptionPage(request, env) {
       headers: { 'Location': new URL('/', request.url).toString() + '?login=1', 'Cache-Control': NO_STORE }
     });
   }
-  return injectHelpWidget(new Response(SUBSCRIPTION_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
+  return injectHelpWidget(new Response(SUBSCRIPTION_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
 
 async function handleVerifyEmail(request, env) {
@@ -2732,7 +2734,7 @@ async function handleDashboard(request, env) {
     .replace(/data-company-name="[^"]*"/, 'data-company-name="' + safeName + '"')
     .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"')
     .replace('</body>', MY_ACCOUNT_LINK_SCRIPT + '</body>');
-  return injectHelpWidget(new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }));
+  return injectHelpWidget(new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
 
 async function handleMe(request, env) {
