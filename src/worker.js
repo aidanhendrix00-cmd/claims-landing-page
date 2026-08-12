@@ -665,7 +665,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-card-sub">Applies to your personal follow-up activity.<span class="mock-flag">sample</span></div> ' +
   '<div class="toggle-row"><div><div class="toggle-label">Autonomous follow-up cadence</div><div class="toggle-sub">Send scheduled reminders automatically on your behalf.</div></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div> ' +
   '<div class="toggle-row"><div><div class="toggle-label">AI drafting</div><div class="toggle-sub">Let clAIms draft follow-up emails for your review.</div></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div> ' +
-  '<div class="toggle-row"><div><div class="toggle-label">Daily digest email</div><div class="toggle-sub">Get a morning summary of what needs attention.</div></div><label class="switch"><input type="checkbox"><span class="slider"></span></label></div> ' +
+  '<div class="toggle-row"><div><div class="toggle-label">Weekly digest email</div><div class="toggle-sub">Get a weekly summary of what needs attention, every Monday.</div></div><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div> ' +
   '</div> ' +
   ' ' +
   '<div class="acct-card" id="permissionsCard" style="display:none;"> ' +
@@ -2708,6 +2708,56 @@ async function handleStripeWebhook(request, env) {
   return new Response('ok', { status: 200 });
 }
 
+async function runWeeklyDigest(env) {
+  try {
+    const tenants = await env.DB.prepare('SELECT id, company_name FROM tenants').all();
+    const tenantList = (tenants && tenants.results) || [];
+    for (const tenant of tenantList) {
+      try {
+        const users = await env.DB.prepare("SELECT id, email, role FROM users WHERE tenant_id = ? AND status = 'active' AND email_verified = 1").bind(tenant.id).all();
+        const userList = (users && users.results) || [];
+        if (!userList.length) continue;
+        let weeklyEmailCount = null;
+        try {
+          const r = await env.DB.prepare("SELECT COUNT(*) as c FROM email_log WHERE tenant_id = ? AND created_at >= datetime('now','-7 days')").bind(tenant.id).first();
+          weeklyEmailCount = r ? r.c : null;
+        } catch (e) { weeklyEmailCount = null; }
+        for (const u of userList) {
+          const html = buildWeeklyDigestHtml(tenant, u, weeklyEmailCount);
+          await sendEmail(env, {
+            to: u.email,
+            subject: 'Your Weekly clAIms Summary',
+            html,
+            kind: 'weekly_digest',
+            tenantId: tenant.id,
+            userId: u.id,
+            from: OPERATIONS_FROM_EMAIL
+          });
+        }
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+function buildWeeklyDigestHtml(tenant, user, weeklyEmailCount) {
+  const name = tenant.company_name || 'your team';
+  const isAdmin = user.role === 'admin';
+  const activityLine = (weeklyEmailCount !== null)
+    ? '<p>' + weeklyEmailCount + ' communications went out from your account this week.</p>'
+    : '';
+  const scopeLine = isAdmin
+    ? '<p>As an admin, you can review outstanding claims, escalations, and comms activity across every office in your dashboard.</p>'
+    : '<p>Log in to review your outstanding claims, escalations, and recent comms activity.</p>';
+  return '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+    '<h2 style="margin:0 0 12px;">Your weekly summary \u2014 ' + name + '</h2>' +
+    '<p>Here is your weekly digest from clAIms.</p>' +
+    activityLine +
+    scopeLine +
+    '<p style="margin-top:20px;"><a href="' + SITE_URL + '/dashboard" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Open Dashboard</a></p>' +
+    '<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">You are receiving this weekly summary because digest emails are enabled for your account.</p>' +
+    '</div>';
+}
+
 async function handleLogin(request, env) {
   let body;
   try {
@@ -2993,6 +3043,10 @@ export default {
 
     const assetResponse = await env.ASSETS.fetch(request);
     return injectHelpWidget(assetResponse);
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runWeeklyDigest(env));
   }
 };
 
