@@ -495,7 +495,7 @@
       </div>
 
       <div class="section-head">
-        <h2>Priority Follow-Ups</h2>
+        <h2>Account Manager</h2>
         <div class="toolbar">
           <input class="search" id="search" placeholder="Search customer or property..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="renderQueue()">
           <select class="sort" id="sort" onchange="renderQueue()">
@@ -1425,41 +1425,72 @@
   function firstContactDateStr(inv){ return fmtDate(addDays(new Date(), -inv.days)); }
 
   function renderTodoList(){
-    const wrap = document.getElementById('todo-list');
-    if(!wrap) return;
-    const open = activeInvoices();
-    const items = open.map(inv => {
-      const cp = nextCadenceCheckpoint(inv);
-      const due = inv.escalated || !cp || (inv.days >= cp.day);
-      return { inv, cp, due };
-    });
+const wrap = document.getElementById('todo-list');
+if(!wrap) return;
+const open = activeInvoices();
+const items = open.map(inv => {
+const cp = nextCadenceCheckpoint(inv);
+const due = inv.escalated || !cp || (inv.days >= cp.day);
+return { inv, cp, due };
+});
 
-    const high = items.filter(i => i.due).sort((a,b) => {
-      const aOver = a.cp ? (a.inv.days - a.cp.day) : 999;
-      const bOver = b.cp ? (b.inv.days - b.cp.day) : 999;
-      return bOver - aOver;
-    });
-    const low = items.filter(i => !i.due).sort((a,b) => (a.cp.day - a.inv.days) - (b.cp.day - b.inv.days));
+const high = items.filter(i => i.due).sort((a,b) => {
+const aOver = a.cp ? (a.inv.days - a.cp.day) : 999;
+const bOver = b.cp ? (b.inv.days - b.cp.day) : 999;
+return bOver - aOver;
+});
+const low = items.filter(i => !i.due).sort((a,b) => (a.cp.day - a.inv.days) - (b.cp.day - b.inv.days));
 
-    if(high.length === 0 && low.length === 0){
-      wrap.innerHTML = `<div class="empty" style="padding:20px;">Nothing tracked yet &mdash; add an invoice to generate today's list.</div>`;
-      return;
-    }
+if(high.length === 0 && low.length === 0){
+wrap.innerHTML = `<div class="empty" style="padding:20px;">Nothing tracked yet &mdash; add an invoice to generate today's list.</div>`;
+renderTodoToggle(0);
+return;
+}
 
-    let num = 1;
-    let html = '';
-    if(high.length){
-      html += `<div class="todo-section-label">Higher Priority &mdash; Recommended Today (${high.length})</div>`;
-      html += high.map(item => todoRowHTML(item, num++, 'high')).join('');
-    }
-    if(low.length){
-      html += `<div class="todo-section-label">Lower Priority &mdash; Not Due Yet (${low.length})</div>`;
-      html += low.map(item => todoRowHTML(item, num++, 'low')).join('');
-    }
-    wrap.innerHTML = html;
-  }
+const total = high.length + low.length;
+let shownHigh = high;
+let shownLow = low;
+if(!todoExpanded && total > 4){
+shownHigh = high.slice(0, 4);
+shownLow = low.slice(0, Math.max(0, 4 - shownHigh.length));
+}
 
-  function todoRowHTML(item, num, priority){
+let num = 1;
+let html = '';
+if(shownHigh.length){
+html += `<div class="todo-section-label">Higher Priority &mdash; Recommended Today (${high.length})</div>`;
+html += shownHigh.map(item => todoRowHTML(item, num++, 'high')).join('');
+}
+if(shownLow.length){
+html += `<div class="todo-section-label">Lower Priority &mdash; Not Due Yet (${low.length})</div>`;
+html += shownLow.map(item => todoRowHTML(item, num++, 'low')).join('');
+}
+wrap.innerHTML = html;
+renderTodoToggle(total);
+}
+
+function renderTodoToggle(total){
+const head = document.querySelector('.todo-head');
+if(!head) return;
+let btn = document.getElementById('todo-toggle-btn');
+if(total <= 4){
+if(btn) btn.remove();
+return;
+}
+if(!btn){
+btn = document.createElement('button');
+btn.id = 'todo-toggle-btn';
+btn.type = 'button';
+btn.style.cssText = 'margin-left:auto;border:none;background:none;color:var(--brand-rust);font-size:11.5px;font-weight:700;cursor:pointer;padding:2px 4px;';
+btn.onclick = function(){ todoExpanded = !todoExpanded; renderTodoList(); };
+head.appendChild(btn);
+}
+btn.textContent = todoExpanded ? 'Show less' : ('Show all (' + total + ')');
+}
+
+var todoExpanded = false;
+
+function todoRowHTML(item, num, priority){
     const inv = item.inv;
     const cp = item.cp;
     const tags = `<span class="badge dept">${DEPARTMENT_LABELS[inv.department]}</span><span class="badge cat">${CATEGORY_LABELS[inv.category]}</span>`;
