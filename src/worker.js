@@ -3208,6 +3208,7 @@ async function handleMe(request, env) {
     ok: true,
     email: user.email,
     role: user.role,
+    office: user.office,
     tenant: user.tenant_slug,
     companyName: user.company_name,
     tenantStatus: user.tenant_status,
