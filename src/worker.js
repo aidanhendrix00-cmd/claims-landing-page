@@ -557,6 +557,15 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-field"><label>Password</label><div class="acct-value">••••••••••• <a href="/#login" onclick="location.hash=\'login\';" style="color:#C29B57;font-weight:600;text-decoration:none;font-size:12.5px;">Change password</a></div></div> ' +
   '<div class="acct-field"><label>Member since</label><div class="acct-value" id="acctJoined">—<span class="mock-flag">sample</span></div></div> ' +
   '</div> ' +
+  '<div class="acct-field" style="grid-column:1/-1;"><label>Password</label><div class="acct-value"><button class="btn-outline btn-sm" id="changePasswordToggleBtn" onclick="toggleChangePasswordForm()" type="button">Change password</button></div></div> ' +
+  '<div id="changePasswordForm" style="display:none;grid-column:1/-1;max-width:340px;margin-top:8px;"> ' +
+  '<div style="margin-bottom:8px;"><label style="display:block;font-size:12px;margin-bottom:4px;">Current password</label><input type="password" id="cpCurrent" style="width:100%;padding:8px;border:1px solid #E5E0D2;border-radius:6px;"></div> ' +
+  '<div style="margin-bottom:8px;"><label style="display:block;font-size:12px;margin-bottom:4px;">New password</label><input type="password" id="cpNew" style="width:100%;padding:8px;border:1px solid #E5E0D2;border-radius:6px;"></div> ' +
+  '<div style="margin-bottom:8px;"><label style="display:block;font-size:12px;margin-bottom:4px;">Confirm new password</label><input type="password" id="cpConfirm" style="width:100%;padding:8px;border:1px solid #E5E0D2;border-radius:6px;"></div> ' +
+  '<div id="cpMsg" style="font-size:13px;margin:6px 0;"></div> ' +
+  '<button class="btn-primary btn-sm" id="cpSaveBtn" onclick="submitChangePassword()" type="button">Save new password</button> ' +
+  '<button class="btn-outline btn-sm" onclick="toggleChangePasswordForm()" type="button">Cancel</button> ' +
+  '</div> ' +
   '</div> ' +
   '</div> ' +
   ' ' +
@@ -2351,6 +2360,45 @@ ready(function(){
     if(data.role!=="admin"){ window.location.href="/account"; return; }
     me=data;
     return fetch("/api/subscription",{credentials:"same-origin"}).then(function(r){return r.json();});
+  function toggleChangePasswordForm(){
+    var f = document.getElementById("changePasswordForm");
+    if (!f) return;
+    var showing = f.style.display !== "none";
+    f.style.display = showing ? "none" : "block";
+    var msg = document.getElementById("cpMsg");
+    if (msg) msg.textContent = "";
+    if (!showing) {
+      var c1 = document.getElementById("cpCurrent"), c2 = document.getElementById("cpNew"), c3 = document.getElementById("cpConfirm");
+      if (c1) c1.value = ""; if (c2) c2.value = ""; if (c3) c3.value = "";
+    }
+  }
+  function submitChangePassword(){
+    var cur = document.getElementById("cpCurrent").value;
+    var nw = document.getElementById("cpNew").value;
+    var conf = document.getElementById("cpConfirm").value;
+    var msg = document.getElementById("cpMsg");
+    var btn = document.getElementById("cpSaveBtn");
+    if (!cur || !nw || !conf) { msg.style.color = "#B3261E"; msg.textContent = "Please fill in all fields."; return; }
+    if (nw.length < 8) { msg.style.color = "#B3261E"; msg.textContent = "New password must be at least 8 characters."; return; }
+    if (nw !== conf) { msg.style.color = "#B3261E"; msg.textContent = "New passwords do not match."; return; }
+    btn.disabled = true; btn.textContent = "Saving...";
+    fetch("/api/change-password", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: cur, newPassword: nw }) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        btn.disabled = false; btn.textContent = "Save new password";
+        if (d && d.ok) {
+          msg.style.color = "#1F5346"; msg.textContent = "Password updated.";
+          setTimeout(function(){ toggleChangePasswordForm(); }, 1500);
+        } else {
+          msg.style.color = "#B3261E"; msg.textContent = (d && d.error) || "Unable to update password right now.";
+        }
+      })
+      .catch(function(){
+        btn.disabled = false; btn.textContent = "Save new password";
+        msg.style.color = "#B3261E"; msg.textContent = "Unable to update password right now.";
+      });
+  }
+
   function openUpdatePaymentMethod(){
     var btn = document.getElementById("updatePaymentBtn");
     if (btn) { btn.disabled = true; btn.textContent = "Opening..."; }
@@ -2513,6 +2561,25 @@ async function getActiveStripeSubscription(env, customerId) {
   const trialing = await stripeRequest(env, 'GET', '/subscriptions', { customer: customerId, status: 'trialing', limit: 1 });
   if (trialing.ok && trialing.data.data && trialing.data.data[0]) return { ok: true, data: trialing.data.data[0] };
   return { ok: true, data: null };
+}
+
+async function handleChangePassword(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user) return json({ ok: false }, 401);
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+  const currentPassword = (body.currentPassword || '').toString();
+  const newPassword = (body.newPassword || '').toString();
+  if (!currentPassword || !newPassword) return json({ ok: false, error: 'Both current and new password are required.' }, 400);
+  if (newPassword.length < 8) return json({ ok: false, error: 'New password must be at least 8 characters.' }, 400);
+  const row = await env.DB.prepare('SELECT password_hash, salt FROM users WHERE id = ?').bind(user.id).first();
+  if (!row) return json({ ok: false, error: 'Account not found.' }, 404);
+  const computedHash = await hashPassword(currentPassword, row.salt);
+  if (computedHash !== row.password_hash) return json({ ok: false, error: 'Current password is incorrect.' }, 401);
+  const newSalt = randomSalt();
+  const newHash = await hashPassword(newPassword, newSalt);
+  await env.DB.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?').bind(newHash, newSalt, user.id).run();
+  return json({ ok: true });
 }
 
 async function handleBillingPortal(request, env) {
@@ -3055,6 +3122,9 @@ export default {
     }
     if (url.pathname === '/api/billing-portal' && request.method === 'POST') {
       return handleBillingPortal(request, env);
+    }
+    if (url.pathname === '/api/change-password' && request.method === 'POST') {
+      return handleChangePassword(request, env);
     }
     if (url.pathname === '/api/subscription/cancel' && request.method === 'POST') {
       return handleSubscriptionCancel(request, env);
