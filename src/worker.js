@@ -1254,6 +1254,24 @@ const DEMO_POPUP_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const DEMO_INTEGRATIONS_SEED_SCRIPT = '<script>' +
+'(function(){' +
+'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+'ready(function(){' +
+'setTimeout(function(){' +
+'if(typeof state!=="undefined"&&state.customIntegrations&&state.customIntegrations.length===0){' +
+'state.customIntegrations.push(' +
+'{id:state.nextIntegrationId++,name:"Salesforce",category:"crm",environment:"production",baseUrl:"https://na1.salesforce.com",authType:"oauth2",syncFreq:"realtime",keyMasked:"sf_live_\u2022\u2022\u2022\u20227f2a",secretMasked:"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",notes:"",status:"connected",addedAt:"Jan 3, 2026",lastSyncedAt:Date.now()-4*60*1000},' +
+'{id:state.nextIntegrationId++,name:"NetSuite",category:"accounting",environment:"production",baseUrl:"https://xxxxx.app.netsuite.com",authType:"oauth2",syncFreq:"hourly",keyMasked:"ns_\u2022\u2022\u2022\u202291cd",secretMasked:"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",notes:"",status:"connected",addedAt:"Jan 3, 2026",lastSyncedAt:Date.now()-52*60*1000}' +
+'); ' +
+'if(typeof saveState==="function") saveState();' +
+'if(typeof renderCustomIntegrations==="function") renderCustomIntegrations();' +
+'}' +
+'},300);' +
+'});' +
+'})();' +
+'<' + '/script>';
+
 const DEMO_TOUR_SCRIPT = '<script>' +
   '(function(){' +
   'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
@@ -1861,8 +1879,8 @@ async function handleDemoDashboard(request, env) {
   const assetResponse = await env.ASSETS.fetch(new URL('/dashboard.html', request.url));
   const html = await assetResponse.text();
   const injected = html.indexOf('</body>') !== -1
-    ? html.replace('</body>', DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + '</body>')
-    : html + DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT;
+    ? html.replace('</body>', DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + DEMO_INTEGRATIONS_SEED_SCRIPT + '</body>')
+    : html + DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + DEMO_INTEGRATIONS_SEED_SCRIPT;
   return new Response(injected, {
     status: assetResponse.status,
     headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' }
