@@ -2717,17 +2717,19 @@ async function handleLogout(request, env) {
 }
 
 const MY_ACCOUNT_LINK_SCRIPT = '<script>' +
-  '(function(){' +
-  'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
-  'ready(function(){' +
-  'var a=document.createElement("a");' +
-  'a.href="/account";' +
-  'a.textContent="My Account";' +
-  'a.style.cssText="position:fixed;top:16px;right:16px;z-index:99997;background:#171717;color:#fff;text-decoration:none;font-family:\'IBM Plex Sans\',Arial,sans-serif;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);";' +
-  'document.body.appendChild(a);' +
-  '});' +
-  '})();' +
-  '<' + '/script>';
+'(function(){' +
+'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
+'ready(function(){' +
+'var wrap=document.getElementById("gh-account");' +
+'if(wrap){wrap.style.display="flex";}' +
+'var btn=document.getElementById("gh-logout-btn");' +
+'if(btn){btn.addEventListener("click",function(){' +
+'btn.disabled=true;' +
+'fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){window.location.href="/";}).catch(function(){window.location.href="/";});' +
+'});}' +
+'});' +
+'})();' +
+'<' + '/script>';
 
 async function handleDashboard(request, env) {
   const user = await getSessionUser(request, env);
