@@ -1959,6 +1959,79 @@ async function handleForgotPassword(request, env) {
   return json({ ok: true, message: genericMessage });
 }
 
+async function handleResetPasswordPage(request, env) {
+  const url = new URL(request.url);
+  const token = url.searchParams.get('token') || '';
+  let userEmail = '';
+  let valid = false;
+  if (token) {
+    try {
+      const row = await env.DB.prepare('SELECT email, reset_expires FROM users WHERE reset_token = ?').bind(token).first();
+      if (row && (!row.reset_expires || new Date(row.reset_expires) > new Date())) {
+        userEmail = row.email;
+        valid = true;
+      }
+    } catch (e) {}
+  }
+  const escToken = token.replace(/[^a-zA-Z0-9]/g, '');
+  const escEmail = String(userEmail || '').replace(/"/g, '&quot;');
+  const body = valid ? (
+    '<div class="card">' +
+    '<h1>Set Up Your Password</h1>' +
+    '<p class="sub">Create a password for your clAIms account.</p>' +
+    '<div class="row"><label>Email</label><input id="rp-email" type="email" value="' + escEmail + '" readonly></div>' +
+    '<div class="row"><label>Password</label><input id="rp-password" type="password" placeholder="At least 8 characters"></div>' +
+    '<div class="row"><label>Confirm Password</label><input id="rp-confirm" type="password" placeholder="Re-enter password"></div>' +
+    '<button id="rp-submit" onclick="clmsSubmitReset()">Set Password</button>' +
+    '<div id="rp-msg" class="msg"></div>' +
+    '<script>' +
+    'const CLMS_TOKEN = "' + escToken + '";' +
+    'async function clmsSubmitReset(){' +
+    '  const email = document.getElementById("rp-email").value.trim();' +
+    '  const password = document.getElementById("rp-password").value;' +
+    '  const confirmPassword = document.getElementById("rp-confirm").value;' +
+    '  const msg = document.getElementById("rp-msg");' +
+    '  const btn = document.getElementById("rp-submit");' +
+    '  if(!password || password.length < 8){ msg.textContent = "Password must be at least 8 characters."; msg.className = "msg err"; return; }' +
+    '  if(password !== confirmPassword){ msg.textContent = "Passwords do not match."; msg.className = "msg err"; return; }' +
+    '  btn.disabled = true; btn.textContent = "Saving...";' +
+    '  try {' +
+    '    const res = await fetch("/api/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: CLMS_TOKEN, email: email, password: password, confirmPassword: confirmPassword }) });' +
+    '    const data = await res.json();' +
+    '    if(!data.ok){ msg.textContent = data.error || "Unable to set password."; msg.className = "msg err"; btn.disabled = false; btn.textContent = "Set Password"; return; }' +
+    '    msg.textContent = "Password set! Redirecting to login..."; msg.className = "msg ok";' +
+    '    setTimeout(function(){ window.location.href = "/?login=1"; }, 1800);' +
+    '  } catch(err) { msg.textContent = "Unable to set password."; msg.className = "msg err"; btn.disabled = false; btn.textContent = "Set Password"; }' +
+    '}' +
+    '</' + 'script>'
+  ) : (
+    '<div class="card">' +
+    '<h1>Link invalid or expired</h1>' +
+    '<p class="sub">This password setup link is no longer valid. Ask an admin to resend your invite, or use Forgot Password on the login page.</p>' +
+    '<a class="btn-link" href="/">Return to clAIms</a>' +
+    '</div>'
+  );
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<title>Set Your Password &middot; clAIms</title>' +
+    '<style>' +
+    'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#EEF1F0;color:#16233A;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
+    '.card{background:#fff;max-width:400px;width:calc(100% - 48px);padding:32px;border-radius:12px;box-shadow:0 10px 30px rgba(23,23,23,0.12);}' +
+    'h1{font-family:"Space Grotesk",sans-serif;font-size:20px;margin:0 0 6px;}' +
+    '.sub{color:#5B6B73;font-size:13px;margin:0 0 20px;}' +
+    '.row{margin-bottom:14px;}' +
+    'label{display:block;font-size:12px;font-weight:600;color:#5B6B73;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;}' +
+    'input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #DCE2E0;border-radius:8px;font-size:14px;}' +
+    'input[readonly]{background:#F5F6F5;color:#5B6B73;}' +
+    'button{width:100%;padding:12px;background:#171717;color:#EDEFF1;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;margin-top:6px;}' +
+    'button:disabled{opacity:0.6;cursor:default;}' +
+    '.msg{margin-top:14px;font-size:13px;}' +
+    '.msg.err{color:#B23A2E;}' +
+    '.msg.ok{color:#2F7A6B;}' +
+    '.btn-link{display:inline-block;margin-top:16px;color:#C29B57;font-weight:600;text-decoration:none;}' +
+    '</style></head><body>' + body + '</body></html>';
+  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+}
+
 async function handleResetPassword(request, env) {
   let body;
   try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
@@ -1985,12 +2058,33 @@ async function handleResetPassword(request, env) {
     return json({ ok: false, error: 'That reset link has expired. Please request a new one.' }, 400);
   }
 
+  const providedEmail = (body.email || '').trim().toLowerCase();
+  if (providedEmail && user.email && providedEmail !== String(user.email).toLowerCase()) {
+    return json({ ok: false, error: 'Email does not match this invite link.' }, 400);
+  }
+
   const salt = randomSalt();
   const passwordHash = await hashPassword(password, salt);
   await env.DB.prepare(
     'UPDATE users SET password_hash = ?, salt = ?, reset_token = NULL, reset_expires = NULL WHERE id = ?'
   ).bind(passwordHash, salt, user.id).run();
   await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run();
+
+  try {
+    if (user.invited_by && !user.invite_completed_at) {
+      const nowIso = new Date().toISOString();
+      await env.DB.prepare('UPDATE users SET invite_completed_at = ? WHERE id = ?').bind(nowIso, user.id).run();
+      const inviter = await env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(user.invited_by).first();
+      if (inviter && inviter.email) {
+        const notifyHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+          '<h2 style="margin:0 0 12px;">New user added</h2>' +
+          '<p>' + (user.full_name || user.email) + ' (' + user.email + ') has finished setting up their clAIms account as a ' + user.role + (user.office ? (' on the ' + (OFFICE_LABELS[user.office] || user.office) + ' team') : '') + '.</p>' +
+          '</div>';
+        await sendEmail(env, { to: inviter.email, subject: 'NEW USER ADDED - clAIms', html: notifyHtml, kind: 'new_user_added', tenantId: user.tenant_id, userId: user.invited_by, from: OPERATIONS_FROM_EMAIL });
+      }
+    }
+  } catch (notifyErr) {}
+
 
   return json({ ok: true, message: 'Password updated successfully.' });
 }
@@ -2676,8 +2770,8 @@ async function handleTeamInvite(request, env) {
   const resetToken = randomToken();
   const resetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const insertResult = await env.DB.prepare(
-    "INSERT INTO users (tenant_id, email, password_hash, salt, role, email_verified, status, full_name, office, reset_token, reset_expires) VALUES (?, ?, ?, ?, ?, 1, 'active', ?, ?, ?, ?)"
-  ).bind(user.tenant_id, email, throwawayHash, throwawaySalt, role, fullName || null, office, resetToken, resetExpires).run();
+    "INSERT INTO users (tenant_id, email, password_hash, salt, role, email_verified, status, full_name, office, reset_token, reset_expires, invited_by) VALUES (?, ?, ?, ?, ?, 1, 'active', ?, ?, ?, ?, ?)"
+  ).bind(user.tenant_id, email, throwawayHash, throwawaySalt, role, fullName || null, office, resetToken, resetExpires, user.id).run();
   const newUserId = insertResult && insertResult.meta ? insertResult.meta.last_row_id : null;
   const setPasswordUrl = SITE_URL + '/reset-password?token=' + resetToken;
   const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
@@ -3344,7 +3438,10 @@ export default {
     if (url.pathname === '/api/subscription/upgrade-request' && request.method === 'POST') {
       return handleSubscriptionUpgradeRequest(request, env);
     }
-    if (url.pathname === '/dashboard') {
+    if (url.pathname === '/reset-password') {
+        return handleResetPasswordPage(request, env);
+      }
+      if (url.pathname === '/dashboard') {
       return handleDashboard(request, env);
     }
     if (url.pathname === '/dashboard.html') {
