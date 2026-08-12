@@ -681,11 +681,11 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-card-sub" id="integrationsSub">Software connected to your dashboard.</div> ' +
   '<div id="integrationsRestricted" class="restricted-box" style="display:none;">Only admins can add or change integrations. Ask your company admin to make changes here.</div> ' +
   '<div id="integrationsContent" style="display:none;"> ' +
-  '<div class="acct-grid"> ' +
+  '<div class="acct-grid" id="integrationsSummaryGrid"> ' +
   '<div class="acct-field"><label>QuickBooks</label><div class="acct-value">Connected</div></div> ' +
   '<div class="acct-field"><label>Salesforce</label><div class="acct-value">Not connected</div></div> ' +
   '</div> ' +
-  '<div style="margin-top:14px;"><button class="btn-outline btn-sm">Manage integrations</button></div> ' +
+  '<div style="margin-top:14px;"><button class="btn-outline btn-sm" onclick="openManageIntegrations()">Manage integrations</button></div> ' +
   '</div> ' +
   '</div> ' +
   '</div> ' +
@@ -716,11 +716,23 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '</div> ' +
   '</div> ' +
   ' ' +
-  '<script>(function(){ ' +
+   '<div class="edit-modal-backdrop" id="integrationsModalBackdrop"> ' +
+ '<div class="edit-modal" style="max-width:540px;"> ' +
+ '<h4>Manage Integrations</h4> ' +
+ '<div class="acct-card-sub" style="margin-top:-4px;margin-bottom:14px;">Sample data for demo purposes &mdash; connect, disconnect, or recategorize the tools below.</div> ' +
+ '<div id="integrationsModalList"></div> ' +
+ '<div class="edit-modal-actions"> ' +
+ '<button class="btn-dark btn-sm" id="integrationsModalClose" onclick="closeManageIntegrations()">Done</button> ' +
+ '</div> ' +
+ '</div> ' +
+ '</div> ' +
+'<script>(function(){ ' +
   'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}} ' +
   ' ' +
   'var ROLE_RANK={admin:0,manager:1,employee:2}; ' +
   'var ROLE_LABEL={admin:"Admin",manager:"Manager",employee:"Employee"}; ' +
+ 'var INTEGRATION_CATEGORIES=["Accounting","CRM","ERP","Estimating","E-Signature","Payments","Storage","Other"]; ' +
+ 'var INTEGRATIONS_CATALOG=[{id:"quickbooks",name:"QuickBooks",category:"Accounting",connected:true},{id:"salesforce",name:"Salesforce",category:"CRM",connected:false},{id:"netsuite",name:"NetSuite",category:"ERP",connected:false},{id:"xactimate",name:"Xactimate",category:"Estimating",connected:false},{id:"docusign",name:"DocuSign",category:"E-Signature",connected:false}]; ' +
   ' ' +
   'var PLAN_FEATURES={ ' +
   '  starter:{name:"Starter",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]}, ' +
@@ -931,7 +943,37 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    }); ' +
   '  } ' +
   ' ' +
-  '  function renderSettingsTab(){ ' +
+   'function renderIntegrationsSummary(){ ' +
+ 'var grid=document.getElementById("integrationsSummaryGrid"); ' +
+ 'if(!grid) return; ' +
+ 'var connected=INTEGRATIONS_CATALOG.filter(function(i){return i.connected;}); ' +
+ 'grid.innerHTML=connected.length?connected.map(function(i){return "<div class=\\"acct-field\\"><label>"+i.name+"</label><div class=\\"acct-value\\">Connected</div></div>"; }).join(""):"<div class=\\"acct-field\\"><label>None</label><div class=\\"acct-value\\">No integrations connected</div></div>"; ' +
+ '} ' +
+ 'function renderIntegrationsModalList(){ ' +
+ 'var wrap=document.getElementById("integrationsModalList"); ' +
+ 'if(!wrap) return; ' +
+ 'wrap.innerHTML=INTEGRATIONS_CATALOG.map(function(i,idx){ ' +
+ 'var opts=INTEGRATION_CATEGORIES.map(function(c){return "<option value=\\""+c+"\\""+(c===i.category?" selected":"")+">"+c+"</option>"; }).join(""); ' +
+ 'return "<div class=\\"acct-field\\" style=\\"display:flex;align-items:center;justify-content:space-between;gap:10px;\\"><div><div style=\\"font-weight:600;font-size:13.5px;\\">"+i.name+"</div><select onchange=\\"setIntegrationCategory("+idx+",this.value)\\" style=\\"margin-top:4px;font-size:11.5px;padding:4px 8px;border-radius:6px;border:1.5px solid #E5E0D2;\\">"+opts+"</select></div><button class=\\"btn-outline btn-sm\\" onclick=\\"toggleIntegration("+idx+")\\">"+(i.connected?"Remove":"Add")+"</button></div>"; ' +
+ '}).join(""); ' +
+ '} ' +
+ 'function setIntegrationCategory(idx,val){ ' +
+ 'INTEGRATIONS_CATALOG[idx].category=val; ' +
+ '} ' +
+ 'function toggleIntegration(idx){ ' +
+ 'INTEGRATIONS_CATALOG[idx].connected=!INTEGRATIONS_CATALOG[idx].connected; ' +
+ 'renderIntegrationsModalList(); ' +
+ 'renderIntegrationsSummary(); ' +
+ '} ' +
+ 'function openManageIntegrations(){ ' +
+ 'renderIntegrationsModalList(); ' +
+ 'document.getElementById("integrationsModalBackdrop").classList.add("open"); ' +
+ '} ' +
+ 'function closeManageIntegrations(){ ' +
+ 'document.getElementById("integrationsModalBackdrop").classList.remove("open"); ' +
+ '} ' +
+ ' ' +
+'  function renderSettingsTab(){ ' +
   '    var r=role(); ' +
   '    document.getElementById("integrationsCardOuter").style.display=(r==="admin")?"block":"none"; ' +
   '    document.getElementById("permissionsCard").style.display="block"; ' +
@@ -952,6 +994,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    var integActionsWrap=document.querySelector("#integrationsContent > div:last-child"); ' +
   '    if(integActionsWrap){ integActionsWrap.style.display=(r==="admin")?"block":"none"; } ' +
   '    document.getElementById("integrationsSub").textContent=(r==="admin")?"Software connected to your dashboard.":"Software connected to your dashboard. Ask your admin to make changes."; ' +
+ 'renderIntegrationsSummary(); ' +
   '  } ' +
   ' ' +
   '  function renderFrequencyTab(){ ' +
