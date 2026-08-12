@@ -697,6 +697,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="edit-modal"> ' +
   '<h4 id="editModalTitle">Edit team member</h4> ' +
   '<div class="acct-field"><label>Name</label><input type="text" id="editModalName" disabled></div> ' +
+  '<div class="acct-field"><label>Email</label><input type="email" id="editModalEmail" placeholder="name@company.com"></div> ' +
   '<div class="acct-field"><label>Department</label><input type="text" id="editModalDept"></div> ' +
   '<div class="acct-field"><label>Office</label><input type="text" id="editModalOffice"></div> ' +
   '<div class="acct-field"><label>Account type</label> ' +
@@ -849,8 +850,12 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    state.team.forEach(function(u){ offices[u.office]=1; depts[u.dept]=1; }); ' +
   '    var officeSel=document.getElementById("filterOffice"); ' +
   '    var deptSel=document.getElementById("filterDept"); ' +
+  '    var curOffice=officeSel.value; ' +
+  '    var curDept=deptSel.value; ' +
   '    officeSel.innerHTML="<option value=\\"\\">All offices</option>"+Object.keys(offices).sort().map(function(o){return "<option value=\\""+o+"\\">"+o+"</option>";}).join(""); ' +
   '    deptSel.innerHTML="<option value=\\"\\">All departments</option>"+Object.keys(depts).sort().map(function(d){return "<option value=\\""+d+"\\">"+d+"</option>";}).join(""); ' +
+  '    officeSel.value=curOffice; ' +
+  '    deptSel.value=curDept; ' +
   '  } ' +
   ' ' +
   '  function renderTeamTab(){ ' +
@@ -1034,6 +1039,9 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    document.getElementById("editModalName").value=isNew?"":user.name; ' +
   '    document.getElementById("editModalName").disabled=!isNew; ' +
   '    document.getElementById("editModalName").placeholder=isNew?"Full name":""; ' +
+  '    document.getElementById("editModalEmail").value=isNew?"":user.email; ' +
+  '    document.getElementById("editModalEmail").disabled=!isNew; ' +
+  '    document.getElementById("editModalEmail").placeholder=isNew?"name@company.com":""; ' +
   '    document.getElementById("editModalDept").value=user.dept; ' +
   '    document.getElementById("editModalOffice").value=user.office; ' +
   '    document.getElementById("editModalRole").value=user.role; ' +
@@ -1055,10 +1063,11 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      var dept=document.getElementById("editModalDept").value.trim(); ' +
   '      var office=document.getElementById("editModalOffice").value.trim(); ' +
   '      var newRole=document.getElementById("editModalRole").value; ' +
+  '    var email=document.getElementById("editModalEmail").value.trim(); ' +
   '      if(state.editingId===null){ ' +
   '        if(!name){ return; } ' +
   '        var nextId=Math.max.apply(null,state.team.map(function(u){return u.id;}))+1; ' +
-  '        state.team.push({id:nextId,name:name,email:name.toLowerCase().replace(/\\s+/g,".")+"@example.com",dept:dept,office:office,role:newRole}); ' +
+  '        state.team.push({id:nextId,name:name,email:email||(name.toLowerCase().replace(/\\s+/g,".")+"@example.com"),dept:dept,office:office,role:newRole}); ' +
   '      }else{ ' +
   '        state.team=state.team.map(function(u){ ' +
   '          if(u.id!==state.editingId) return u; ' +
