@@ -1891,7 +1891,7 @@ const token = cookies[SESSION_COOKIE];
 if (!token) return null;
 const row = await pgSelectOne(env, 'sessions',
 'token=' + pgEq(token) +
-'&select=expires_at,users(id,email,role,tenant_id,office,status,email_verified,tenants(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id))'
+'&select=expires_at,users(id,email,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id))'
 );
 if (!row || !row.users) return null;
 if (new Date(row.expires_at) < new Date()) return null;
