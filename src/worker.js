@@ -1300,6 +1300,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
+const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
 const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '.cdap-trigger{position:fixed;top:16px;right:16px;z-index:99996;background:#171717;color:#fff;border:none;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);cursor:pointer;} ' +
   '#clmsAcctOverlay{display:none;position:fixed;inset:0;background:#F5F2EA;z-index:999995;overflow-y:auto;font-family:"IBM Plex Sans",Arial,sans-serif;color:#171717;} ' +
@@ -1830,15 +1831,18 @@ async function injectHelpWidget(response, opts) {
 }
 
 async function handleDemoDashboard(request, env) {
-  const assetResponse = await env.ASSETS.fetch(new URL('/dashboard.html', request.url));
-  const html = await assetResponse.text();
-  const injected = html.indexOf('</body>') !== -1
-    ? html.replace('</body>', DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + DEMO_INTEGRATIONS_SEED_SCRIPT + '</body>')
-    : html + DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + DEMO_INTEGRATIONS_SEED_SCRIPT;
-  return new Response(injected, {
-    status: assetResponse.status,
-    headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' }
-  });
+const assetResponse = await env.ASSETS.fetch(new URL('/dashboard.html', request.url));
+let html = await assetResponse.text();
+html = html.indexOf('<head>') !== -1
+? html.replace('<head>', '<head>' + DEMO_FETCH_ISOLATION_SCRIPT)
+: DEMO_FETCH_ISOLATION_SCRIPT + html;
+const injected = html.indexOf('</body>') !== -1
+? html.replace('</body>', DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + DEMO_INTEGRATIONS_SEED_SCRIPT + '</body>')
+: html + DEMO_ACCOUNT_OVERLAY_SCRIPT + DEMO_TOUR_SCRIPT + DEMO_INTEGRATIONS_SEED_SCRIPT;
+return new Response(injected, {
+status: assetResponse.status,
+headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'public, max-age=300' }
+});
 }
 
 async function uniqueSlug(env, base) {
