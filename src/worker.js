@@ -1303,7 +1303,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
-const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
+const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';if(u.indexOf('/api/escalate-notify')!==-1){return Promise.resolve(new Response(JSON.stringify({ok:true,sent:true,demo:true,notifiedName:'Dana Whitfield',notifiedEmail:'dana.whitfield@example.com'}),{status:200,headers:{'Content-Type':'application/json'}}));}for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
 const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '.cdap-trigger{position:fixed;top:16px;right:16px;z-index:99996;background:#171717;color:#fff;border:none;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);cursor:pointer;} ' +
   '#clmsAcctOverlay{display:none;position:fixed;inset:0;background:#F5F2EA;z-index:999995;overflow-y:auto;font-family:"IBM Plex Sans",Arial,sans-serif;color:#171717;} ' +
@@ -3335,11 +3335,30 @@ const invoiceName = String(body.invoiceName || 'An invoice').slice(0, 200);
 const amount = Number(body.amount) || 0;
 const officeLabel = String(body.officeLabel || '').slice(0, 100);
 const departmentLabel = String(body.departmentLabel || '').slice(0, 100);
-const assigneeName = String(body.assigneeName || 'Team').slice(0, 100);
-const assigneeEmail = String(body.assigneeEmail || '').trim();
-if (!assigneeEmail) {
-return json({ ok: false, error: 'Missing assignee email' }, 400);
+// Resolve the recipient from the tenant's own user list rather than trusting
+// an address supplied by the browser. Prefer a manager in the invoice's office,
+// then an admin in that office, then any admin on the account.
+const officeKey = String(body.office || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+const roster = await pgSelect(env, 'users',
+'tenant_id=' + pgEq(user.tenant_id) + '&status=' + pgEq('active') +
+'&select=id,email,full_name,role,office&order=id.asc'
+) || [];
+const sameOffice = function (u) {
+return String(u.office || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') === officeKey;
+};
+const withEmail = roster.filter(function (u) { return u.email; });
+const recipient =
+withEmail.find(function (u) { return u.role === 'manager' && sameOffice(u) && u.id !== user.id; }) ||
+withEmail.find(function (u) { return u.role === 'admin' && sameOffice(u) && u.id !== user.id; }) ||
+withEmail.find(function (u) { return u.role === 'admin' && u.id !== user.id; }) ||
+withEmail.find(function (u) { return u.role === 'manager' && sameOffice(u); }) ||
+withEmail.find(function (u) { return u.role === 'admin'; }) ||
+null;
+if (!recipient) {
+return json({ ok: false, error: 'No active manager or admin is set up to receive escalations.' });
 }
+const assigneeEmail = recipient.email;
+const assigneeName = String(recipient.full_name || recipient.email.split('@')[0]).slice(0, 100);
 const amountFmt = amount.toLocaleString(undefined, { minimumFractionDigits: 2 });
 const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
 '<h2 style="margin:0 0 12px;">Escalated - Needs Your Attention</h2>' +
@@ -3360,7 +3379,7 @@ tenantId: user.tenant_id,
 userId: user.id,
 from: OPERATIONS_FROM_EMAIL
 });
-return json({ ok: true, sent: !!result.ok });
+return json({ ok: true, sent: !!result.ok, notifiedName: assigneeName, notifiedEmail: assigneeEmail });
 }
 
 async function handleLogout(request, env) {
