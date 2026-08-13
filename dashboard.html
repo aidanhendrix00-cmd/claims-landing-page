@@ -2070,26 +2070,38 @@ function todoRowHTML(item, num, priority){
 const inv = findInv(id);
 if(!inv) return;
 inv.escalated = true;
-var mgr = OFFICE_MANAGERS[inv.officeLocation];
-inv.notifiedName = mgr ? mgr.name : null;
+inv.notifiedName = null;
 inv.notifiedAt = new Date().toISOString();
 addActivity(inv, 'Invoice escalated for manager attention; removed from autonomous cadence.', 'manual');
 saveState(); renderAll();
 showToast(`${inv.name} moved to Escalations`);
-if(mgr){
+// The recipient is resolved server-side from the company's own user list
+// (manager or admin for this office), so no address is sent from the browser.
 fetch('/api/escalate-notify', {
 method: 'POST',
+credentials: 'same-origin',
 headers: { 'Content-Type': 'application/json' },
 body: JSON.stringify({
 invoiceName: inv.name,
 amount: inv.amount,
+office: inv.officeLocation,
 officeLabel: OFFICE_LABELS[inv.officeLocation],
-departmentLabel: DEPARTMENT_LABELS[inv.department],
-assigneeName: mgr.name,
-assigneeEmail: mgr.email
+departmentLabel: DEPARTMENT_LABELS[inv.department]
 })
-}).catch(function(){});
+}).then(function(r){ return r.json(); }).then(function(res){
+if(res && res.ok && res.notifiedName){
+inv.notifiedName = res.notifiedName;
+addActivity(inv, `Escalation notice emailed to ${res.notifiedName}${res.notifiedEmail ? ` (${res.notifiedEmail})` : ''}.`, 'automation');
+} else {
+const why = (res && res.error) ? res.error : 'the notification could not be delivered.';
+addActivity(inv, `Escalated, but no one was notified: ${why}`, 'automation');
+showToast('Escalated \u2014 but no one could be notified');
 }
+saveState(); renderAll();
+}).catch(function(){
+addActivity(inv, 'Escalated, but the notification request failed to send.', 'automation');
+saveState(); renderAll();
+});
   }
   function unescalateInvoice(id){
     const inv = findInv(id);
