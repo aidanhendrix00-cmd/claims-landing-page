@@ -78,7 +78,7 @@ const HELP_WIDGET_HTML = '<style>' +
   'btn.disabled=false;btn.textContent="Send message";' +
   'if(res.ok&&res.data&&res.data.ok){' +
   'status.className="chp-status ok";' +
-  'status.textContent="Thanks, "+name.split(" ")[0]+" — we got your message and will reply to "+email+" soon.";' +
+  'status.textContent="Thanks, "+name.split(" ")[0]+" â we got your message and will reply to "+email+" soon.";' +
   'document.getElementById("clms-help-form").reset();' +
   '}else{' +
   'status.className="chp-status err";' +
@@ -88,7 +88,7 @@ const HELP_WIDGET_HTML = '<style>' +
   '.catch(function(){' +
   'btn.disabled=false;btn.textContent="Send message";' +
   'status.className="chp-status err";' +
-  'status.textContent="Network error — please email help@claims-collection.net directly.";' +
+  'status.textContent="Network error â please email help@claims-collection.net directly.";' +
   '});' +
   'return false;' +
   '}' +
@@ -145,7 +145,7 @@ const RESET_PASSWORD_SCRIPT = '<script>' +
   '.then(function(res){' +
   'btn.disabled=false;' +
   'if(res.ok&&res.data&&res.data.ok){' +
-  'note.textContent="Password updated — you can log in now.";' +
+  'note.textContent="Password updated â you can log in now.";' +
   'document.getElementById("clms-rc-password").value="";' +
   'document.getElementById("clms-rc-confirm").value="";' +
   'setTimeout(backToLogin,1800);' +
@@ -204,7 +204,7 @@ const DEMO_FIX_SCRIPT = '<script>' +
   '},{once:true});' +
   '}).catch(function(){' +
   'loaded=false;' +
-  'if(loading){loading.textContent="Couldn\'t load the demo right now — please try again shortly.";}' +
+  'if(loading){loading.textContent="Couldn\'t load the demo right now â please try again shortly.";}' +
   '});' +
   '};' +
   'if(location.hash==="#demo"){window.loadDemoIfNeeded();}' +
@@ -279,7 +279,7 @@ const CONTACT_FORM_SCRIPT = '<script>' +
   '\'<label>Anything you\\\'d like us to know? <span style="text-transform:none;font-weight:400;">(optional)</span></label>\'+' +
   '\'<textarea id="c-message" placeholder="Anything else we should know..."></textarea>\'+' +
   '\'</div>\'+' +
-  '\'<button class="btn-primary contact-submit" onclick="submitContact()">Send inquiry →</button>\'+' +
+  '\'<button class="btn-primary contact-submit" onclick="submitContact()">Send inquiry â</button>\'+' +
   '\'<div class="contact-note">This opens your email client with these details filled in, addressed to <b id="contactEmailDisplay">salesnmarketing@claims-collection.net</b>.</div>\';' +
   'var topicSelect=document.getElementById("c-help-topic");' +
   'var otherWrap=document.getElementById("c-help-other-wrap");' +
@@ -298,7 +298,7 @@ const CONTACT_FORM_SCRIPT = '<script>' +
   'var message=messageEl?messageEl.value.trim():"";' +
   'if(!name||!email){alert("Please enter your name and work email so we know who to follow up with.");return;}' +
   'var topicLabel=TOPIC_LABELS[topic]||topic;' +
-  'var subject="New inquiry — "+topicLabel+" — "+(company||name);' +
+  'var subject="New inquiry â "+topicLabel+" â "+(company||name);' +
   'var bodyLines=["Name: "+name,"Email: "+email,"Company: "+(company||"(not provided)"),"What can we help with: "+topicLabel];' +
   'if(topic==="other"&&otherDetail){bodyLines.push("Details: "+otherDetail);}' +
   'bodyLines.push("");' +
@@ -403,7 +403,7 @@ const GET_STARTED_FORM_SCRIPT = '<script>' +
 
 const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-8">' +
   '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-  '<title>Thank you — clAIms</title>' +
+  '<title>Thank you â clAIms</title>' +
   '<link rel="icon" href="/favicon.ico">' +
   '<style>' +
   'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;box-sizing:border-box;}' +
@@ -424,7 +424,7 @@ const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-
 
 const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-8"> ' +
   '<meta name="viewport" content="width=device-width, initial-scale=1"> ' +
-  '<title>My Account — clAIms</title> ' +
+  '<title>My Account â clAIms</title> ' +
   '<link rel="icon" href="/favicon.ico"> ' +
   '<style> ' +
   '*{box-sizing:border-box;} ' +
@@ -466,7 +466,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '.plan-banner .plan-name{font-size:18px;font-weight:700;} ' +
   '.plan-feature-list{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;} ' +
   '.plan-feature-list li{font-size:13px;color:#3B3A35;padding-left:20px;position:relative;} ' +
-  '.plan-feature-list li:before{content:"✓";position:absolute;left:0;color:#C29B57;font-weight:700;} ' +
+  '.plan-feature-list li:before{content:"â";position:absolute;left:0;color:#C29B57;font-weight:700;} ' +
   '@media (max-width:640px){.plan-feature-list{grid-template-columns:1fr;}} ' +
   'table.acct-table{width:100%;border-collapse:collapse;font-size:13.5px;} ' +
   'table.acct-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8A8578;font-weight:700;padding:10px 12px;border-bottom:1.5px solid #E5E0D2;} ' +
@@ -528,8 +528,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-topbar"> ' +
   '<div class="acct-brand">clAIms</div> ' +
   '<div class="acct-topbar-right"> ' +
-  '<div class="acct-user-chip" id="acctUserChip">Loading account…</div> ' +
-  '<a href="/dashboard" class="btn-to-dashboard" id="toDashboardBtn">To my Dashboard →</a> ' +
+  '<div class="acct-user-chip" id="acctUserChip">Loading accountâ¦</div> ' +
+  '<a href="/dashboard" class="btn-to-dashboard" id="toDashboardBtn">To my Dashboard â</a> ' +
   '</div> ' +
   '</div> ' +
   ' ' +
@@ -542,7 +542,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<button class="acct-tab" data-tab="settings">Settings &amp; Permissions</button> ' +
   '</div> ' +
   ' ' +
-  '<div id="acctLoading" class="loading-state">Loading your account…</div> ' +
+  '<div id="acctLoading" class="loading-state">Loading your accountâ¦</div> ' +
   ' ' +
   '<div id="acctPanels" style="display:none;"> ' +
   ' ' +
@@ -551,12 +551,12 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<h3>Account information</h3> ' +
   '<div class="acct-card-sub">Your login and profile details.</div> ' +
   '<div class="acct-grid"> ' +
-  '<div class="acct-field"><label>Full name</label><div class="acct-value" id="acctFullName">—</div></div> ' +
-  '<div class="acct-field"><label>Username / Email</label><div class="acct-value" id="acctEmail">—</div></div> ' +
-  '<div class="acct-field"><label>Company</label><div class="acct-value" id="acctCompany">—</div></div> ' +
-  '<div class="acct-field"><label>Account type</label><div class="acct-value" id="acctRoleValue">—</div></div> ' +
-  '<div class="acct-field"><label>Password</label><div class="acct-value">••••••••••• <a href="/#login" onclick="location.hash=\'login\';" style="color:#C29B57;font-weight:600;text-decoration:none;font-size:12.5px;">Change password</a></div></div> ' +
-  '<div class="acct-field"><label>Member since</label><div class="acct-value" id="acctJoined">—<span class="mock-flag">sample</span></div></div> ' +
+  '<div class="acct-field"><label>Full name</label><div class="acct-value" id="acctFullName">â</div></div> ' +
+  '<div class="acct-field"><label>Username / Email</label><div class="acct-value" id="acctEmail">â</div></div> ' +
+  '<div class="acct-field"><label>Company</label><div class="acct-value" id="acctCompany">â</div></div> ' +
+  '<div class="acct-field"><label>Account type</label><div class="acct-value" id="acctRoleValue">â</div></div> ' +
+  '<div class="acct-field"><label>Password</label><div class="acct-value">â¢â¢â¢â¢â¢â¢â¢â¢â¢â¢â¢ <a href="/#login" onclick="location.hash=\'login\';" style="color:#C29B57;font-weight:600;text-decoration:none;font-size:12.5px;">Change password</a></div></div> ' +
+  '<div class="acct-field"><label>Member since</label><div class="acct-value" id="acctJoined">â<span class="mock-flag">sample</span></div></div> ' +
   '</div> ' +
   '<div class="acct-field" style="grid-column:1/-1;"><label>Password</label><div class="acct-value"><button class="btn-outline btn-sm" id="changePasswordToggleBtn" onclick="toggleChangePasswordForm()" type="button">Change password</button></div></div> ' +
   '<div id="changePasswordForm" style="display:none;grid-column:1/-1;max-width:340px;margin-top:8px;"> ' +
@@ -576,7 +576,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="plan-banner"> ' +
   '<div> ' +
   '<div class="plan-label">Current plan</div> ' +
-  '<div class="plan-name" id="billingPlanName">—</div> ' +
+  '<div class="plan-name" id="billingPlanName">â</div> ' +
   '</div> ' +
   '<button class="btn-dark btn-sm" id="manageSubBtn" onclick="window.location.href=\'/account/subscription\'">Manage Subscription</button> ' +
   '</div> ' +
@@ -587,8 +587,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-card"> ' +
   '<h3>Payment method<span class="mock-flag">sample</span></h3> ' +
   '<div class="acct-grid"> ' +
-  '<div class="acct-field"><label>Card on file</label><div class="acct-value">Visa •••• 4242, exp 08/28</div></div> ' +
-  '<div class="acct-field"><label>Business address</label><div class="acct-value" id="billingAddress">—</div></div> ' +
+  '<div class="acct-field"><label>Card on file</label><div class="acct-value">Visa â¢â¢â¢â¢ 4242, exp 08/28</div></div> ' +
+  '<div class="acct-field"><label>Business address</label><div class="acct-value" id="billingAddress">â</div></div> ' +
   '</div> ' +
   '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;" id="billingAdminActions"> ' +
   '<button class="btn-outline btn-sm" id="updatePaymentBtn" onclick="openUpdatePaymentMethod()">Update payment method</button> ' +
@@ -746,8 +746,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
  'var INTEGRATIONS_CATALOG=[{id:"quickbooks",name:"QuickBooks",category:"Accounting",connected:true},{id:"salesforce",name:"Salesforce",category:"CRM",connected:false},{id:"netsuite",name:"NetSuite",category:"ERP",connected:false},{id:"xactimate",name:"Xactimate",category:"Estimating",connected:false},{id:"docusign",name:"DocuSign",category:"E-Signature",connected:false}]; ' +
   ' ' +
   'var PLAN_FEATURES={ ' +
-  '  starter:{name:"Starter",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]}, ' +
-  '  growth:{name:"Growth",features:["5–8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]}, ' +
+  '  starter:{name:"Starter",features:["2â3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]}, ' +
+  '  growth:{name:"Growth",features:["5â8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]}, ' +
   '  enterprise:{name:"Enterprise",features:["Unlimited seats","All integrations","Everything in Growth","Multi-office & multi-entity support","Dedicated account manager"]} ' +
   '}; ' +
   ' ' +
@@ -1050,13 +1050,13 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'var tiersRow=document.getElementById("tiersRow");' +
   'if(!tiersRow){return;}' +
   'var startPrice=tiersRow.querySelector(".tier.starter .tier-price");' +
-  'if(startPrice){startPrice.innerHTML="$249<span class=\\"per\\">–$409/mo</span>";}' +
+  'if(startPrice){startPrice.innerHTML="$249<span class=\\"per\\">â$409/mo</span>";}' +
   'var startImpl=tiersRow.querySelector(".tier.starter .tier-impl b");' +
-  'if(startImpl){startImpl.textContent="$1,250–$2,050";}' +
+  'if(startImpl){startImpl.textContent="$1,250â$2,050";}' +
   'var growPrice=tiersRow.querySelector(".tier.growth .tier-price");' +
-  'if(growPrice){growPrice.innerHTML="$739<span class=\\"per\\">–$1,649/mo</span>";}' +
+  'if(growPrice){growPrice.innerHTML="$739<span class=\\"per\\">â$1,649/mo</span>";}' +
   'var growImpl=tiersRow.querySelector(".tier.growth .tier-impl b");' +
-  'if(growImpl){growImpl.textContent="$2,900–$3,750";}' +
+  'if(growImpl){growImpl.textContent="$2,900â$3,750";}' +
   'var entPrice=tiersRow.querySelector(".tier.enterprise .tier-price");' +
   'if(entPrice){entPrice.innerHTML="$1,650<span class=\\"per\\">/mo flat</span>";}' +
   'var entImpl=tiersRow.querySelector(".tier.enterprise .tier-impl b");' +
@@ -1064,7 +1064,7 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'var startFit=tiersRow.querySelector(".tier.starter .tier-fit");' +
   'if(startFit){startFit.textContent="Under $500K in annual revenue";}' +
   'var growFit=tiersRow.querySelector(".tier.growth .tier-fit");' +
-  'if(growFit){growFit.textContent="$500K–$2M in annual revenue";}' +
+  'if(growFit){growFit.textContent="$500Kâ$2M in annual revenue";}' +
   'var entFit=tiersRow.querySelector(".tier.enterprise .tier-fit");' +
   'if(entFit){entFit.textContent="$2M+ in annual revenue, multiple offices or entities";}' +
   'var tierBtns=tiersRow.querySelectorAll("a.btn-tier");' +
@@ -1188,7 +1188,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}' +
   'ready(function(){' +
   'var steps=[' +
-  '{sel:"#nav",title:"Your command center",text:"Every stage of your AR lifecycle — from new invoices to collected cash — is one click away."},' +
+  '{sel:"#nav",title:"Your command center",text:"Every stage of your AR lifecycle â from new invoices to collected cash â is one click away."},' +
   '{sel:"#kpis",title:"Live KPIs",text:"See exactly what is outstanding, overdue, and needs attention today, updated in real time."},' +
   '{sel:"#search",title:"Search and filter",text:"Find any invoice instantly by office, department, payer, or status."},' +
   '{sel:"#queue",title:"Your prioritized queue",text:"clAIms automatically ranks every open invoice so your team always knows who to follow up with next, and why."},' +
@@ -1203,8 +1203,8 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '{click:"#clmsAcctTriggerBtn",sel:"#clmsAcctOverlay .cdap-topbar",title:"Your account page",text:"Every teammate lands here after logging in. It is where you manage your profile, billing, team, and settings without leaving clAIms."},' +
   '{click:\'#clmsAcctOverlay [data-tab="billing"]\',sel:"#cdap-panel-billing",title:"Payment & Billing",text:"Admins and managers can see the plan, payment method, and transaction history, and admins can manage the subscription right from here."},' +
   '{click:\'#clmsAcctOverlay [data-tab="team"]\',sel:"#cdap-panel-team",title:"My Team",text:"Filter your roster by office, department, or account type. Admins and managers can add, edit, or remove teammates and adjust their permissions here."},' +
-  '{click:\'#clmsAcctOverlay [data-tab="frequency"]\',sel:"#cdap-panel-frequency",title:"Contact Frequency",text:"Set exactly which days automation runs, when a NOIL or demand letter gets drafted, and guardrails like quiet hours, weekly contact caps, and human escalation — all sent under your company name, never clAIms."},' +
-  '{click:\'#clmsAcctOverlay [data-tab="settings"]\',sel:"#cdap-panel-settings",title:"Settings & Permissions",text:"Everyone controls their own automation preferences here, and admins can see exactly what each account type — employee, manager, admin — is allowed to do."},' +
+  '{click:\'#clmsAcctOverlay [data-tab="frequency"]\',sel:"#cdap-panel-frequency",title:"Contact Frequency",text:"Set exactly which days automation runs, when a NOIL or demand letter gets drafted, and guardrails like quiet hours, weekly contact caps, and human escalation â all sent under your company name, never clAIms."},' +
+  '{click:\'#clmsAcctOverlay [data-tab="settings"]\',sel:"#cdap-panel-settings",title:"Settings & Permissions",text:"Everyone controls their own automation preferences here, and admins can see exactly what each account type â employee, manager, admin â is allowed to do."},' +
   '{click:"#cdapCloseBtn",nav:"queue",sel:"#queue",title:"Back to your dashboard",text:"Close your account page any time to jump back into your queue."}' +
   '];' +
   'var idx=-1;' +
@@ -1334,7 +1334,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '.cdap-plan-banner .cdap-plan-name{font-size:18px;font-weight:700;} ' +
   '.cdap-feature-list{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;} ' +
   '.cdap-feature-list li{font-size:13px;color:#3B3A35;padding-left:20px;position:relative;} ' +
-  '.cdap-feature-list li:before{content:"✓";position:absolute;left:0;color:#C29B57;font-weight:700;} ' +
+  '.cdap-feature-list li:before{content:"â";position:absolute;left:0;color:#C29B57;font-weight:700;} ' +
   '@media (max-width:640px){.cdap-feature-list{grid-template-columns:1fr;}} ' +
   'table.cdap-table{width:100%;border-collapse:collapse;font-size:13.5px;} ' +
   'table.cdap-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8A8578;font-weight:700;padding:10px 12px;border-bottom:1.5px solid #E5E0D2;} ' +
@@ -1391,7 +1391,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<div class="cdap-brand">clAIms</div> ' +
   '<div class="cdap-topbar-right"> ' +
   '<div class="cdap-user-chip"><b>demo.admin@yourcompany.com</b><span class="cdap-role-badge">Admin</span></div> ' +
-  '<button class="cdap-close-btn" id="cdapCloseBtn">Close ✕</button> ' +
+  '<button class="cdap-close-btn" id="cdapCloseBtn">Close â</button> ' +
   '</div> ' +
   '</div> ' +
   ' ' +
@@ -1413,7 +1413,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<div class="cdap-field"><label>Username / Email</label><div class="cdap-value">demo.admin@yourcompany.com</div></div> ' +
   '<div class="cdap-field"><label>Company</label><div class="cdap-value">Your Company Name</div></div> ' +
   '<div class="cdap-field"><label>Account type</label><div class="cdap-value"><span class="cdap-role-pill admin">Admin</span></div></div> ' +
-  '<div class="cdap-field"><label>Password</label><div class="cdap-value">••••••••••• <span style="color:#C29B57;font-weight:600;font-size:12.5px;">Change password</span></div></div> ' +
+  '<div class="cdap-field"><label>Password</label><div class="cdap-value">â¢â¢â¢â¢â¢â¢â¢â¢â¢â¢â¢ <span style="color:#C29B57;font-weight:600;font-size:12.5px;">Change password</span></div></div> ' +
   '<div class="cdap-field"><label>Member since</label><div class="cdap-value">March 2025</div></div> ' +
   '</div> ' +
   '</div> ' +
@@ -1430,7 +1430,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<div class="cdap-card"> ' +
   '<h3>Plan features<span class="cdap-mock-flag">sample</span></h3> ' +
   '<ul class="cdap-feature-list"> ' +
-  '<li>5–8 user seats</li> ' +
+  '<li>5â8 user seats</li> ' +
   '<li>QuickBooks, Dash, Salesforce, NetSuite, and more</li> ' +
   '<li>Everything in Starter</li> ' +
   '<li>Invoiced MTD &amp; Collected reporting by office</li> ' +
@@ -1440,7 +1440,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<div class="cdap-card"> ' +
   '<h3>Payment method<span class="cdap-mock-flag">sample</span></h3> ' +
   '<div class="cdap-grid"> ' +
-  '<div class="cdap-field"><label>Card on file</label><div class="cdap-value">Visa •••• 4242, exp 08/28</div></div> ' +
+  '<div class="cdap-field"><label>Card on file</label><div class="cdap-value">Visa â¢â¢â¢â¢ 4242, exp 08/28</div></div> ' +
   '<div class="cdap-field"><label>Business address</label><div class="cdap-value">123 Main St, Dallas, TX 75201</div></div> ' +
   '</div> ' +
   '<div style="margin-top:14px;"><button class="cdap-btn-outline cdap-btn-sm">Update payment method</button></div> ' +
@@ -1915,9 +1915,9 @@ async function handleSupportRequest(request, env) {
     '<p>Thanks for reaching out to clAIms support. A member of our team will reply to this email within one business day.</p>' +
     '<p style="color:#666;font-size:13px;">Your message: &ldquo;' + escapeHtml(message.slice(0, 300)) + '&rdquo;</p>' +
     '</div>';
-  await sendEmail(env, { to: email, subject: 'We got your message — clAIms support', html: confirmHtml, kind: 'support_confirmation' });
+  await sendEmail(env, { to: email, subject: 'We got your message â clAIms support', html: confirmHtml, kind: 'support_confirmation' });
 
-  return json({ ok: true, message: 'Thanks — we got your message.' });
+  return json({ ok: true, message: 'Thanks â we got your message.' });
 }
 
 async function handleForgotPassword(request, env) {
@@ -1944,7 +1944,7 @@ async function handleForgotPassword(request, env) {
       '<p>Hi ' + escapeHtml(user.full_name || '') + ',</p>' +
       '<p>We received a request to reset the password for your clAIms account. Click below to choose a new password.</p>' +
       '<p style="margin:28px 0;"><a href="' + resetUrl + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Reset password</a></p>' +
-      '<p style="color:#666;font-size:13px;">This link expires in 1 hour. If you did not request this, you can safely ignore this email — your password will not be changed.</p>' +
+      '<p style="color:#666;font-size:13px;">This link expires in 1 hour. If you did not request this, you can safely ignore this email â your password will not be changed.</p>' +
       '</div>';
     await sendEmail(env, {
       to: user.email,
@@ -1957,6 +1957,64 @@ async function handleForgotPassword(request, env) {
   }
 
   return json({ ok: true, message: genericMessage });
+}
+
+async function handleMagicLinkRequest(request, env) {
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+  const email = (body.email || '').trim().toLowerCase();
+  if (!email) return json({ ok: false, error: 'Email is required' }, 400);
+  try {
+    const user = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
+    if (user && user.email_verified && user.status !== 'pending_approval' && user.status !== 'rejected') {
+      const token = randomToken();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      await env.DB.prepare('INSERT INTO magic_links (user_id, token, expires_at) VALUES (?, ?, ?)').bind(user.id, token, expiresAt).run();
+      const link = SITE_URL + '/magic-link?token=' + token;
+      const magicHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+        '<h2 style="margin:0 0 12px;">Sign in to clAIms</h2>' +
+        '<p>Click the button below to sign in instantly. This link expires in 15 minutes and can only be used once.</p>' +
+        '<p style="margin:24px 0;"><a href="' + link + '" style="background:#171717;color:#EDEFF1;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Sign in to clAIms</a></p>' +
+        '<p style="color:#5B6B73;font-size:13px;">If you did not request this, you can safely ignore this email.</p>' +
+        '</div>';
+      await sendEmail(env, { to: user.email, subject: 'Your clAIms sign-in link', html: magicHtml, kind: 'magic_link', tenantId: user.tenant_id, userId: user.id, from: OPERATIONS_FROM_EMAIL });
+    }
+  } catch (e) {}
+  return json({ ok: true, message: "If that email has an account, we've sent a sign-in link." });
+}
+
+const MAGIC_LINK_ERROR_HTML = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign-in link expired — clAIms</title><style>' +
+'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#EEF1F0;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
+'.card{background:#fff;border-radius:12px;padding:40px;max-width:420px;text-align:center;box-shadow:0 10px 30px -8px rgba(23,23,23,0.15);}' +
+'h1{font-family:\'Space Grotesk\',sans-serif;font-size:22px;margin:0 0 12px;}' +
+'p{color:#5B6B73;font-size:14px;line-height:1.5;}' +
+'a{color:#C29B57;font-weight:600;text-decoration:none;}' +
+'</style></head><body><div class="card"><h1>This sign-in link has expired</h1><p>Sign-in links are one-time use and expire after 15 minutes. Head back and request a new one.</p><p><a href="/?login=1">Return to clAIms</a></p></div></body></html>';
+
+async function handleMagicLinkVerify(request, env) {
+  const url = new URL(request.url);
+  const token = url.searchParams.get('token') || '';
+  const errResp = function(status) {
+    return new Response(MAGIC_LINK_ERROR_HTML, { status: status, headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } });
+  };
+  if (!token) return errResp(400);
+  try {
+    const row = await env.DB.prepare('SELECT * FROM magic_links WHERE token = ?').bind(token).first();
+    if (!row || row.used_at || new Date(row.expires_at) < new Date()) return errResp(400);
+    const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(row.user_id).first();
+    if (!user) return errResp(400);
+    await env.DB.prepare("UPDATE magic_links SET used_at = datetime('now') WHERE id = ?").bind(row.id).run();
+    const sessionToken = randomToken();
+    const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
+    await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').bind(sessionToken, user.id, expiresAt).run();
+    const cookie = SESSION_COOKIE + '=' + sessionToken + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
+    return new Response(null, {
+      status: 302,
+      headers: { 'Location': '/dashboard', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
+    });
+  } catch (e) {
+    return errResp(500);
+  }
 }
 
 async function handleResetPasswordPage(request, env) {
@@ -2172,7 +2230,7 @@ async function handleSignup(request, env) {
     '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;">' +
     '<h2 style="color:#171717;">Verify your email</h2>' +
     '<p>Hi ' + escapeHtml(fullName) + ',</p>' +
-    '<p>Thanks for signing up for clAIms' + (isNewTenant ? '' : ' — ' + escapeHtml(tenant.company_name)) + '. Click below to verify your email and continue setup.</p>' +
+    '<p>Thanks for signing up for clAIms' + (isNewTenant ? '' : ' â ' + escapeHtml(tenant.company_name)) + '. Click below to verify your email and continue setup.</p>' +
     '<p style="margin:28px 0;"><a href="' + verifyUrl + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Verify email</a></p>' +
     '<p style="color:#666;font-size:13px;">This link expires in 24 hours. If you did not request this, you can ignore this email.</p>' +
     '</div>';
@@ -2242,7 +2300,7 @@ async function handleGetStarted(request, env) {
     kind: 'get_started_lead'
   });
 
-  return json({ ok: true, message: 'Thanks — our team will be in touch shortly.', emailSent: !!result.ok });
+  return json({ ok: true, message: 'Thanks â our team will be in touch shortly.', emailSent: !!result.ok });
 }
 
 async function handleThankYou(request, env) {
@@ -2262,7 +2320,7 @@ async function handleAccountPage(request, env) {
 
 const SUBSCRIPTION_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Manage Subscription — clAIms</title>
+<title>Manage Subscription â clAIms</title>
 <link rel="icon" href="/favicon.ico">
 <style>
 *{box-sizing:border-box;}
@@ -2309,7 +2367,7 @@ body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;co
 <a class="sub-back" href="/account">&larr; Back to Account</a>
 </div>
 <div class="sub-wrap" id="subWrap">
-<div class="sub-loading">Loading your subscription…</div>
+<div class="sub-loading">Loading your subscriptionâ¦</div>
 </div>
 
 <div class="sub-modal-backdrop" id="cancelModalBackdrop">
@@ -2338,8 +2396,8 @@ body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;co
 (function(){
 function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}
 var PLAN_FEATURES={
-  starter:{name:"Starter",next:"growth",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]},
-  growth:{name:"Growth",next:"enterprise",features:["5–8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]},
+  starter:{name:"Starter",next:"growth",features:["2â3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]},
+  growth:{name:"Growth",next:"enterprise",features:["5â8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]},
   enterprise:{name:"Enterprise",next:null,features:["Unlimited seats","All integrations","Everything in Growth","Multi-office & multi-entity support","Dedicated account manager"]}
 };
 function fmtDate(iso){
@@ -2474,7 +2532,7 @@ ready(function(){
 
   document.getElementById("cancelModalYes").addEventListener("click",function(){
     var btn=document.getElementById("cancelModalYes");
-    btn.disabled=true; btn.textContent="Cancelling…";
+    btn.disabled=true; btn.textContent="Cancellingâ¦";
     fetch("/api/subscription/cancel",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(res){
       btn.disabled=false; btn.textContent="Cancel subscription";
       closeModal("cancelModalBackdrop");
@@ -2494,12 +2552,12 @@ ready(function(){
 
   document.getElementById("upgradeModalYes").addEventListener("click",function(){
     var btn=document.getElementById("upgradeModalYes");
-    btn.disabled=true; btn.textContent="Sending…";
+    btn.disabled=true; btn.textContent="Sendingâ¦";
     fetch("/api/subscription/upgrade-request",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(res){
       btn.disabled=false; btn.textContent="Send request";
       closeModal("upgradeModalBackdrop");
       if(res&&res.ok){
-        alert("Request sent — our team will follow up by email to complete your upgrade.");
+        alert("Request sent â our team will follow up by email to complete your upgrade.");
       } else {
         alert((res&&res.error)||"We couldn't send your upgrade request. Please email us directly.");
       }
@@ -2510,7 +2568,7 @@ ready(function(){
   });
 
   function doReactivate(btn){
-    btn.disabled=true; btn.textContent="Restoring…";
+    btn.disabled=true; btn.textContent="Restoringâ¦";
     fetch("/api/subscription/reactivate",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(res){
       if(res&&res.ok){
         subInfo.subscription.cancelAtPeriodEnd=false;
@@ -3170,7 +3228,7 @@ async function handleLogin(request, env) {
     const link = STRIPE_LINKS[plan];
     if (link) {
       const paymentUrl = link + '?prefilled_email=' + encodeURIComponent(user.email) + '&client_reference_id=' + tenant.id;
-      return json({ ok: false, error: 'Your company account is verified — finish payment to activate it.', redirect: paymentUrl }, 403);
+      return json({ ok: false, error: 'Your company account is verified â finish payment to activate it.', redirect: paymentUrl }, 403);
     }
     return json({ ok: false, error: 'Your plan requires a custom quote. Our team will reach out shortly, or contact hndrx@claims-collection.net.' }, 403);
   }
@@ -3438,7 +3496,13 @@ export default {
     if (url.pathname === '/api/subscription/upgrade-request' && request.method === 'POST') {
       return handleSubscriptionUpgradeRequest(request, env);
     }
-    if (url.pathname === '/reset-password') {
+    if (url.pathname === '/api/magic-link/request' && request.method === 'POST') {
+  return handleMagicLinkRequest(request, env);
+}
+if (url.pathname === '/magic-link') {
+  return handleMagicLinkVerify(request, env);
+}
+if (url.pathname === '/reset-password') {
         return handleResetPasswordPage(request, env);
       }
       if (url.pathname === '/dashboard') {
