@@ -3091,36 +3091,34 @@ return redirectTo('/?verify=pending-approval');
 }
 
 async function handlePendingApprovals(request, env) {
-  const admin = await getSessionUser(request, env);
-  if (!admin || admin.role !== 'admin') return json({ ok: false, error: 'Not authorized' }, 403);
-  const results = await env.DB.prepare(
-    "SELECT id, email, full_name, status, created_at FROM users WHERE tenant_id = ? AND status = 'pending_approval'"
-  ).bind(admin.tenant_id).all();
-  return json({ ok: true, pending: results.results });
+const admin = await getSessionUser(request, env);
+if (!admin || admin.role !== 'admin') return json({ ok: false, error: 'Not authorized' }, 403);
+const pending = await pgSelect(env, 'users', 'tenant_id=' + pgEq(admin.tenant_id) + '&status=' + pgEq('pending_approval') + '&select=id,email,full_name,status,created_at');
+return json({ ok: true, pending: pending });
 }
 
 async function handleApproveUser(request, env) {
-  const admin = await getSessionUser(request, env);
-  if (!admin || admin.role !== 'admin') return json({ ok: false, error: 'Not authorized' }, 403);
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
-  const targetId = body.userId;
-  const target = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(targetId, admin.tenant_id).first();
-  if (!target) return json({ ok: false, error: 'User not found' }, 404);
-  await env.DB.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(targetId).run();
-  return json({ ok: true });
+const admin = await getSessionUser(request, env);
+if (!admin || admin.role !== 'admin') return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const targetId = body.userId;
+const target = await pgSelectOne(env, 'users', 'id=' + pgEq(targetId) + '&tenant_id=' + pgEq(admin.tenant_id) + '&select=*');
+if (!target) return json({ ok: false, error: 'User not found' }, 404);
+await pgUpdate(env, 'users', 'id=' + pgEq(targetId), { status: 'active' });
+return json({ ok: true });
 }
 
 async function handleRejectUser(request, env) {
-  const admin = await getSessionUser(request, env);
-  if (!admin || admin.role !== 'admin') return json({ ok: false, error: 'Not authorized' }, 403);
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
-  const targetId = body.userId;
-  const target = await env.DB.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').bind(targetId, admin.tenant_id).first();
-  if (!target) return json({ ok: false, error: 'User not found' }, 404);
-  await env.DB.prepare("UPDATE users SET status = 'rejected' WHERE id = ?").bind(targetId).run();
-  return json({ ok: true });
+const admin = await getSessionUser(request, env);
+if (!admin || admin.role !== 'admin') return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const targetId = body.userId;
+const target = await pgSelectOne(env, 'users', 'id=' + pgEq(targetId) + '&tenant_id=' + pgEq(admin.tenant_id) + '&select=*');
+if (!target) return json({ ok: false, error: 'User not found' }, 404);
+await pgUpdate(env, 'users', 'id=' + pgEq(targetId), { status: 'rejected' });
+return json({ ok: true });
 }
 
 async function verifyStripeSignature(env, sigHeader, rawBody) {
@@ -3171,62 +3169,59 @@ return new Response('ok', { status: 200 });
 }
 
 async function runWeeklyDigest(env) {
-  try {
-    const tenants = await env.DB.prepare('SELECT id, company_name FROM tenants').all();
-    const tenantList = (tenants && tenants.results) || [];
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
-    for (const tenant of tenantList) {
-      try {
-        const usersRes = await env.DB.prepare("SELECT id, email, role, office FROM users WHERE tenant_id = ? AND status = 'active' AND email_verified = 1").bind(tenant.id).all();
-        const userList = (usersRes && usersRes.results) || [];
-        if (!userList.length) continue;
+try {
+const tenantList = await pgSelect(env, 'tenants', 'select=id,company_name');
+const weekAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+for (const tenant of tenantList) {
+try {
+const userList = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenant.id) + '&status=' + pgEq('active') + '&email_verified=eq.true&select=id,email,role,office');
+if (!userList.length) continue;
 
-        const accountsRes = await env.DB.prepare('SELECT * FROM accounts WHERE tenant_id = ?').bind(tenant.id).all();
-        const accounts = (accountsRes && accountsRes.results) || [];
+const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenant.id) + '&select=*');
 
-        for (const user of userList) {
-          try {
-            const officeFilter = (user.role === 'admin') ? null : (user.office || null);
-            const scoped = officeFilter ? accounts.filter(a => a.office === officeFilter) : accounts;
+for (const user of userList) {
+try {
+const officeFilter = (user.role === 'admin') ? null : (user.office || null);
+const scoped = officeFilter ? accounts.filter(a => a.office === officeFilter) : accounts;
 
-            const collectedAccounts = scoped.filter(a => a.paid_at && a.paid_at >= weekAgo);
-            const amountCollected = collectedAccounts.reduce((sum, a) => sum + (a.paid_amount || a.amount || 0), 0);
+const collectedAccounts = scoped.filter(a => a.paid_at && new Date(a.paid_at).getTime() >= weekAgoMs);
+const amountCollected = collectedAccounts.reduce((sum, a) => sum + (a.paid_amount || a.amount || 0), 0);
 
-            const followUps = scoped.filter(a => a.updated_at && a.updated_at >= weekAgo && (a.follow_up_count || 0) > 0).length;
-            const noilSent = scoped.filter(a => a.noil_sent_at && a.noil_sent_at >= weekAgo).length;
-            const demandLettersSent = scoped.filter(a => a.demand_letter_sent_at && a.demand_letter_sent_at >= weekAgo).length;
-            const newEscalations = scoped.filter(a => a.escalated && a.updated_at && a.updated_at >= weekAgo).length;
-            const needsAttention = scoped
-              .filter(a => a.escalated && !a.paid_at)
-              .sort((x, y) => (y.amount || 0) - (x.amount || 0))
-              .slice(0, 10);
+const followUps = scoped.filter(a => a.updated_at && new Date(a.updated_at).getTime() >= weekAgoMs && (a.follow_up_count || 0) > 0).length;
+const noilSent = scoped.filter(a => a.noil_sent_at && new Date(a.noil_sent_at).getTime() >= weekAgoMs).length;
+const demandLettersSent = scoped.filter(a => a.demand_letter_sent_at && new Date(a.demand_letter_sent_at).getTime() >= weekAgoMs).length;
+const newEscalations = scoped.filter(a => a.escalated && a.updated_at && new Date(a.updated_at).getTime() >= weekAgoMs).length;
+const needsAttention = scoped
+.filter(a => a.escalated && !a.paid_at)
+.sort((x, y) => (y.amount || 0) - (x.amount || 0))
+.slice(0, 10);
 
-            const html = buildWeeklyDigestHtml({
-              companyName: tenant.company_name,
-              officeLabel: officeFilter ? (OFFICE_LABELS[officeFilter] || officeFilter) : 'All Offices',
-              amountCollected,
-              collectedCount: collectedAccounts.length,
-              followUps,
-              noilSent,
-              demandLettersSent,
-              escalations: newEscalations,
-              needsAttention
-            });
+const html = buildWeeklyDigestHtml({
+companyName: tenant.company_name,
+officeLabel: officeFilter ? (OFFICE_LABELS[officeFilter] || officeFilter) : 'All Offices',
+amountCollected,
+collectedCount: collectedAccounts.length,
+followUps,
+noilSent,
+demandLettersSent,
+escalations: newEscalations,
+needsAttention
+});
 
-            await sendEmail(env, {
-              to: user.email,
-              subject: 'Weekly Digest - clAIms',
-              html,
-              kind: 'weekly_digest',
-              tenantId: tenant.id,
-              userId: user.id,
-              from: OPERATIONS_FROM_EMAIL
-            });
-          } catch (userErr) {}
-        }
-      } catch (tenantErr) {}
-    }
-  } catch (e) {}
+await sendEmail(env, {
+to: user.email,
+subject: 'Weekly Digest - clAIms',
+html,
+kind: 'weekly_digest',
+tenantId: tenant.id,
+userId: user.id,
+from: OPERATIONS_FROM_EMAIL
+});
+} catch (userErr) {}
+}
+} catch (tenantErr) {}
+}
+} catch (e) {}
 }
 
 function buildWeeklyDigestHtml(d) {
@@ -3445,161 +3440,38 @@ async function handleMe(request, env) {
 }
 
 async function handleAdminAccountsExport(request, env) {
-  const url = new URL(request.url);
-  const key = url.searchParams.get('key') || request.headers.get('X-Export-Key') || '';
-  if (!env.ADMIN_EXPORT_KEY || key !== env.ADMIN_EXPORT_KEY) {
-    return json({ ok: false, error: 'Not authorized' }, 401);
-  }
-  const results = await env.DB.prepare(
-    `SELECT t.id AS tenant_id, t.slug, t.company_name, t.created_at AS company_created_at, t.domain, t.address, t.city, t.state, t.zip, t.country, t.company_size, t.recommended_plan, t.selected_plan, t.status AS tenant_status, t.integration_status,
-            u.id AS user_id, u.email, u.full_name, u.role AS user_role, u.status AS user_status, u.email_verified, u.created_at AS user_created_at
-     FROM tenants t
-     LEFT JOIN users u ON u.tenant_id = t.id
-     ORDER BY t.id, u.id`
-  ).all();
-  return new Response(JSON.stringify({ ok: true, generated_at: new Date().toISOString(), rows: results.results }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE, 'Access-Control-Allow-Origin': '*' }
-  });
+const url = new URL(request.url);
+const key = url.searchParams.get('key') || request.headers.get('X-Export-Key') || '';
+if (!env.ADMIN_EXPORT_KEY || key !== env.ADMIN_EXPORT_KEY) {
+return json({ ok: false, error: 'Not authorized' }, 401);
+}
+const tenantsWithUsers = await pgSelect(env, 'tenants', 'select=id,slug,company_name,created_at,domain,address,city,state,zip,country,company_size,recommended_plan,selected_plan,status,integration_status,users!users_tenant_id_fkey(id,email,full_name,role,status,email_verified,created_at)&order=id.asc');
+const rows = [];
+for (const t of tenantsWithUsers) {
+const users = (t.users || []).slice().sort((a, b) => (a.id || 0) - (b.id || 0));
+if (!users.length) {
+rows.push({
+tenant_id: t.id, slug: t.slug, company_name: t.company_name, company_created_at: t.created_at,
+domain: t.domain, address: t.address, city: t.city, state: t.state, zip: t.zip, country: t.country,
+company_size: t.company_size, recommended_plan: t.recommended_plan, selected_plan: t.selected_plan,
+tenant_status: t.status, integration_status: t.integration_status,
+user_id: null, email: null, full_name: null, user_role: null, user_status: null, email_verified: null, user_created_at: null
+});
+} else {
+for (const u of users) {
+rows.push({
+tenant_id: t.id, slug: t.slug, company_name: t.company_name, company_created_at: t.created_at,
+domain: t.domain, address: t.address, city: t.city, state: t.state, zip: t.zip, country: t.country,
+company_size: t.company_size, recommended_plan: t.recommended_plan, selected_plan: t.selected_plan,
+tenant_status: t.status, integration_status: t.integration_status,
+user_id: u.id, email: u.email, full_name: u.full_name, user_role: u.role, user_status: u.status, email_verified: u.email_verified, user_created_at: u.created_at
+});
+}
+}
+}
+return new Response(JSON.stringify({ ok: true, generated_at: new Date().toISOString(), rows: rows }), {
+status: 200,
+headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE, 'Access-Control-Allow-Origin': '*' }
+});
 }
 
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-
-    if (url.pathname === '/api/login' && request.method === 'POST') {
-      return handleLogin(request, env);
-    }
-    if (url.pathname === '/api/logout' && request.method === 'POST') {
-      return handleLogout(request, env);
-    }
-    if (url.pathname === '/api/escalate-notify' && request.method === 'POST') {
-      return handleEscalateNotify(request, env);
-    }
-    if (url.pathname === '/api/me' && request.method === 'GET') {
-      return handleMe(request, env);
-    }
-    if (url.pathname === '/api/admin/accounts-export' && request.method === 'GET') {
-      return handleAdminAccountsExport(request, env);
-    }
-    if (url.pathname === '/api/signup' && request.method === 'POST') {
-      return handleSignup(request, env);
-    }
-    if (url.pathname === '/api/verify-email' && request.method === 'GET') {
-      return handleVerifyEmail(request, env);
-    }
-    if (url.pathname === '/api/pending-approvals' && request.method === 'GET') {
-      return handlePendingApprovals(request, env);
-    }
-    if (url.pathname === '/api/approve-user' && request.method === 'POST') {
-      return handleApproveUser(request, env);
-    }
-    if (url.pathname === '/api/reject-user' && request.method === 'POST') {
-      return handleRejectUser(request, env);
-    }
-    if (url.pathname === '/api/support' && request.method === 'POST') {
-      return handleSupportRequest(request, env);
-    }
-    if (url.pathname === '/api/forgot-password' && request.method === 'POST') {
-      return handleForgotPassword(request, env);
-    }
-    if (url.pathname === '/api/reset-password' && request.method === 'POST') {
-      return handleResetPassword(request, env);
-    }
-    if (url.pathname === '/api/demo-dashboard' && request.method === 'GET') {
-      return handleDemoDashboard(request, env);
-    }
-    if (url.pathname === '/api/get-started' && request.method === 'POST') {
-      return handleGetStarted(request, env);
-    }
-    if (url.pathname === '/thank-you' && request.method === 'GET') {
-      return handleThankYou(request, env);
-    }
-    if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
-      return handleStripeWebhook(request, env);
-    }
-    if (url.pathname === '/account') {
-      return handleAccountPage(request, env);
-    }
-    if (url.pathname === '/account/subscription') {
-      return handleSubscriptionPage(request, env);
-    }
-    if (url.pathname === '/api/subscription' && request.method === 'GET') {
-      return handleSubscriptionInfo(request, env);
-    }
-    if (url.pathname === '/api/billing-portal' && request.method === 'POST') {
-      return handleBillingPortal(request, env);
-    }
-    if (url.pathname === '/api/change-password' && request.method === 'POST') {
-      return handleChangePassword(request, env);
-    }
-    if (url.pathname === '/api/integrations/accounting/sync' && request.method === 'POST') {
-      return handleAccountingSync(request, env);
-    }
-    if (url.pathname === '/api/integrations/connect' && request.method === 'POST') {
-      return handleIntegrationConnect(request, env);
-    }
-    if (url.pathname === '/api/integrations/disconnect' && request.method === 'POST') {
-      return handleIntegrationDisconnect(request, env);
-    }
-    if (url.pathname === '/api/integrations' && request.method === 'GET') {
-      return handleIntegrationsList(request, env);
-    }
-    if (url.pathname === '/api/accounts' && request.method === 'GET') {
-      return handleAccounts(request, env);
-    }
-    if (url.pathname === '/api/team' && request.method === 'GET') {
-      return handleTeamList(request, env);
-    }
-    if (url.pathname === '/api/team/invite' && request.method === 'POST') {
-      return handleTeamInvite(request, env);
-    }
-    if (url.pathname === '/api/team/remove' && request.method === 'POST') {
-      return handleTeamRemove(request, env);
-    }
-    if (url.pathname === '/api/transactions' && request.method === 'GET') {
-      return handleTransactions(request, env);
-    }
-    if (url.pathname === '/api/subscription/cancel' && request.method === 'POST') {
-      return handleSubscriptionCancel(request, env);
-    }
-    if (url.pathname === '/api/subscription/reactivate' && request.method === 'POST') {
-      return handleSubscriptionReactivate(request, env);
-    }
-    if (url.pathname === '/api/subscription/upgrade-request' && request.method === 'POST') {
-      return handleSubscriptionUpgradeRequest(request, env);
-    }
-    if (url.pathname === '/api/magic-link/request' && request.method === 'POST') {
-  return handleMagicLinkRequest(request, env);
-}
-if (url.pathname === '/magic-link') {
-  return handleMagicLinkVerify(request, env);
-}
-if (url.pathname === '/reset-password') {
-        return handleResetPasswordPage(request, env);
-      }
-      if (url.pathname === '/dashboard') {
-      return handleDashboard(request, env);
-    }
-    if (url.pathname === '/dashboard.html') {
-      return new Response(null, {
-        status: 302,
-        headers: { 'Location': '/dashboard', 'Cache-Control': NO_STORE }
-      });
-    }
-
-    const assetResponse = await env.ASSETS.fetch(request);
-    return injectHelpWidget(assetResponse);
-  },
-
-  async scheduled(event, env, ctx) {
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour12: false, weekday: 'short', hour: '2-digit' }).formatToParts(new Date());
-    const weekday = (parts.find(p => p.type === 'weekday') || {}).value;
-    const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10);
-    if (weekday === 'Wed' && hour === 18) {
-      ctx.waitUntil(runWeeklyDigest(env));
-    }
-  }
-};
-
-// redeploy trigger
