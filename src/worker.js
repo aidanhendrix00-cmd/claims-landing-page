@@ -2700,210 +2700,235 @@ function officeScopeClause(user) {
 }
 
 async function handleIntegrationsList(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-  const rows = await env.DB.prepare('SELECT id, provider, status, connected_at FROM integrations WHERE tenant_id = ? ORDER BY id DESC').bind(user.tenant_id).all();
-  return json({ ok: true, integrations: (rows && rows.results) || [] });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+const rows = await pgSelect(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,provider,status,connected_at&order=id.desc');
+return json({ ok: true, integrations: rows || [] });
 }
 
 async function handleIntegrationConnect(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-  let body;
-  try { body = await request.json(); } catch (e) { body = {}; }
-  const provider = (body.provider || 'accounting').toString().slice(0, 60);
-  const apiKey = randomToken();
-  const existing = await env.DB.prepare('SELECT id FROM integrations WHERE tenant_id = ? AND provider = ?').bind(user.tenant_id, provider).first();
-  if (existing) {
-    await env.DB.prepare("UPDATE integrations SET status = 'connected', api_key = ?, connected_at = datetime('now') WHERE id = ?").bind(apiKey, existing.id).run();
-  } else {
-    await env.DB.prepare("INSERT INTO integrations (tenant_id, provider, status, api_key, connected_at) VALUES (?, ?, 'connected', ?, datetime('now'))").bind(user.tenant_id, provider, apiKey).run();
-  }
-  return json({ ok: true, provider, apiKey, syncUrl: SITE_URL + '/api/integrations/accounting/sync' });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { body = {}; }
+const provider = (body.provider || 'accounting').toString().slice(0, 60);
+const apiKey = randomToken();
+const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&provider=' + pgEq(provider) + '&select=id');
+if (existing) {
+await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), { status: 'connected', api_key: apiKey, connected_at: new Date().toISOString() });
+} else {
+await pgInsert(env, 'integrations', { tenant_id: user.tenant_id, provider: provider, status: 'connected', api_key: apiKey, connected_at: new Date().toISOString() });
+}
+return json({ ok: true, provider, apiKey, syncUrl: SITE_URL + '/api/integrations/accounting/sync' });
 }
 
 async function handleIntegrationDisconnect(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-  let body;
-  try { body = await request.json(); } catch (e) { body = {}; }
-  const id = parseInt(body.id, 10);
-  if (!id) return json({ ok: false, error: 'Missing id' }, 400);
-  await env.DB.prepare("UPDATE integrations SET status = 'disconnected' WHERE id = ? AND tenant_id = ?").bind(id, user.tenant_id).run();
-  return json({ ok: true });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { body = {}; }
+const id = parseInt(body.id, 10);
+if (!id) return json({ ok: false, error: 'Missing id' }, 400);
+await pgUpdate(env, 'integrations', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id), { status: 'disconnected' });
+return json({ ok: true });
 }
 
 async function handleAccountingSync(request, env) {
-  const authHeader = request.headers.get('Authorization') || '';
-  const match = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match) return json({ ok: false, error: 'Missing bearer token' }, 401);
-  const apiKey = match[1].trim();
-  const integration = await env.DB.prepare("SELECT id, tenant_id FROM integrations WHERE api_key = ? AND status = 'connected'").bind(apiKey).first();
-  if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
-  const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
-  const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
-  let processed = 0;
-  for (const raw of items) {
-    if (!raw || !raw.externalId || !raw.customerName) continue;
-    let status = (raw.status || 'in_ar').toString();
-    if (status === 'paid_in_full') status = 'paid';
-    const office = VALID_OFFICES.indexOf(raw.office) !== -1 ? raw.office : null;
-    const escalated = raw.escalated ? 1 : 0;
-    const waSent = raw.waSent ? 1 : 0;
-    try {
-      await env.DB.prepare(
-        'INSERT INTO accounts (tenant_id, integration_id, external_id, office, customer_name, meta, payer, contact, amount, invoiced_at, status, paid_amount, paid_at, department, category, escalated, noil_sent_at, demand_letter_sent_at, wa_sent, wa_signed_at, follow_up_count, note, updated_at) ' +
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, datetime(\'now\')) ' +
-        'ON CONFLICT(tenant_id, external_id) DO UPDATE SET ' +
-        'office=excluded.office, customer_name=excluded.customer_name, meta=excluded.meta, payer=excluded.payer, contact=excluded.contact, amount=excluded.amount, invoiced_at=excluded.invoiced_at, ' +
-        'status=excluded.status, paid_amount=excluded.paid_amount, ' +
-        "paid_at = CASE WHEN excluded.status='paid' AND accounts.status!='paid' AND excluded.paid_at IS NULL THEN datetime('now') ELSE COALESCE(excluded.paid_at, accounts.paid_at) END, " +
-        'department=excluded.department, category=excluded.category, escalated=excluded.escalated, ' +
-        'noil_sent_at=COALESCE(excluded.noil_sent_at, accounts.noil_sent_at), ' +
-        'demand_letter_sent_at=COALESCE(excluded.demand_letter_sent_at, accounts.demand_letter_sent_at), ' +
-        'wa_sent=excluded.wa_sent, wa_signed_at=COALESCE(excluded.wa_signed_at, accounts.wa_signed_at), ' +
-        "follow_up_count=excluded.follow_up_count, note=excluded.note, updated_at=datetime('now')"
-      ).bind(
-        integration.tenant_id, integration.id, String(raw.externalId), office, String(raw.customerName).slice(0,200),
-        raw.meta ? String(raw.meta).slice(0,300) : null, raw.payer ? String(raw.payer).slice(0,40) : null, raw.contact ? String(raw.contact).slice(0,120) : null,
-        Number(raw.amount) || 0, raw.invoicedAt ? String(raw.invoicedAt) : null, status,
-        raw.paidAmount != null ? Number(raw.paidAmount) : null, raw.paidAt ? String(raw.paidAt) : null,
-        raw.department ? String(raw.department).slice(0,40) : null, raw.category ? String(raw.category).slice(0,40) : null,
-        escalated, raw.noilSentAt ? String(raw.noilSentAt) : null, raw.demandLetterSentAt ? String(raw.demandLetterSentAt) : null,
-        waSent, raw.waSignedAt ? String(raw.waSignedAt) : null, parseInt(raw.followUpCount,10) || 0, raw.note ? String(raw.note).slice(0,500) : null
-      ).run();
-      processed++;
-      if (Array.isArray(raw.activities) && raw.activities.length) {
-        const acctRow = await env.DB.prepare('SELECT id FROM accounts WHERE tenant_id = ? AND external_id = ?').bind(integration.tenant_id, String(raw.externalId)).first();
-        if (acctRow) {
-          for (const act of raw.activities.slice(0, 25)) {
-            if (!act || !act.type) continue;
-            await env.DB.prepare(
-              'INSERT INTO account_activity (tenant_id, account_id, type, sent_at, recipient, source, subject, status) VALUES (?,?,?,?,?,?,?,?)'
-            ).bind(
-              integration.tenant_id, acctRow.id, String(act.type).slice(0,40),
-              act.sentAt ? String(act.sentAt) : new Date().toISOString(),
-              act.recipient ? String(act.recipient).slice(0,120) : null,
-              act.source ? String(act.source).slice(0,20) : 'automation',
-              act.subject ? String(act.subject).slice(0,200) : null,
-              act.status ? String(act.status).slice(0,40) : null
-            ).run();
-          }
-        }
-      }
-    } catch (e) {}
-  }
-  return json({ ok: true, processed });
+const authHeader = request.headers.get('Authorization') || '';
+const match = authHeader.match(/^Bearer\s+(.+)$/i);
+if (!match) return json({ ok: false, error: 'Missing bearer token' }, 401);
+const apiKey = match[1].trim();
+const integration = await pgSelectOne(env, 'integrations', 'api_key=' + pgEq(apiKey) + '&status=' + pgEq('connected') + '&select=id,tenant_id');
+if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
+const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
+const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
+let processed = 0;
+for (const raw of items) {
+if (!raw || !raw.externalId || !raw.customerName) continue;
+let status = (raw.status || 'in_ar').toString();
+if (status === 'paid_in_full') status = 'paid';
+const office = VALID_OFFICES.indexOf(raw.office) !== -1 ? raw.office : null;
+const escalated = !!raw.escalated;
+const waSent = !!raw.waSent;
+try {
+const existing = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&external_id=' + pgEq(String(raw.externalId)) + '&select=id,status,paid_at,noil_sent_at,demand_letter_sent_at,wa_signed_at');
+const nowIso = new Date().toISOString();
+const rawPaidAt = raw.paidAt ? String(raw.paidAt) : null;
+const rawNoilSentAt = raw.noilSentAt ? String(raw.noilSentAt) : null;
+const rawDemandLetterSentAt = raw.demandLetterSentAt ? String(raw.demandLetterSentAt) : null;
+const rawWaSignedAt = raw.waSignedAt ? String(raw.waSignedAt) : null;
+const commonFields = {
+office: office, customer_name: String(raw.customerName).slice(0,200),
+meta: raw.meta ? String(raw.meta).slice(0,300) : null,
+payer: raw.payer ? String(raw.payer).slice(0,40) : null,
+contact: raw.contact ? String(raw.contact).slice(0,120) : null,
+amount: Number(raw.amount) || 0,
+invoiced_at: raw.invoicedAt ? String(raw.invoicedAt) : null,
+status: status,
+paid_amount: raw.paidAmount != null ? Number(raw.paidAmount) : null,
+department: raw.department ? String(raw.department).slice(0,40) : null,
+category: raw.category ? String(raw.category).slice(0,40) : null,
+escalated: escalated,
+wa_sent: waSent,
+follow_up_count: parseInt(raw.followUpCount,10) || 0,
+note: raw.note ? String(raw.note).slice(0,500) : null,
+updated_at: nowIso
+};
+let acctId;
+if (existing) {
+let paidAt;
+if (status === 'paid' && existing.status !== 'paid' && rawPaidAt === null) {
+paidAt = nowIso;
+} else {
+paidAt = rawPaidAt !== null ? rawPaidAt : existing.paid_at;
+}
+const updateFields = Object.assign({}, commonFields, {
+paid_at: paidAt,
+noil_sent_at: rawNoilSentAt !== null ? rawNoilSentAt : existing.noil_sent_at,
+demand_letter_sent_at: rawDemandLetterSentAt !== null ? rawDemandLetterSentAt : existing.demand_letter_sent_at,
+wa_signed_at: rawWaSignedAt !== null ? rawWaSignedAt : existing.wa_signed_at
+});
+await pgUpdate(env, 'accounts', 'id=' + pgEq(existing.id), updateFields);
+acctId = existing.id;
+} else {
+const inserted = await pgInsert(env, 'accounts', Object.assign({
+tenant_id: integration.tenant_id, integration_id: integration.id, external_id: String(raw.externalId)
+}, commonFields, {
+paid_at: rawPaidAt,
+noil_sent_at: rawNoilSentAt,
+demand_letter_sent_at: rawDemandLetterSentAt,
+wa_signed_at: rawWaSignedAt
+}));
+acctId = inserted ? inserted.id : null;
+}
+processed++;
+if (Array.isArray(raw.activities) && raw.activities.length && acctId) {
+for (const act of raw.activities.slice(0, 25)) {
+if (!act || !act.type) continue;
+await pgInsert(env, 'account_activity', {
+tenant_id: integration.tenant_id, account_id: acctId, type: String(act.type).slice(0,40),
+sent_at: act.sentAt ? String(act.sentAt) : new Date().toISOString(),
+recipient: act.recipient ? String(act.recipient).slice(0,120) : null,
+source: act.source ? String(act.source).slice(0,20) : 'automation',
+subject: act.subject ? String(act.subject).slice(0,200) : null,
+status: act.status ? String(act.status).slice(0,40) : null
+});
+}
+}
+} catch (e) {}
+}
+return json({ ok: true, processed });
 }
 
 async function handleAccounts(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  let rows;
-  if (user.role === 'admin') {
-    rows = await env.DB.prepare('SELECT * FROM accounts WHERE tenant_id = ? ORDER BY invoiced_at DESC').bind(user.tenant_id).all();
-  } else {
-    rows = await env.DB.prepare('SELECT * FROM accounts WHERE tenant_id = ? AND office = ? ORDER BY invoiced_at DESC').bind(user.tenant_id, user.office || '__none__').all();
-  }
-  const list = (rows && rows.results) || [];
-  const accounts = list.map(function (a) {
-    let days = null;
-    if (a.invoiced_at) {
-      try { days = Math.max(0, Math.floor((Date.now() - new Date(a.invoiced_at).getTime()) / 86400000)); } catch (e) {}
-    }
-    return {
-      id: a.id,
-      invoiceNumber: 'INV-' + (10000 + a.id),
-      externalId: a.external_id,
-      name: a.customer_name,
-      meta: a.meta,
-      payer: a.payer,
-      contact: a.contact,
-      amount: a.amount,
-      invoicedDate: a.invoiced_at,
-      days: days,
-      jobStatus: a.status,
-      department: a.department,
-      category: a.category,
-      officeLocation: a.office,
-      escalated: !!a.escalated,
-      notifiedName: a.notified_name,
-      notifiedAt: a.notified_at,
-      noilSentAt: a.noil_sent_at,
-      demandLetterSentAt: a.demand_letter_sent_at,
-      waSent: !!a.wa_sent,
-      waSignedDate: a.wa_signed_at,
-      followups: a.follow_up_count,
-      note: a.note,
-      paidAmount: a.paid_amount,
-      paidDate: a.paid_at
-    };
-  });
-  return json({ ok: true, accounts });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let list;
+if (user.role === 'admin') {
+list = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=invoiced_at.desc');
+} else {
+list = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=*&order=invoiced_at.desc');
+}
+const accounts = list.map(function (a) {
+let days = null;
+if (a.invoiced_at) {
+try { days = Math.max(0, Math.floor((Date.now() - new Date(a.invoiced_at).getTime()) / 86400000)); } catch (e) {}
+}
+return {
+id: a.id,
+invoiceNumber: 'INV-' + (10000 + a.id),
+externalId: a.external_id,
+name: a.customer_name,
+meta: a.meta,
+payer: a.payer,
+contact: a.contact,
+amount: a.amount,
+invoicedDate: a.invoiced_at,
+days: days,
+jobStatus: a.status,
+department: a.department,
+category: a.category,
+officeLocation: a.office,
+escalated: !!a.escalated,
+notifiedName: a.notified_name,
+notifiedAt: a.notified_at,
+noilSentAt: a.noil_sent_at,
+demandLetterSentAt: a.demand_letter_sent_at,
+waSent: !!a.wa_sent,
+waSignedDate: a.wa_signed_at,
+followups: a.follow_up_count,
+note: a.note,
+paidAmount: a.paid_amount,
+paidDate: a.paid_at
+};
+});
+return json({ ok: true, accounts });
 }
 
 async function handleTeamList(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  let rows;
-  if (user.role === 'admin') {
-    rows = await env.DB.prepare("SELECT id, email, full_name, role, office, status FROM users WHERE tenant_id = ? ORDER BY id ASC").bind(user.tenant_id).all();
-  } else {
-    rows = await env.DB.prepare("SELECT id, email, full_name, role, office, status FROM users WHERE tenant_id = ? AND (office = ? OR role = 'admin') ORDER BY id ASC").bind(user.tenant_id, user.office || '__none__').all();
-  }
-  return json({ ok: true, team: (rows && rows.results) || [] });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let rows;
+if (user.role === 'admin') {
+rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,status&order=id.asc');
+} else {
+rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&or=(office.eq.' + encodeURIComponent(user.office || '__none__') + ',role.eq.admin)&select=id,email,full_name,role,office,status&order=id.asc');
+}
+return json({ ok: true, team: rows || [] });
 }
 
 async function handleTeamInvite(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
-  const email = (body.email || '').toString().trim().toLowerCase();
-  const fullName = (body.fullName || '').toString().slice(0, 120);
-  const role = (body.role || '').toString();
-  const office = (body.office || '').toString();
-  const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
-  if (!email || !email.includes('@')) return json({ ok: false, error: 'A valid email is required.' }, 400);
-  if (role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'manager' or 'employee'." }, 400);
-  if (VALID_OFFICES.indexOf(office) === -1) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
-  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
-  if (existing) return json({ ok: false, error: 'That email is already associated with an account.' }, 409);
-  const throwawaySalt = randomSalt();
-  const throwawayHash = await hashPassword(randomToken(), throwawaySalt);
-  const resetToken = randomToken();
-  const resetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-  const insertResult = await env.DB.prepare(
-    "INSERT INTO users (tenant_id, email, password_hash, salt, role, email_verified, status, full_name, office, reset_token, reset_expires, invited_by) VALUES (?, ?, ?, ?, ?, 1, 'active', ?, ?, ?, ?, ?)"
-  ).bind(user.tenant_id, email, throwawayHash, throwawaySalt, role, fullName || null, office, resetToken, resetExpires, user.id).run();
-  const newUserId = insertResult && insertResult.meta ? insertResult.meta.last_row_id : null;
-  const setPasswordUrl = SITE_URL + '/reset-password?token=' + resetToken;
-  const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
-    '<h2 style="margin:0 0 12px;">You\'ve been added to clAIms</h2>' +
-    '<p>' + (fullName || email) + ', you have been added as a ' + role + ' on the ' + OFFICE_LABELS[office] + ' team.</p>' +
-    '<p style="margin-top:20px;"><a href="' + setPasswordUrl + '" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Set Your Password</a></p>' +
-    '<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days.</p>' +
-    '</div>';
-  await sendEmail(env, { to: email, subject: "You've been added to clAIms", html, kind: 'team_invite', tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL });
-  return json({ ok: true, id: newUserId });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const email = (body.email || '').toString().trim().toLowerCase();
+const fullName = (body.fullName || '').toString().slice(0, 120);
+const role = (body.role || '').toString();
+const office = (body.office || '').toString();
+const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
+if (!email || !email.includes('@')) return json({ ok: false, error: 'A valid email is required.' }, 400);
+if (role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'manager' or 'employee'." }, 400);
+if (VALID_OFFICES.indexOf(office) === -1) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
+const existing = await pgSelectOne(env, 'users', 'email=' + pgEq(email) + '&select=id');
+if (existing) return json({ ok: false, error: 'That email is already associated with an account.' }, 409);
+const throwawaySalt = randomSalt();
+const throwawayHash = await hashPassword(randomToken(), throwawaySalt);
+const resetToken = randomToken();
+const resetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+const insertedUser = await pgInsert(env, 'users', {
+tenant_id: user.tenant_id, email: email, password_hash: throwawayHash, salt: throwawaySalt, role: role,
+email_verified: true, status: 'active', full_name: fullName || null, office: office,
+reset_token: resetToken, reset_expires: resetExpires, invited_by: user.id
+});
+const newUserId = insertedUser ? insertedUser.id : null;
+const setPasswordUrl = SITE_URL + '/reset-password?token=' + resetToken;
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+'<h2 style="margin:0 0 12px;">You\'ve been added to clAIms</h2>' +
+'<p>' + (fullName || email) + ', you have been added as a ' + role + ' on the ' + OFFICE_LABELS[office] + ' team.</p>' +
+'<p style="margin-top:20px;"><a href="' + setPasswordUrl + '" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Set Your Password</a></p>' +
+'<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days.</p>' +
+'</div>';
+await sendEmail(env, { to: email, subject: "You've been added to clAIms", html, kind: 'team_invite', tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL });
+return json({ ok: true, id: newUserId });
 }
 
 async function handleTeamRemove(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-  let body;
-  try { body = await request.json(); } catch (e) { body = {}; }
-  const id = parseInt(body.id, 10);
-  if (!id) return json({ ok: false, error: 'Missing id' }, 400);
-  await env.DB.prepare("UPDATE users SET status = 'disabled' WHERE id = ? AND tenant_id = ? AND role != 'admin'").bind(id, user.tenant_id).run();
-  return json({ ok: true });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { body = {}; }
+const id = parseInt(body.id, 10);
+if (!id) return json({ ok: false, error: 'Missing id' }, 400);
+await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&role=neq.admin', { status: 'disabled' });
+return json({ ok: true });
 }
 
 async function handleChangePassword(request, env) {
@@ -3118,35 +3143,31 @@ async function verifyStripeSignature(env, sigHeader, rawBody) {
 }
 
 async function handleStripeWebhook(request, env) {
-  const rawBody = await request.text();
-  const sigHeader = request.headers.get('Stripe-Signature') || '';
-  const valid = await verifyStripeSignature(env, sigHeader, rawBody);
-  if (!valid) {
-    return new Response('Invalid signature', { status: 400 });
-  }
-  let event;
-  try { event = JSON.parse(rawBody); } catch (e) { return new Response('Bad payload', { status: 400 }); }
+const rawBody = await request.text();
+const sigHeader = request.headers.get('Stripe-Signature') || '';
+const valid = await verifyStripeSignature(env, sigHeader, rawBody);
+if (!valid) {
+return new Response('Invalid signature', { status: 400 });
+}
+let event;
+try { event = JSON.parse(rawBody); } catch (e) { return new Response('Bad payload', { status: 400 }); }
 
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const tenantId = session.client_reference_id;
-    if (tenantId) {
-      await env.DB.prepare(
-        "UPDATE tenants SET status = 'active', integration_status = 'not_started', stripe_customer_id = ? WHERE id = ?"
-      ).bind(session.customer || null, tenantId).run();
-      await env.DB.prepare(
-        "UPDATE users SET status = 'active' WHERE tenant_id = ? AND role = 'admin'"
-      ).bind(tenantId).run();
+if (event.type === 'checkout.session.completed') {
+const session = event.data.object;
+const tenantId = session.client_reference_id;
+if (tenantId) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { status: 'active', integration_status: 'not_started', stripe_customer_id: session.customer || null });
+await pgUpdate(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&role=' + pgEq('admin'), { status: 'active' });
 
-      const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(tenantId).first();
-      if (tenant) {
-        const notifyHtml = '<div style="font-family:sans-serif;"><h2>Payment received</h2><p>' + escapeHtml(tenant.company_name) + ' has completed payment and is now active. Plan: ' + escapeHtml(tenant.selected_plan || tenant.recommended_plan || 'n/a') + '.</p></div>';
-        await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Payment received: ' + tenant.company_name, html: notifyHtml, kind: 'payment_received', tenantId: tenant.id });
-      }
-    }
-  }
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=*');
+if (tenant) {
+const notifyHtml = '<div style="font-family:sans-serif;"><h2>Payment received</h2><p>' + escapeHtml(tenant.company_name) + ' has completed payment and is now active. Plan: ' + escapeHtml(tenant.selected_plan || tenant.recommended_plan || 'n/a') + '.</p></div>';
+await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Payment received: ' + tenant.company_name, html: notifyHtml, kind: 'payment_received', tenantId: tenant.id });
+}
+}
+}
 
-  return new Response('ok', { status: 200 });
+return new Response('ok', { status: 200 });
 }
 
 async function runWeeklyDigest(env) {
