@@ -3475,3 +3475,144 @@ headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE, 'Acces
 });
 }
 
+
+export default {
+async fetch(request, env, ctx) {
+const url = new URL(request.url);
+
+if (url.pathname === '/api/login' && request.method === 'POST') {
+return handleLogin(request, env);
+}
+if (url.pathname === '/api/logout' && request.method === 'POST') {
+return handleLogout(request, env);
+}
+if (url.pathname === '/api/escalate-notify' && request.method === 'POST') {
+return handleEscalateNotify(request, env);
+}
+if (url.pathname === '/api/me' && request.method === 'GET') {
+return handleMe(request, env);
+}
+if (url.pathname === '/api/admin/accounts-export' && request.method === 'GET') {
+return handleAdminAccountsExport(request, env);
+}
+if (url.pathname === '/api/signup' && request.method === 'POST') {
+return handleSignup(request, env);
+}
+if (url.pathname === '/api/verify-email' && request.method === 'GET') {
+return handleVerifyEmail(request, env);
+}
+if (url.pathname === '/api/pending-approvals' && request.method === 'GET') {
+return handlePendingApprovals(request, env);
+}
+if (url.pathname === '/api/approve-user' && request.method === 'POST') {
+return handleApproveUser(request, env);
+}
+if (url.pathname === '/api/reject-user' && request.method === 'POST') {
+return handleRejectUser(request, env);
+}
+if (url.pathname === '/api/support' && request.method === 'POST') {
+return handleSupportRequest(request, env);
+}
+if (url.pathname === '/api/forgot-password' && request.method === 'POST') {
+return handleForgotPassword(request, env);
+}
+if (url.pathname === '/api/reset-password' && request.method === 'POST') {
+return handleResetPassword(request, env);
+}
+if (url.pathname === '/api/demo-dashboard' && request.method === 'GET') {
+return handleDemoDashboard(request, env);
+}
+if (url.pathname === '/api/get-started' && request.method === 'POST') {
+return handleGetStarted(request, env);
+}
+if (url.pathname === '/thank-you' && request.method === 'GET') {
+return handleThankYou(request, env);
+}
+if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
+return handleStripeWebhook(request, env);
+}
+if (url.pathname === '/account') {
+return handleAccountPage(request, env);
+}
+if (url.pathname === '/account/subscription') {
+return handleSubscriptionPage(request, env);
+}
+if (url.pathname === '/api/subscription' && request.method === 'GET') {
+return handleSubscriptionInfo(request, env);
+}
+if (url.pathname === '/api/billing-portal' && request.method === 'POST') {
+return handleBillingPortal(request, env);
+}
+if (url.pathname === '/api/change-password' && request.method === 'POST') {
+return handleChangePassword(request, env);
+}
+if (url.pathname === '/api/integrations/accounting/sync' && request.method === 'POST') {
+return handleAccountingSync(request, env);
+}
+if (url.pathname === '/api/integrations/connect' && request.method === 'POST') {
+return handleIntegrationConnect(request, env);
+}
+if (url.pathname === '/api/integrations/disconnect' && request.method === 'POST') {
+return handleIntegrationDisconnect(request, env);
+}
+if (url.pathname === '/api/integrations' && request.method === 'GET') {
+return handleIntegrationsList(request, env);
+}
+if (url.pathname === '/api/accounts' && request.method === 'GET') {
+return handleAccounts(request, env);
+}
+if (url.pathname === '/api/team' && request.method === 'GET') {
+return handleTeamList(request, env);
+}
+if (url.pathname === '/api/team/invite' && request.method === 'POST') {
+return handleTeamInvite(request, env);
+}
+if (url.pathname === '/api/team/remove' && request.method === 'POST') {
+return handleTeamRemove(request, env);
+}
+if (url.pathname === '/api/transactions' && request.method === 'GET') {
+return handleTransactions(request, env);
+}
+if (url.pathname === '/api/subscription/cancel' && request.method === 'POST') {
+return handleSubscriptionCancel(request, env);
+}
+if (url.pathname === '/api/subscription/reactivate' && request.method === 'POST') {
+return handleSubscriptionReactivate(request, env);
+}
+if (url.pathname === '/api/subscription/upgrade-request' && request.method === 'POST') {
+return handleSubscriptionUpgradeRequest(request, env);
+}
+if (url.pathname === '/api/magic-link/request' && request.method === 'POST') {
+return handleMagicLinkRequest(request, env);
+}
+if (url.pathname === '/magic-link') {
+return handleMagicLinkVerify(request, env);
+}
+if (url.pathname === '/reset-password') {
+return handleResetPasswordPage(request, env);
+}
+if (url.pathname === '/dashboard') {
+return handleDashboard(request, env);
+}
+if (url.pathname === '/dashboard.html') {
+return new Response(null, {
+status: 302,
+headers: { 'Location': '/dashboard', 'Cache-Control': NO_STORE }
+});
+}
+
+const assetResponse = await env.ASSETS.fetch(request);
+return injectHelpWidget(assetResponse);
+},
+
+async scheduled(event, env, ctx) {
+const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour12: false, weekday: 'short', hour: '2-digit' }).formatToParts(new Date());
+const weekday = (parts.find(p => p.type === 'weekday') || {}).value;
+const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10);
+if (weekday === 'Wed' && hour === 18) {
+ctx.waitUntil(runWeeklyDigest(env));
+}
+}
+};
+
+// redeploy trigger
