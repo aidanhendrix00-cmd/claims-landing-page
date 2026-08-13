@@ -1040,6 +1040,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '}); ' +
   '})(); ' +
   '</script> ' +
+  '<script>(function(){fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){var chip=document.getElementById("acctUserChip");if(chip){chip.textContent=(d&&d.ok)?((d.email||"Account")+(d.role?(" ("+d.role+")"):"")):"Account";}}).catch(function(){var chip=document.getElementById("acctUserChip");if(chip){chip.textContent="Account";}});})();</script> ' +
   '</body></html> ' +
   ' ';
 
