@@ -388,6 +388,7 @@
           Client portal login is still being finalized &mdash; it isn't live yet. <a href="#" onclick="goToContactFromAuth(event)">Request access from our team</a> and we'll get you set up directly.
         </div>
 
+        <div class="auth-footer-link">Prefer not to type a password? <a href="#" onclick="showAuthMagic(event)">Email me a sign-in link</a></div>
         <div class="auth-footer-link">Don't have an account? <a href="#" onclick="goToContactFromAuth(event)">Get started</a></div>
       </div>
 
@@ -406,6 +407,21 @@
         <div class="auth-note" id="resetNote">
           Password reset isn't wired up yet. <a href="#" onclick="goToContactFromAuth(event)">Reach out to our team</a> directly and we'll help you back in.
         </div>
+      </div>
+
+      <div id="magicView" style="display:none;">
+        <button class="auth-back-link" onclick="showAuthLogin(event)">&larr; Back to login</button>
+        <div class="auth-eyebrow">Email Sign-In Link</div>
+        <h1>Get a sign-in link</h1>
+        <p class="auth-sub">Enter your email and we'll send you a one-time link to sign in &mdash; no password needed.</p>
+
+        <div class="auth-field">
+          <label>Email</label>
+          <input type="email" id="magic-email" placeholder="you@yourcompany.com" autocomplete="email">
+        </div>
+
+        <button class="btn-auth" onclick="submitAuthMagic()">Email Me a Sign-In Link</button>
+        <div class="auth-note" id="magicNote"></div>
       </div>
 
     </div>
@@ -1099,12 +1115,39 @@
   function showAuthReset(e){
     if(e) e.preventDefault();
     document.getElementById('loginView').style.display = 'none';
+    var magicViewEl = document.getElementById('magicView');
+    if (magicViewEl) magicViewEl.style.display = 'none';
     document.getElementById('resetView').style.display = 'block';
   }
   function showAuthLogin(e){
     if(e) e.preventDefault();
     document.getElementById('resetView').style.display = 'none';
+    var magicViewEl2 = document.getElementById('magicView');
+    if (magicViewEl2) magicViewEl2.style.display = 'none';
     document.getElementById('loginView').style.display = 'block';
+  }
+  function showAuthMagic(e){
+    if(e) e.preventDefault();
+    document.getElementById('loginView').style.display = 'none';
+    document.getElementById('resetView').style.display = 'none';
+    document.getElementById('magicView').style.display = 'block';
+  }
+  function submitAuthMagic(){
+    var emailInput = document.getElementById('magic-email');
+    var email = emailInput ? emailInput.value.trim() : '';
+    var note = document.getElementById('magicNote');
+    note.classList.add('show');
+    if (!email) { note.textContent = 'Please enter your email address.'; return; }
+    note.textContent = 'Sending sign-in link...';
+    fetch('/api/magic-link/request', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email: email })
+    }).then(function(res){ return res.json(); }).then(function(data){
+      note.textContent = (data && data.message) || "If that email has an account, we've sent a sign-in link.";
+    }).catch(function(){
+      note.textContent = 'Something went wrong. Please try again.';
+    });
   }
   function submitAuthLogin(){
     var email = document.getElementById('li-username').value.trim();
@@ -1188,7 +1231,21 @@
   }
   window.submitSignup = submitSignup;
   function submitAuthReset(){
-    document.getElementById('resetNote').classList.add('show');
+    var emailInput = document.getElementById('reset-email');
+    var email = emailInput ? emailInput.value.trim() : '';
+    var note = document.getElementById('resetNote');
+    note.classList.add('show');
+    if (!email) { note.textContent = 'Please enter your email address.'; return; }
+    note.textContent = 'Sending reset link...';
+    fetch('/api/forgot-password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email: email })
+    }).then(function(res){ return res.json(); }).then(function(data){
+      note.textContent = (data && data.message) || "If an account exists for that email, we've sent a reset link.";
+    }).catch(function(){
+      note.textContent = 'Something went wrong. Please try again.';
+    });
   }
   function goToContactFromAuth(e){
     if(e) e.preventDefault();
@@ -1197,8 +1254,10 @@
   }
   window.showAuthReset = showAuthReset;
   window.showAuthLogin = showAuthLogin;
+  window.showAuthMagic = showAuthMagic;
   window.submitAuthLogin = submitAuthLogin;
   window.submitAuthReset = submitAuthReset;
+  window.submitAuthMagic = submitAuthMagic;
   window.goToContactFromAuth = goToContactFromAuth;
 
   // Reuse the header's logo (avoids embedding the image a second time)
