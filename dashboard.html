@@ -1318,6 +1318,87 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
       seedInv.activity.unshift({ ts: seedDate.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}), text: `Response received: "${seedInv.responseSummary}"`, source: 'automation' });
     }
 
+    // Backfill realistic ledger detail on every demo invoice so the A/R
+    // Spreadsheet reads like a live account book instead of a blank template.
+    // Mirrors exactly what the integrations write on a real tenant: last touch,
+    // reply state, signed paperwork dates, expected payment method, and the most
+    // recent Salesforce note.
+    const DEMO_REPLIES = {
+      replied: [
+        'Adjuster confirmed the estimate is approved; payment is in the next check run.',
+        'Property manager acknowledged the balance and asked for a W-9 before releasing funds.',
+        'Homeowner confirmed the deductible is paid and the carrier is funding the remainder.',
+        'Adjuster requested the signed COS before issuing the supplement payment.',
+        'Owner approved the final invoice; accounting is scheduling the wire this week.',
+        'Carrier confirmed the claim is closed and the remaining balance is being released.'
+      ],
+      opened: [
+        'Follow-up opened twice, no reply yet - resending with the itemized breakdown.',
+        'Adjuster viewed the invoice packet but has not responded to the payment request.',
+        'Opened on mobile the same day; no reply, next cadence step queued.',
+        'Property manager opened the demand notice; awaiting written confirmation.'
+      ],
+      sent: [
+        'Follow-up delivered, awaiting first response.',
+        'Invoice and supporting photos delivered to the adjuster; no reply yet.',
+        'Second follow-up sent to the billing contact on file.',
+        'Statement delivered to accounts payable; no acknowledgement received.'
+      ]
+    };
+    const DEMO_SF_NOTES = [
+      'Estimate approved by carrier - awaiting payment authorization.',
+      'Supplement submitted for additional drying equipment.',
+      'Adjuster assigned; site inspection completed.',
+      'Final invoice uploaded to the claim file.',
+      'Certificate of Satisfaction returned by the homeowner.',
+      'Deductible collected; balance billed to carrier.',
+      'Contents inventory approved by the desk adjuster.',
+      'Payment authorization pending carrier review.',
+      'Photos and moisture logs attached to the claim record.',
+      'Scope revision accepted; revised invoice issued.'
+    ];
+    s.invoices.forEach(function(inv, idx){
+      const ageDays = Number(inv.days) || 30;
+      if(!inv.claimNumber && inv.payer === 'pm'){
+        inv.claimNumber = 'CLM-' + (240000 + (Number(inv.id) || idx) * 331);
+      }
+      if(!inv.lastContact){
+        const contactAgo = Math.max(1, Math.min(Math.max(1, ageDays - 1), 2 + (idx % 9)));
+        inv.lastContact = isoDate(addDays(new Date(), -contactAgo));
+      }
+      if(!inv.responded || inv.responded === 'none'){
+        const r = idx % 5;
+        inv.responded = (r < 2) ? 'replied' : (r < 4 ? 'opened' : 'sent');
+      }
+      if(!inv.responseSummary){
+        const pool = DEMO_REPLIES[inv.responded] || DEMO_REPLIES.sent;
+        inv.responseSummary = pool[idx % pool.length];
+      }
+      if(!inv.waSent) inv.waSent = true;
+      if(inv.waSent && !inv.waSignedDate){
+        inv.waSignedDate = isoDate(addDays(new Date(), -(ageDays + 2 + (idx % 4))));
+      }
+      const workDone = (inv.jobStatus === 'work_completed' || inv.jobStatus === 'in_ar' || inv.jobStatus === 'paid' || ageDays >= 40);
+      if(workDone && !inv.cosSent) inv.cosSent = true;
+      if(inv.cosSent && !inv.cosSignedDate){
+        inv.cosSignedDate = isoDate(addDays(new Date(), -Math.max(1, ageDays - 4 - (idx % 3))));
+      }
+      if(!inv.paymentType){
+        inv.paymentType = ['check','wire','payment_link'][idx % 3];
+      }
+      if(ageDays >= 35 && !inv.noilSent) inv.noilSent = true;
+      if(ageDays >= 65 && !inv.lienFiled) inv.lienFiled = true;
+      inv.activity = inv.activity || [];
+      if(inv.activity.length === 0){
+        const noteDate = addDays(new Date(), -(1 + (idx % 6)));
+        inv.activity.unshift({
+          ts: noteDate.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),
+          text: DEMO_SF_NOTES[idx % DEMO_SF_NOTES.length],
+          source: 'salesforce'
+        });
+      }
+    });
+
     // Simulate 10 invoices already paid in full via a mix of payment methods,
     // spread across the last few months so "Collected" has real multi-month data.
     const CARRIERS = ['State Farm Insurance', 'Allstate Insurance', 'Liberty Mutual', 'Farmers Insurance', 'Travelers Insurance'];
