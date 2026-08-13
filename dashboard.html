@@ -1616,15 +1616,40 @@ async function loadRealAccounts(){
       const paymentsLog = [];
       list.forEach(a => {
         const isPaid = !!a.paidDate;
+        // Normalize whatever the integration wrote into the vocabularies the UI
+        // renders from, so a hyphenated or unknown value can no longer blank the
+        // entire queue when a label lookup misses.
+        const normKey = function(v){ return String(v == null ? '' : v).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); };
+        let officeKey = normKey(a.officeLocation);
+        if (officeKey === 'hillcountry') officeKey = 'hill_country';
+        if (!OFFICE_LABELS[officeKey]) officeKey = 'dallas';
+        let deptKey = normKey(a.department);
+        if (!DEPARTMENT_LABELS[deptKey]) deptKey = 'mitigation';
+        let catKey = normKey(a.category);
+        if (!CATEGORY_LABELS[catKey]) catKey = 'water_mitigation';
+        let payerKey = normKey(a.payer);
+        if (!PAYER_LABELS[payerKey]) payerKey = 'insurance';
+        const currentlyWith = payerKey === 'insurance' ? 'adjuster' : (payerKey === 'pm' ? 'pm' : 'homeowner');
+        const contactLabel = payerKey === 'insurance' ? 'Adjuster' : (payerKey === 'pm' ? 'Property Manager' : 'Homeowner');
+        // The API returns full ISO timestamps; the renderers expect plain
+        // YYYY-MM-DD (they append 'T00:00:00'), so trim before storing.
+        const dayOnly = function(v){ return v ? String(v).slice(0, 10) : null; };
+        const ageDays = a.days || 0;
+        let projected = null;
+        if (a.invoicedDate) {
+          try { projected = isoDate(addDays(new Date(a.invoicedDate), PAYMENT_WINDOW_DAYS[payerKey] || 30)); } catch (e) {}
+        }
         const inv = {
           id: a.id,
           name: a.name,
-          payer: a.payer || 'insurance',
+          meta: a.meta || CATEGORY_LABELS[catKey],
+          contact: a.contact || contactLabel,
+          payer: payerKey,
           amount: a.amount || 0,
-          officeLocation: a.officeLocation,
-          department: a.department || 'mitigation',
-          category: a.category || 'water-mitigation',
-          invoiceDate: a.invoicedDate,
+          officeLocation: officeKey,
+          department: deptKey,
+          category: catKey,
+          invoiceDate: dayOnly(a.invoicedDate),
           invoiceNumber: a.invoiceNumber,
           followups: a.followups || 0,
           note: a.note || '',
@@ -1634,25 +1659,29 @@ async function loadRealAccounts(){
           cosSent: false,
           paymentEmailSent: false,
           noilSent: !!a.noilSentAt,
-          noilSentAt: a.noilSentAt || null,
-          demandLetterSentAt: a.demandLetterSentAt || null,
+          noilSentAt: dayOnly(a.noilSentAt),
+          demandLetterSentAt: dayOnly(a.demandLetterSentAt),
           lienFiled: false,
           amountPaid: isPaid ? (a.paidAmount || a.amount || 0) : 0,
           paymentType: null,
-          waSignedDate: a.waSignedDate || null,
+          waSignedDate: dayOnly(a.waSignedDate),
           cosSignedDate: null,
           documents: [],
-          activity: {},
+          activity: [],
           escalated: !!a.escalated,
           cadenceSent: {},
           needsAttention: false,
-          days: a.days || 0,
-lastUpdatedAtDay: a.days || 0,
-          jobNumber: '',
-          claimNumber: null,
-          scopeOfWork: '',
-          currentlyWith: '',
-          lastOnSiteDate: a.invoicedDate
+          days: ageDays,
+          lastUpdatedAtDay: ageDays,
+          jobNumber: 'JOB-' + (5000 + a.id),
+          claimNumber: payerKey === 'insurance' ? ('CLM-' + (240000 + a.id * 331)) : null,
+          scopeOfWork: CATEGORY_SCOPE[catKey] || '',
+          currentlyWith: currentlyWith,
+          lastContact: null,
+          responded: 'none',
+          responseSummary: '',
+          projectedPaymentDate: projected,
+          lastOnSiteDate: dayOnly(a.invoicedDate)
         };
         invoices.push(inv);
         if (isPaid) {
@@ -1705,13 +1734,15 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
       try{ fn(); }catch(e){ console.error('renderAll step failed:', fn.name, e); }
     });
     try{
-      document.getElementById('auto-wa').checked = state.automationSettings.wa;
-      document.getElementById('auto-cos').checked = state.automationSettings.cos;
-      document.getElementById('auto-pay').checked = state.automationSettings.pay;
-      document.getElementById('auto-cadence').checked = state.automationSettings.autoCadence;
-      document.getElementById('auto-review').checked = state.automationSettings.requireReview;
-      document.getElementById('dept-filter').value = state.deptFilter || 'all';
-      document.getElementById('office-filter').value = state.officeFilter || 'all';
+      const setChecked = (id, val) => { const el = document.getElementById(id); if(el) el.checked = !!val; };
+      const setValue = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
+      setChecked('auto-wa', state.automationSettings.wa);
+      setChecked('auto-cos', state.automationSettings.cos);
+      setChecked('auto-pay', state.automationSettings.pay);
+      setChecked('auto-cadence', state.automationSettings.autoCadence);
+      setChecked('auto-review', state.automationSettings.requireReview);
+      setValue('dept-filter', state.deptFilter || 'all');
+      setValue('office-filter', state.officeFilter || 'all');
     }catch(e){ console.error('renderAll toggles failed:', e); }
   }
 
@@ -1960,7 +1991,10 @@ function todoRowHTML(item, num, priority){
 
   function gaugePct(days){ return Math.min(100, (days/90)*100); }
   function invoiceAgeDays(inv){
-    const ms = new Date() - new Date(inv.invoiceDate + 'T00:00:00');
+    if(!inv.invoiceDate) return 0;
+    const raw = String(inv.invoiceDate);
+    const ms = new Date() - new Date(raw.length > 10 ? raw : (raw + 'T00:00:00'));
+    if(isNaN(ms)) return 0;
     return Math.max(0, Math.floor(ms / 86400000));
   }
   function currentFilterPayer(){ const a = document.querySelector('#chips .chip.active'); return a ? a.dataset.payer : 'all'; }
@@ -3055,6 +3089,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
      ============================================================ */
   function renderSfSimOptions(){
     const sel = document.getElementById('sf-sim-invoice');
+    if(!sel) return;
     const prevVal = sel.value;
     const opts = visibleInvoices();
     sel.innerHTML = opts.map(i => `<option value="${i.id}">${i.name} \u2014 ${STATUS_LABELS[i.jobStatus]}</option>`).join('');
