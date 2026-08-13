@@ -1700,6 +1700,49 @@ function fromHex(hex) {
   return bytes;
 }
 
+async function pgFetch(env, method, table, query, body, extraPrefer) {
+const url = env.SUPABASE_URL + '/rest/v1/' + table + (query ? ('?' + query) : '');
+const headers = {
+'apikey': env.SUPABASE_SERVICE_KEY,
+'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY,
+'Content-Type': 'application/json'
+};
+let prefer = extraPrefer || '';
+if (method === 'POST' || method === 'PATCH') {
+prefer = (prefer ? prefer + ',' : '') + 'return=representation';
+}
+if (prefer) headers['Prefer'] = prefer;
+const opts = { method: method, headers: headers };
+if (body !== undefined) opts.body = JSON.stringify(body);
+const res = await fetch(url, opts);
+if (!res.ok) {
+const errText = await res.text();
+throw new Error('Supabase ' + method + ' ' + table + ' failed: ' + res.status + ' ' + errText);
+}
+const text = await res.text();
+return text ? JSON.parse(text) : null;
+}
+async function pgSelect(env, table, query) {
+const rows = await pgFetch(env, 'GET', table, query);
+return rows || [];
+}
+async function pgSelectOne(env, table, query) {
+const rows = await pgSelect(env, table, query);
+return (rows && rows[0]) || null;
+}
+async function pgInsert(env, table, data, prefer) {
+const rows = await pgFetch(env, 'POST', table, null, data, prefer);
+if (Array.isArray(data)) return rows;
+return (rows && rows[0]) || null;
+}
+async function pgUpdate(env, table, query, data) {
+return await pgFetch(env, 'PATCH', table, query, data);
+}
+async function pgDelete(env, table, query) {
+return await pgFetch(env, 'DELETE', table, query);
+}
+function pgEq(value) { return 'eq.' + encodeURIComponent(value); }
+
 async function hashPassword(password, saltHex) {
   const enc = new TextEncoder();
   const salt = fromHex(saltHex);
@@ -1799,71 +1842,78 @@ async function handleDemoDashboard(request, env) {
 }
 
 async function uniqueSlug(env, base) {
-  let slug = base;
-  let n = 1;
-  while (true) {
-    const row = await env.DB.prepare('SELECT id FROM tenants WHERE slug = ?').bind(slug).first();
-    if (!row) return slug;
-    n++;
-    slug = base + '-' + n;
-  }
+let slug = base;
+let n = 1;
+while (true) {
+const row = await pgSelectOne(env, 'tenants', 'slug=' + pgEq(slug) + '&select=id');
+if (!row) return slug;
+n++;
+slug = base + '-' + n;
+}
 }
 
 async function sendEmail(env, opts) {
-  const to = opts.to, subject = opts.subject, html = opts.html, kind = opts.kind, tenantId = opts.tenantId, userId = opts.userId, replyTo = opts.replyTo;
+const to = opts.to, subject = opts.subject, html = opts.html, kind = opts.kind, tenantId = opts.tenantId, userId = opts.userId, replyTo = opts.replyTo;
 const fromAddr = opts.from || FROM_EMAIL;
-  if (!env.RESEND_API_KEY) {
-    try {
-      await env.DB.prepare(
-        'INSERT INTO email_log (to_email, subject, kind, tenant_id, user_id, status, error) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(to, subject, kind, tenantId || null, userId || null, 'skipped', 'RESEND_API_KEY not configured').run();
-    } catch (e) {}
-    return { ok: false, skipped: true };
-  }
-  try {
-    const payload = { from: fromAddr, to: [to], subject: subject, html: html };
-    if (replyTo) payload.reply_to = replyTo;
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + env.RESEND_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-    const ok = res.ok;
-    let errText = '';
-    if (!ok) errText = await res.text();
-    await env.DB.prepare(
-      'INSERT INTO email_log (to_email, subject, kind, tenant_id, user_id, status, error) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(to, subject, kind, tenantId || null, userId || null, ok ? 'sent' : 'failed', ok ? null : errText.slice(0, 500)).run();
-    return { ok: ok };
-  } catch (e) {
-    try {
-      await env.DB.prepare(
-        'INSERT INTO email_log (to_email, subject, kind, tenant_id, user_id, status, error) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(to, subject, kind, tenantId || null, userId || null, 'failed', String(e).slice(0, 500)).run();
-    } catch (e2) {}
-    return { ok: false, error: String(e) };
-  }
+if (!env.RESEND_API_KEY) {
+try {
+await pgInsert(env, 'email_log', { to_email: to, subject: subject, kind: kind, tenant_id: tenantId || null, user_id: userId || null, status: 'skipped', error: 'RESEND_API_KEY not configured' });
+} catch (e) {}
+return { ok: false, skipped: true };
+}
+try {
+const payload = { from: fromAddr, to: [to], subject: subject, html: html };
+if (replyTo) payload.reply_to = replyTo;
+const res = await fetch('https://api.resend.com/emails', {
+method: 'POST',
+headers: {
+'Authorization': 'Bearer ' + env.RESEND_API_KEY,
+'Content-Type': 'application/json'
+},
+body: JSON.stringify(payload)
+});
+const ok = res.ok;
+let errText = '';
+if (!ok) errText = await res.text();
+await pgInsert(env, 'email_log', { to_email: to, subject: subject, kind: kind, tenant_id: tenantId || null, user_id: userId || null, status: ok ? 'sent' : 'failed', error: ok ? null : errText.slice(0, 500) });
+return { ok: ok };
+} catch (e) {
+try {
+await pgInsert(env, 'email_log', { to_email: to, subject: subject, kind: kind, tenant_id: tenantId || null, user_id: userId || null, status: 'failed', error: String(e).slice(0, 500) });
+} catch (e2) {}
+return { ok: false, error: String(e) };
+}
 }
 
 async function getSessionUser(request, env) {
-  const cookies = parseCookies(request);
-  const token = cookies[SESSION_COOKIE];
-  if (!token) return null;
-  const row = await env.DB.prepare(
-    'SELECT u.id, u.email, u.role, u.tenant_id, u.office, u.status AS user_status, u.email_verified, ' +
-    't.slug AS tenant_slug, t.company_name, t.status AS tenant_status, t.integration_status, ' +
-    't.selected_plan, t.recommended_plan, t.stripe_customer_id, s.expires_at ' +
-    'FROM sessions s ' +
-    'JOIN users u ON u.id = s.user_id ' +
-    'JOIN tenants t ON t.id = u.tenant_id ' +
-    'WHERE s.token = ?'
-  ).bind(token).first();
-  if (!row) return null;
-  if (new Date(row.expires_at) < new Date()) return null;
-  return row;
+const cookies = parseCookies(request);
+const token = cookies[SESSION_COOKIE];
+if (!token) return null;
+const row = await pgSelectOne(env, 'sessions',
+'token=' + pgEq(token) +
+'&select=expires_at,users(id,email,role,tenant_id,office,status,email_verified,tenants(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id))'
+);
+if (!row || !row.users) return null;
+if (new Date(row.expires_at) < new Date()) return null;
+const u = row.users;
+const t = u.tenants || {};
+return {
+id: u.id,
+email: u.email,
+role: u.role,
+tenant_id: u.tenant_id,
+office: u.office,
+user_status: u.status,
+email_verified: u.email_verified,
+tenant_slug: t.slug,
+company_name: t.company_name,
+tenant_status: t.status,
+integration_status: t.integration_status,
+selected_plan: t.selected_plan,
+recommended_plan: t.recommended_plan,
+stripe_customer_id: t.stripe_customer_id,
+expires_at: row.expires_at
+};
 }
 
 async function handleSupportRequest(request, env) {
@@ -1921,66 +1971,66 @@ async function handleSupportRequest(request, env) {
 }
 
 async function handleForgotPassword(request, env) {
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
 
-  const email = (body.email || '').trim().toLowerCase();
-  const genericMessage = "If an account exists for that email, we've sent a reset link.";
+const email = (body.email || '').trim().toLowerCase();
+const genericMessage = "If an account exists for that email, we've sent a reset link.";
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
-  }
+if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
+}
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
-  if (user) {
-    const token = randomToken();
-    const expires = new Date(Date.now() + RESET_TTL_SECONDS * 1000).toISOString();
-    await env.DB.prepare('UPDATE users SET reset_token = ?, reset_expires = ? WHERE id = ?').bind(token, expires, user.id).run();
+const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=*');
+if (user) {
+const token = randomToken();
+const expires = new Date(Date.now() + RESET_TTL_SECONDS * 1000).toISOString();
+await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { reset_token: token, reset_expires: expires });
 
-    const resetUrl = SITE_URL + '/?reset_token=' + token + '#login';
-    const resetHtml =
-      '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;">' +
-      '<h2 style="color:#171717;">Reset your password</h2>' +
-      '<p>Hi ' + escapeHtml(user.full_name || '') + ',</p>' +
-      '<p>We received a request to reset the password for your clAIms account. Click below to choose a new password.</p>' +
-      '<p style="margin:28px 0;"><a href="' + resetUrl + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Reset password</a></p>' +
-      '<p style="color:#666;font-size:13px;">This link expires in 1 hour. If you did not request this, you can safely ignore this email â your password will not be changed.</p>' +
-      '</div>';
-    await sendEmail(env, {
-      to: user.email,
-      subject: 'Reset your clAIms password',
-      html: resetHtml,
-      kind: 'password_reset',
-      tenantId: user.tenant_id,
-      userId: user.id
-    });
-  }
+const resetUrl = SITE_URL + '/?reset_token=' + token + '#login';
+const resetHtml =
+'<div style="font-family:sans-serif;max-width:480px;margin:0 auto;">' +
+'<h2 style="color:#171717;">Reset your password</h2>' +
+'<p>Hi ' + escapeHtml(user.full_name || '') + ',</p>' +
+'<p>We received a request to reset the password for your clAIms account. Click below to choose a new password.</p>' +
+'<p style="margin:28px 0;"><a href="' + resetUrl + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Reset password</a></p>' +
+'<p style="color:#666;font-size:13px;">This link expires in 1 hour. If you did not request this, you can safely ignore this email — your password will not be changed.</p>' +
+'</div>';
+await sendEmail(env, {
+to: user.email,
+subject: 'Reset your clAIms password',
+html: resetHtml,
+kind: 'password_reset',
+tenantId: user.tenant_id,
+userId: user.id
+});
+}
 
-  return json({ ok: true, message: genericMessage });
+return json({ ok: true, message: genericMessage });
 }
 
 async function handleMagicLinkRequest(request, env) {
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
-  const email = (body.email || '').trim().toLowerCase();
-  if (!email) return json({ ok: false, error: 'Email is required' }, 400);
-  try {
-    const user = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
-    if (user && user.email_verified && user.status !== 'pending_approval' && user.status !== 'rejected') {
-      const token = randomToken();
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-      await env.DB.prepare('INSERT INTO magic_links (user_id, token, expires_at) VALUES (?, ?, ?)').bind(user.id, token, expiresAt).run();
-      const link = SITE_URL + '/magic-link?token=' + token;
-      const magicHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
-        '<h2 style="margin:0 0 12px;">Sign in to clAIms</h2>' +
-        '<p>Click the button below to sign in instantly. This link expires in 15 minutes and can only be used once.</p>' +
-        '<p style="margin:24px 0;"><a href="' + link + '" style="background:#171717;color:#EDEFF1;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Sign in to clAIms</a></p>' +
-        '<p style="color:#5B6B73;font-size:13px;">If you did not request this, you can safely ignore this email.</p>' +
-        '</div>';
-      await sendEmail(env, { to: user.email, subject: 'Your clAIms sign-in link', html: magicHtml, kind: 'magic_link', tenantId: user.tenant_id, userId: user.id, from: OPERATIONS_FROM_EMAIL });
-    }
-  } catch (e) {}
-  return json({ ok: true, message: "If that email has an account, we've sent a sign-in link." });
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const email = (body.email || '').trim().toLowerCase();
+if (!email) return json({ ok: false, error: 'Email is required' }, 400);
+try {
+const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=*');
+if (user && user.email_verified && user.status !== 'pending_approval' && user.status !== 'rejected') {
+const token = randomToken();
+const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+await pgInsert(env, 'magic_links', { user_id: user.id, token: token, expires_at: expiresAt });
+const link = SITE_URL + '/magic-link?token=' + token;
+const magicHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+'<h2 style="margin:0 0 12px;">Sign in to clAIms</h2>' +
+'<p>Click the button below to sign in instantly. This link expires in 15 minutes and can only be used once.</p>' +
+'<p style="margin:24px 0;"><a href="' + link + '" style="background:#171717;color:#EDEFF1;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Sign in to clAIms</a></p>' +
+'<p style="color:#5B6B73;font-size:13px;">If you did not request this, you can safely ignore this email.</p>' +
+'</div>';
+await sendEmail(env, { to: user.email, subject: 'Your clAIms sign-in link', html: magicHtml, kind: 'magic_link', tenantId: user.tenant_id, userId: user.id, from: OPERATIONS_FROM_EMAIL });
+}
+} catch (e) {}
+return json({ ok: true, message: "If that email has an account, we've sent a sign-in link." });
 }
 
 const MAGIC_LINK_ERROR_HTML = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign-in link expired — clAIms</title><style>' +
@@ -1991,267 +2041,269 @@ const MAGIC_LINK_ERROR_HTML = '<!DOCTYPE html><html lang="en"><head><meta charse
 'a{color:#C29B57;font-weight:600;text-decoration:none;}' +
 '</style></head><body><div class="card"><h1>This sign-in link has expired</h1><p>Sign-in links are one-time use and expire after 15 minutes. Head back and request a new one.</p><p><a href="/?login=1">Return to clAIms</a></p></div></body></html>';
 
+
+
 async function handleMagicLinkVerify(request, env) {
-  const url = new URL(request.url);
-  const token = url.searchParams.get('token') || '';
-  const errResp = function(status) {
-    return new Response(MAGIC_LINK_ERROR_HTML, { status: status, headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } });
-  };
-  if (!token) return errResp(400);
-  try {
-    const row = await env.DB.prepare('SELECT * FROM magic_links WHERE token = ?').bind(token).first();
-    if (!row || row.used_at || new Date(row.expires_at) < new Date()) return errResp(400);
-    const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(row.user_id).first();
-    if (!user) return errResp(400);
-    await env.DB.prepare("UPDATE magic_links SET used_at = datetime('now') WHERE id = ?").bind(row.id).run();
-    const sessionToken = randomToken();
-    const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
-    await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').bind(sessionToken, user.id, expiresAt).run();
-    const cookie = SESSION_COOKIE + '=' + sessionToken + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
-    return new Response(null, {
-      status: 302,
-      headers: { 'Location': '/dashboard', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
-    });
-  } catch (e) {
-    return errResp(500);
-  }
+const url = new URL(request.url);
+const token = url.searchParams.get('token') || '';
+const errResp = function(status) {
+return new Response(MAGIC_LINK_ERROR_HTML, { status: status, headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } });
+};
+if (!token) return errResp(400);
+try {
+const row = await pgSelectOne(env, 'magic_links', 'token=' + pgEq(token) + '&select=*');
+if (!row || row.used_at || new Date(row.expires_at) < new Date()) return errResp(400);
+const user = await pgSelectOne(env, 'users', 'id=' + pgEq(row.user_id) + '&select=*');
+if (!user) return errResp(400);
+await pgUpdate(env, 'magic_links', 'id=' + pgEq(row.id), { used_at: new Date().toISOString() });
+const sessionToken = randomToken();
+const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
+await pgInsert(env, 'sessions', { token: sessionToken, user_id: user.id, expires_at: expiresAt });
+const cookie = SESSION_COOKIE + '=' + sessionToken + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
+return new Response(null, {
+status: 302,
+headers: { 'Location': '/dashboard', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
+});
+} catch (e) {
+return errResp(500);
+}
 }
 
 async function handleResetPasswordPage(request, env) {
-  const url = new URL(request.url);
-  const token = url.searchParams.get('token') || '';
-  let userEmail = '';
-  let valid = false;
-  if (token) {
-    try {
-      const row = await env.DB.prepare('SELECT email, reset_expires FROM users WHERE reset_token = ?').bind(token).first();
-      if (row && (!row.reset_expires || new Date(row.reset_expires) > new Date())) {
-        userEmail = row.email;
-        valid = true;
-      }
-    } catch (e) {}
-  }
-  const escToken = token.replace(/[^a-zA-Z0-9]/g, '');
-  const escEmail = String(userEmail || '').replace(/"/g, '&quot;');
-  const body = valid ? (
-    '<div class="card">' +
-    '<h1>Set Up Your Password</h1>' +
-    '<p class="sub">Create a password for your clAIms account.</p>' +
-    '<div class="row"><label>Email</label><input id="rp-email" type="email" value="' + escEmail + '" readonly></div>' +
-    '<div class="row"><label>Password</label><input id="rp-password" type="password" placeholder="At least 8 characters"></div>' +
-    '<div class="row"><label>Confirm Password</label><input id="rp-confirm" type="password" placeholder="Re-enter password"></div>' +
-    '<button id="rp-submit" onclick="clmsSubmitReset()">Set Password</button>' +
-    '<div id="rp-msg" class="msg"></div>' +
-    '<script>' +
-    'const CLMS_TOKEN = "' + escToken + '";' +
-    'async function clmsSubmitReset(){' +
-    '  const email = document.getElementById("rp-email").value.trim();' +
-    '  const password = document.getElementById("rp-password").value;' +
-    '  const confirmPassword = document.getElementById("rp-confirm").value;' +
-    '  const msg = document.getElementById("rp-msg");' +
-    '  const btn = document.getElementById("rp-submit");' +
-    '  if(!password || password.length < 8){ msg.textContent = "Password must be at least 8 characters."; msg.className = "msg err"; return; }' +
-    '  if(password !== confirmPassword){ msg.textContent = "Passwords do not match."; msg.className = "msg err"; return; }' +
-    '  btn.disabled = true; btn.textContent = "Saving...";' +
-    '  try {' +
-    '    const res = await fetch("/api/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: CLMS_TOKEN, email: email, password: password, confirmPassword: confirmPassword }) });' +
-    '    const data = await res.json();' +
-    '    if(!data.ok){ msg.textContent = data.error || "Unable to set password."; msg.className = "msg err"; btn.disabled = false; btn.textContent = "Set Password"; return; }' +
-    '    msg.textContent = "Password set! Redirecting to login..."; msg.className = "msg ok";' +
-    '    setTimeout(function(){ window.location.href = "/?login=1"; }, 1800);' +
-    '  } catch(err) { msg.textContent = "Unable to set password."; msg.className = "msg err"; btn.disabled = false; btn.textContent = "Set Password"; }' +
-    '}' +
-    '</' + 'script>'
-  ) : (
-    '<div class="card">' +
-    '<h1>Link invalid or expired</h1>' +
-    '<p class="sub">This password setup link is no longer valid. Ask an admin to resend your invite, or use Forgot Password on the login page.</p>' +
-    '<a class="btn-link" href="/">Return to clAIms</a>' +
-    '</div>'
-  );
-  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<title>Set Your Password &middot; clAIms</title>' +
-    '<style>' +
-    'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#EEF1F0;color:#16233A;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
-    '.card{background:#fff;max-width:400px;width:calc(100% - 48px);padding:32px;border-radius:12px;box-shadow:0 10px 30px rgba(23,23,23,0.12);}' +
-    'h1{font-family:"Space Grotesk",sans-serif;font-size:20px;margin:0 0 6px;}' +
-    '.sub{color:#5B6B73;font-size:13px;margin:0 0 20px;}' +
-    '.row{margin-bottom:14px;}' +
-    'label{display:block;font-size:12px;font-weight:600;color:#5B6B73;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;}' +
-    'input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #DCE2E0;border-radius:8px;font-size:14px;}' +
-    'input[readonly]{background:#F5F6F5;color:#5B6B73;}' +
-    'button{width:100%;padding:12px;background:#171717;color:#EDEFF1;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;margin-top:6px;}' +
-    'button:disabled{opacity:0.6;cursor:default;}' +
-    '.msg{margin-top:14px;font-size:13px;}' +
-    '.msg.err{color:#B23A2E;}' +
-    '.msg.ok{color:#2F7A6B;}' +
-    '.btn-link{display:inline-block;margin-top:16px;color:#C29B57;font-weight:600;text-decoration:none;}' +
-    '</style></head><body>' + body + '</body></html>';
-  return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+const url = new URL(request.url);
+const token = url.searchParams.get('token') || '';
+let userEmail = '';
+let valid = false;
+if (token) {
+try {
+const row = await pgSelectOne(env, 'users', 'reset_token=' + pgEq(token) + '&select=email,reset_expires');
+if (row && (!row.reset_expires || new Date(row.reset_expires) > new Date())) {
+userEmail = row.email;
+valid = true;
+}
+} catch (e) {}
+}
+const escToken = token.replace(/[^a-zA-Z0-9]/g, '');
+const escEmail = String(userEmail || '').replace(/"/g, '&quot;');
+const body = valid ? (
+'<div class="card">' +
+'<h1>Set Up Your Password</h1>' +
+'<p class="sub">Create a password for your clAIms account.</p>' +
+'<div class="row"><label>Email</label><input id="rp-email" type="email" value="' + escEmail + '" readonly></div>' +
+'<div class="row"><label>Password</label><input id="rp-password" type="password" placeholder="At least 8 characters"></div>' +
+'<div class="row"><label>Confirm Password</label><input id="rp-confirm" type="password" placeholder="Re-enter password"></div>' +
+'<button id="rp-submit" onclick="clmsSubmitReset()">Set Password</button>' +
+'<div id="rp-msg" class="msg"></div>' +
+'<script>' +
+'const CLMS_TOKEN = "' + escToken + '";' +
+'async function clmsSubmitReset(){' +
+' const email = document.getElementById("rp-email").value.trim();' +
+' const password = document.getElementById("rp-password").value;' +
+' const confirmPassword = document.getElementById("rp-confirm").value;' +
+' const msg = document.getElementById("rp-msg");' +
+' const btn = document.getElementById("rp-submit");' +
+' if(!password || password.length < 8){ msg.textContent = "Password must be at least 8 characters."; msg.className = "msg err"; return; }' +
+' if(password !== confirmPassword){ msg.textContent = "Passwords do not match."; msg.className = "msg err"; return; }' +
+' btn.disabled = true; btn.textContent = "Saving...";' +
+' try {' +
+' const res = await fetch("/api/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: CLMS_TOKEN, email: email, password: password, confirmPassword: confirmPassword }) });' +
+' const data = await res.json();' +
+' if(!data.ok){ msg.textContent = data.error || "Unable to set password."; msg.className = "msg err"; btn.disabled = false; btn.textContent = "Set Password"; return; }' +
+' msg.textContent = "Password set! Redirecting to login..."; msg.className = "msg ok";' +
+' setTimeout(function(){ window.location.href = "/?login=1"; }, 1800);' +
+' } catch(err) { msg.textContent = "Unable to set password."; msg.className = "msg err"; btn.disabled = false; btn.textContent = "Set Password"; }' +
+'}' +
+'<' + '/script>'
+) : (
+'<div class="card">' +
+'<h1>Link invalid or expired</h1>' +
+'<p class="sub">This password setup link is no longer valid. Ask an admin to resend your invite, or use Forgot Password on the login page.</p>' +
+'<a class="btn-link" href="/">Return to clAIms</a>' +
+'</div>'
+);
+const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+'<title>Set Your Password &middot; clAIms</title>' +
+'<style>' +
+'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#EEF1F0;color:#16233A;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
+'.card{background:#fff;max-width:400px;width:calc(100% - 48px);padding:32px;border-radius:12px;box-shadow:0 10px 30px rgba(23,23,23,0.12);}' +
+'h1{font-family:"Space Grotesk",sans-serif;font-size:20px;margin:0 0 6px;}' +
+'.sub{color:#5B6B73;font-size:13px;margin:0 0 20px;}' +
+'.row{margin-bottom:14px;}' +
+'label{display:block;font-size:12px;font-weight:600;color:#5B6B73;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;}' +
+'input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #DCE2E0;border-radius:8px;font-size:14px;}' +
+'input[readonly]{background:#F5F6F5;color:#5B6B73;}' +
+'button{width:100%;padding:12px;background:#171717;color:#EDEFF1;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;margin-top:6px;}' +
+'button:disabled{opacity:0.6;cursor:default;}' +
+'.msg{margin-top:14px;font-size:13px;}' +
+'.msg.err{color:#B23A2E;}' +
+'.msg.ok{color:#2F7A6B;}' +
+'.btn-link{display:inline-block;margin-top:16px;color:#C29B57;font-weight:600;text-decoration:none;}' +
+'</style></head><body>' + body + '</body></html>';
+return new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
 }
 
 async function handleResetPassword(request, env) {
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
 
-  const token = (body.token || '').trim();
-  const password = body.password || '';
-  const confirmPassword = body.confirmPassword || '';
+const token = (body.token || '').trim();
+const password = body.password || '';
+const confirmPassword = body.confirmPassword || '';
 
-  if (!token) {
-    return json({ ok: false, error: 'Missing reset token.' }, 400);
-  }
-  if (!password || password.length < 8) {
-    return json({ ok: false, error: 'Password must be at least 8 characters.' }, 400);
-  }
-  if (password !== confirmPassword) {
-    return json({ ok: false, error: 'Passwords do not match.' }, 400);
-  }
+if (!token) {
+return json({ ok: false, error: 'Missing reset token.' }, 400);
+}
+if (!password || password.length < 8) {
+return json({ ok: false, error: 'Password must be at least 8 characters.' }, 400);
+}
+if (password !== confirmPassword) {
+return json({ ok: false, error: 'Passwords do not match.' }, 400);
+}
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE reset_token = ?').bind(token).first();
-  if (!user) {
-    return json({ ok: false, error: 'That reset link is invalid or has already been used.' }, 400);
-  }
-  if (!user.reset_expires || new Date(user.reset_expires) < new Date()) {
-    return json({ ok: false, error: 'That reset link has expired. Please request a new one.' }, 400);
-  }
+const user = await pgSelectOne(env, 'users', 'reset_token=' + pgEq(token) + '&select=*');
+if (!user) {
+return json({ ok: false, error: 'That reset link is invalid or has already been used.' }, 400);
+}
+if (!user.reset_expires || new Date(user.reset_expires) < new Date()) {
+return json({ ok: false, error: 'That reset link has expired. Please request a new one.' }, 400);
+}
 
-  const providedEmail = (body.email || '').trim().toLowerCase();
-  if (providedEmail && user.email && providedEmail !== String(user.email).toLowerCase()) {
-    return json({ ok: false, error: 'Email does not match this invite link.' }, 400);
-  }
+const providedEmail = (body.email || '').trim().toLowerCase();
+if (providedEmail && user.email && providedEmail !== String(user.email).toLowerCase()) {
+return json({ ok: false, error: 'Email does not match this invite link.' }, 400);
+}
 
-  const salt = randomSalt();
-  const passwordHash = await hashPassword(password, salt);
-  await env.DB.prepare(
-    'UPDATE users SET password_hash = ?, salt = ?, reset_token = NULL, reset_expires = NULL WHERE id = ?'
-  ).bind(passwordHash, salt, user.id).run();
-  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run();
+const salt = randomSalt();
+const passwordHash = await hashPassword(password, salt);
+await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { password_hash: passwordHash, salt: salt, reset_token: null, reset_expires: null });
+await pgDelete(env, 'sessions', 'user_id=' + pgEq(user.id));
 
-  try {
-    if (user.invited_by && !user.invite_completed_at) {
-      const nowIso = new Date().toISOString();
-      await env.DB.prepare('UPDATE users SET invite_completed_at = ? WHERE id = ?').bind(nowIso, user.id).run();
-      const inviter = await env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(user.invited_by).first();
-      if (inviter && inviter.email) {
-        const notifyHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
-          '<h2 style="margin:0 0 12px;">New user added</h2>' +
-          '<p>' + (user.full_name || user.email) + ' (' + user.email + ') has finished setting up their clAIms account as a ' + user.role + (user.office ? (' on the ' + (OFFICE_LABELS[user.office] || user.office) + ' team') : '') + '.</p>' +
-          '</div>';
-        await sendEmail(env, { to: inviter.email, subject: 'NEW USER ADDED - clAIms', html: notifyHtml, kind: 'new_user_added', tenantId: user.tenant_id, userId: user.invited_by, from: OPERATIONS_FROM_EMAIL });
-      }
-    }
-  } catch (notifyErr) {}
+try {
+if (user.invited_by && !user.invite_completed_at) {
+const nowIso = new Date().toISOString();
+await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { invite_completed_at: nowIso });
+const inviter = await pgSelectOne(env, 'users', 'id=' + pgEq(user.invited_by) + '&select=email');
+if (inviter && inviter.email) {
+const notifyHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+'<h2 style="margin:0 0 12px;">New user added</h2>' +
+'<p>' + (user.full_name || user.email) + ' (' + user.email + ') has finished setting up their clAIms account as a ' + user.role + (user.office ? (' on the ' + (OFFICE_LABELS[user.office] || user.office) + ' team') : '') + '.</p>' +
+'</div>';
+await sendEmail(env, { to: inviter.email, subject: 'NEW USER ADDED - clAIms', html: notifyHtml, kind: 'new_user_added', tenantId: user.tenant_id, userId: user.invited_by, from: OPERATIONS_FROM_EMAIL });
+}
+}
+} catch (notifyErr) {}
 
-
-  return json({ ok: true, message: 'Password updated successfully.' });
+return json({ ok: true, message: 'Password updated successfully.' });
 }
 
 async function handleSignup(request, env) {
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
 
-  const fullName = (body.fullName || '').trim();
-  const email = (body.email || '').trim().toLowerCase();
-  const password = body.password || '';
-  const confirmPassword = body.confirmPassword || '';
-  const companyName = (body.companyName || '').trim();
-  const address = (body.address || '').trim();
-  const city = (body.city || '').trim();
-  const state = (body.state || '').trim();
-  const zip = (body.zip || '').trim();
-  const companySize = (body.companySize || '').trim();
+const fullName = (body.fullName || '').trim();
+const email = (body.email || '').trim().toLowerCase();
+const password = body.password || '';
+const confirmPassword = body.confirmPassword || '';
+const companyName = (body.companyName || '').trim();
+const address = (body.address || '').trim();
+const city = (body.city || '').trim();
+const state = (body.state || '').trim();
+const zip = (body.zip || '').trim();
+const companySize = (body.companySize || '').trim();
 
-  if (!fullName || !email || !password || !companyName || !companySize) {
-    return json({ ok: false, error: 'Please fill out all required fields.' }, 400);
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
-  }
-  if (password.length < 8) {
-    return json({ ok: false, error: 'Password must be at least 8 characters.' }, 400);
-  }
-  if (password !== confirmPassword) {
-    return json({ ok: false, error: 'Passwords do not match.' }, 400);
-  }
-  if (!body.agreeToTerms) {
-    return json({ ok: false, error: 'You must agree to the Terms & Conditions to create an account.' }, 400);
-  }
+if (!fullName || !email || !password || !companyName || !companySize) {
+return json({ ok: false, error: 'Please fill out all required fields.' }, 400);
+}
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
+}
+if (password.length < 8) {
+return json({ ok: false, error: 'Password must be at least 8 characters.' }, 400);
+}
+if (password !== confirmPassword) {
+return json({ ok: false, error: 'Passwords do not match.' }, 400);
+}
+if (!body.agreeToTerms) {
+return json({ ok: false, error: 'You must agree to the Terms & Conditions to create an account.' }, 400);
+}
 
-  const existingUser = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = ?').bind(email).first();
-  if (existingUser) {
-    return json({ ok: false, error: 'An account with this email already exists.' }, 409);
-  }
+const existingUser = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=id');
+if (existingUser) {
+return json({ ok: false, error: 'An account with this email already exists.' }, 409);
+}
 
-  const domain = emailDomain(email);
-  const isPersonalDomain = PERSONAL_EMAIL_DOMAINS.has(domain);
+const domain = emailDomain(email);
+const isPersonalDomain = PERSONAL_EMAIL_DOMAINS.has(domain);
 
-  const salt = randomSalt();
-  const passwordHash = await hashPassword(password, salt);
-  const verificationToken = randomToken();
-  const verificationExpires = new Date(Date.now() + VERIFICATION_TTL_SECONDS * 1000).toISOString();
+const salt = randomSalt();
+const passwordHash = await hashPassword(password, salt);
+const verificationToken = randomToken();
+const verificationExpires = new Date(Date.now() + VERIFICATION_TTL_SECONDS * 1000).toISOString();
 
-  let tenant = null;
-  let isNewTenant = false;
-  let userRole = 'admin';
-  let userStatus = 'pending_verification';
+let tenant = null;
+let isNewTenant = false;
+let userRole = 'admin';
+let userStatus = 'pending_verification';
 
-  if (!isPersonalDomain) {
-    tenant = await env.DB.prepare('SELECT * FROM tenants WHERE domain = ?').bind(domain).first();
-  }
+if (!isPersonalDomain) {
+tenant = await pgSelectOne(env, 'tenants', 'domain=' + pgEq(domain) + '&select=*');
+}
 
-  if (tenant) {
-    userRole = 'user';
-    userStatus = 'pending_approval';
-  } else {
-    isNewTenant = true;
-    const recommendedPlan = planForSize(companySize);
-    const slug = await uniqueSlug(env, slugify(companyName));
-    const insertTenant = await env.DB.prepare(
-      "INSERT INTO tenants (slug, company_name, domain, address, city, state, zip, company_size, recommended_plan, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_verification')"
-    ).bind(slug, companyName, isPersonalDomain ? null : domain, address, city, state, zip, companySize, recommendedPlan).run();
-    const tenantId = insertTenant.meta.last_row_id;
-    tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(tenantId).first();
-  }
+if (tenant) {
+userRole = 'user';
+userStatus = 'pending_approval';
+} else {
+isNewTenant = true;
+const recommendedPlan = planForSize(companySize);
+const slug = await uniqueSlug(env, slugify(companyName));
+tenant = await pgInsert(env, 'tenants', {
+slug: slug, company_name: companyName, domain: isPersonalDomain ? null : domain,
+address: address, city: city, state: state, zip: zip, company_size: companySize,
+recommended_plan: recommendedPlan, status: 'pending_verification'
+});
+}
 
-  const acceptedAt = new Date().toISOString();
-  const acceptedIp = request.headers.get('CF-Connecting-IP') || '';
-  const insertUser = await env.DB.prepare(
-    'INSERT INTO users (tenant_id, email, password_hash, salt, role, status, email_verified, verification_token, verification_expires, full_name, terms_accepted_at, terms_accepted_ip, terms_version) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)'
-  ).bind(tenant.id, email, passwordHash, salt, userRole, userStatus, verificationToken, verificationExpires, fullName, acceptedAt, acceptedIp, 'v1').run();
-  const userId = insertUser.meta.last_row_id;
+const acceptedAt = new Date().toISOString();
+const acceptedIp = request.headers.get('CF-Connecting-IP') || '';
+const insertedUser = await pgInsert(env, 'users', {
+tenant_id: tenant.id, email: email, password_hash: passwordHash, salt: salt,
+role: userRole, status: userStatus, email_verified: false,
+verification_token: verificationToken, verification_expires: verificationExpires,
+full_name: fullName, terms_accepted_at: acceptedAt, terms_accepted_ip: acceptedIp, terms_version: 'v1'
+});
+const userId = insertedUser.id;
 
-  if (isNewTenant) {
-    await env.DB.prepare('UPDATE tenants SET admin_user_id = ? WHERE id = ?').bind(userId, tenant.id).run();
-  }
+if (isNewTenant) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenant.id), { admin_user_id: userId });
+}
 
-  const verifyUrl = SITE_URL + '/api/verify-email?token=' + verificationToken;
-  const verifyHtml =
-    '<div style="font-family:sans-serif;max-width:480px;margin:0 auto;">' +
-    '<h2 style="color:#171717;">Verify your email</h2>' +
-    '<p>Hi ' + escapeHtml(fullName) + ',</p>' +
-    '<p>Thanks for signing up for clAIms' + (isNewTenant ? '' : ' â ' + escapeHtml(tenant.company_name)) + '. Click below to verify your email and continue setup.</p>' +
-    '<p style="margin:28px 0;"><a href="' + verifyUrl + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Verify email</a></p>' +
-    '<p style="color:#666;font-size:13px;">This link expires in 24 hours. If you did not request this, you can ignore this email.</p>' +
-    '</div>';
-  await sendEmail(env, { to: email, subject: 'Verify your email for clAIms', html: verifyHtml, kind: 'verify_email', tenantId: tenant.id, userId: userId });
+const verifyUrl = SITE_URL + '/api/verify-email?token=' + verificationToken;
+const verifyHtml =
+'<div style="font-family:sans-serif;max-width:480px;margin:0 auto;">' +
+'<h2 style="color:#171717;">Verify your email</h2>' +
+'<p>Hi ' + escapeHtml(fullName) + ',</p>' +
+'<p>Thanks for signing up for clAIms' + (isNewTenant ? '' : ' — ' + escapeHtml(tenant.company_name)) + '. Click below to verify your email and continue setup.</p>' +
+'<p style="margin:28px 0;"><a href="' + verifyUrl + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Verify email</a></p>' +
+'<p style="color:#666;font-size:13px;">This link expires in 24 hours. If you did not request this, you can ignore this email.</p>' +
+'</div>';
+await sendEmail(env, { to: email, subject: 'Verify your email for clAIms', html: verifyHtml, kind: 'verify_email', tenantId: tenant.id, userId: userId });
 
-  const notifyHtml =
-    '<div style="font-family:sans-serif;max-width:560px;margin:0 auto;">' +
-    '<h2>New Create Account submission</h2>' +
-    '<table style="border-collapse:collapse;width:100%;">' +
-    '<tr><td style="padding:4px 8px;font-weight:600;">Full name</td><td style="padding:4px 8px;">' + escapeHtml(fullName) + '</td></tr>' +
-    '<tr><td style="padding:4px 8px;font-weight:600;">Email</td><td style="padding:4px 8px;">' + escapeHtml(email) + '</td></tr>' +
-    '<tr><td style="padding:4px 8px;font-weight:600;">Company</td><td style="padding:4px 8px;">' + escapeHtml(companyName) + '</td></tr>' +
-    '<tr><td style="padding:4px 8px;font-weight:600;">Address</td><td style="padding:4px 8px;">' + escapeHtml(address) + ', ' + escapeHtml(city) + ', ' + escapeHtml(state) + ' ' + escapeHtml(zip) + '</td></tr>' +
-    '<tr><td style="padding:4px 8px;font-weight:600;">Company size</td><td style="padding:4px 8px;">' + escapeHtml(companySize) + '</td></tr>' +
-    '<tr><td style="padding:4px 8px;font-weight:600;">Recommended plan</td><td style="padding:4px 8px;">' + escapeHtml(tenant.recommended_plan || 'n/a') + '</td></tr>' +
-    '<tr><td style="padding:4px 8px;font-weight:600;">Signup type</td><td style="padding:4px 8px;">' + (isNewTenant ? 'New company (' + escapeHtml(tenant.slug) + ')' : 'Joined existing company: ' + escapeHtml(tenant.company_name) + ' (pending admin approval)') + '</td></tr>' +
-    '</table>' +
-    '</div>';
-  await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'New signup: ' + companyName + ' (' + email + ')', html: notifyHtml, kind: 'signup_notification', tenantId: tenant.id, userId: userId });
+const notifyHtml =
+'<div style="font-family:sans-serif;max-width:560px;margin:0 auto;">' +
+'<h2>New Create Account submission</h2>' +
+'<table style="border-collapse:collapse;width:100%;">' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Full name</td><td style="padding:4px 8px;">' + escapeHtml(fullName) + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Email</td><td style="padding:4px 8px;">' + escapeHtml(email) + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Company</td><td style="padding:4px 8px;">' + escapeHtml(companyName) + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Address</td><td style="padding:4px 8px;">' + escapeHtml(address) + ', ' + escapeHtml(city) + ', ' + escapeHtml(state) + ' ' + escapeHtml(zip) + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Company size</td><td style="padding:4px 8px;">' + escapeHtml(companySize) + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Recommended plan</td><td style="padding:4px 8px;">' + escapeHtml(tenant.recommended_plan || 'n/a') + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Signup type</td><td style="padding:4px 8px;">' + (isNewTenant ? 'New company (' + escapeHtml(tenant.slug) + ')' : 'Joined existing company: ' + escapeHtml(tenant.company_name) + ' (pending admin approval)') + '</td></tr>' +
+'</table>' +
+'</div>';
+await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'New signup: ' + companyName + ' (' + email + ')', html: notifyHtml, kind: 'signup_notification', tenantId: tenant.id, userId: userId });
 
-  return json({ ok: true, message: 'Check your email to verify your account.', joinedExisting: !isNewTenant });
+return json({ ok: true, message: 'Check your email to verify your account.', joinedExisting: !isNewTenant });
 }
 
 async function handleGetStarted(request, env) {
@@ -2855,22 +2907,22 @@ async function handleTeamRemove(request, env) {
 }
 
 async function handleChangePassword(request, env) {
-  const user = await getSessionUser(request, env);
-  if (!user) return json({ ok: false }, 401);
-  let body;
-  try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
-  const currentPassword = (body.currentPassword || '').toString();
-  const newPassword = (body.newPassword || '').toString();
-  if (!currentPassword || !newPassword) return json({ ok: false, error: 'Both current and new password are required.' }, 400);
-  if (newPassword.length < 8) return json({ ok: false, error: 'New password must be at least 8 characters.' }, 400);
-  const row = await env.DB.prepare('SELECT password_hash, salt FROM users WHERE id = ?').bind(user.id).first();
-  if (!row) return json({ ok: false, error: 'Account not found.' }, 404);
-  const computedHash = await hashPassword(currentPassword, row.salt);
-  if (computedHash !== row.password_hash) return json({ ok: false, error: 'Current password is incorrect.' }, 401);
-  const newSalt = randomSalt();
-  const newHash = await hashPassword(newPassword, newSalt);
-  await env.DB.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?').bind(newHash, newSalt, user.id).run();
-  return json({ ok: true });
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const currentPassword = (body.currentPassword || '').toString();
+const newPassword = (body.newPassword || '').toString();
+if (!currentPassword || !newPassword) return json({ ok: false, error: 'Both current and new password are required.' }, 400);
+if (newPassword.length < 8) return json({ ok: false, error: 'New password must be at least 8 characters.' }, 400);
+const row = await pgSelectOne(env, 'users', 'id=' + pgEq(user.id) + '&select=password_hash,salt');
+if (!row) return json({ ok: false, error: 'Account not found.' }, 404);
+const computedHash = await hashPassword(currentPassword, row.salt);
+if (computedHash !== row.password_hash) return json({ ok: false, error: 'Current password is incorrect.' }, 401);
+const newSalt = randomSalt();
+const newHash = await hashPassword(newPassword, newSalt);
+await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { password_hash: newHash, salt: newSalt });
+return json({ ok: true });
 }
 
 async function handleBillingPortal(request, env) {
@@ -2984,33 +3036,33 @@ async function handleSubscriptionPage(request, env) {
 }
 
 async function handleVerifyEmail(request, env) {
-  const url = new URL(request.url);
-  const token = url.searchParams.get('token') || '';
-  if (!token) return redirectTo('/?verify=missing');
+const url = new URL(request.url);
+const token = url.searchParams.get('token') || '';
+if (!token) return redirectTo('/?verify=missing');
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE verification_token = ?').bind(token).first();
-  if (!user) return redirectTo('/?verify=invalid');
-  if (user.verification_expires && new Date(user.verification_expires) < new Date()) {
-    return redirectTo('/?verify=expired');
-  }
+const user = await pgSelectOne(env, 'users', 'verification_token=' + pgEq(token) + '&select=*');
+if (!user) return redirectTo('/?verify=invalid');
+if (user.verification_expires && new Date(user.verification_expires) < new Date()) {
+return redirectTo('/?verify=expired');
+}
 
-  await env.DB.prepare('UPDATE users SET email_verified = 1, verification_token = NULL WHERE id = ?').bind(user.id).run();
+await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { email_verified: true, verification_token: null });
 
-  const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(user.tenant_id).first();
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=*');
 
-  if (tenant && user.role === 'admin' && tenant.admin_user_id === user.id) {
-    const plan = tenant.recommended_plan || 'starter';
-    const link = STRIPE_LINKS[plan];
-    if (!link) {
-      await env.DB.prepare("UPDATE tenants SET status = 'verified' WHERE id = ?").bind(tenant.id).run();
-      return redirectTo('/?verify=enterprise');
-    }
-    await env.DB.prepare("UPDATE tenants SET status = 'payment_pending' WHERE id = ?").bind(tenant.id).run();
-    const paymentUrl = link + '?prefilled_email=' + encodeURIComponent(user.email) + '&client_reference_id=' + tenant.id;
-    return redirectTo(paymentUrl);
-  }
+if (tenant && user.role === 'admin' && tenant.admin_user_id === user.id) {
+const plan = tenant.recommended_plan || 'starter';
+const link = STRIPE_LINKS[plan];
+if (!link) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenant.id), { status: 'verified' });
+return redirectTo('/?verify=enterprise');
+}
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenant.id), { status: 'payment_pending' });
+const paymentUrl = link + '?prefilled_email=' + encodeURIComponent(user.email) + '&client_reference_id=' + tenant.id;
+return redirectTo(paymentUrl);
+}
 
-  return redirectTo('/?verify=pending-approval');
+return redirectTo('/?verify=pending-approval');
 }
 
 async function handlePendingApprovals(request, env) {
@@ -3190,61 +3242,61 @@ function buildWeeklyDigestHtml(d) {
 }
 
 async function handleLogin(request, env) {
-  let body;
-  try {
-    body = await request.json();
-  } catch (e) {
-    return json({ ok: false, error: 'Invalid request body' }, 400);
-  }
-  const email = (body.email || '').trim().toLowerCase();
-  const password = body.password || '';
-  if (!email || !password) {
-    return json({ ok: false, error: 'Email and password are required' }, 400);
-  }
+let body;
+try {
+body = await request.json();
+} catch (e) {
+return json({ ok: false, error: 'Invalid request body' }, 400);
+}
+const email = (body.email || '').trim().toLowerCase();
+const password = body.password || '';
+if (!email || !password) {
+return json({ ok: false, error: 'Email and password are required' }, 400);
+}
 
-  const user = await env.DB.prepare('SELECT * FROM users WHERE lower(email) = ?').bind(email).first();
-  if (!user) {
-    return json({ ok: false, error: 'Invalid email or password' }, 401);
-  }
+const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=*');
+if (!user) {
+return json({ ok: false, error: 'Invalid email or password' }, 401);
+}
 
-  const computedHash = await hashPassword(password, user.salt);
-  if (computedHash !== user.password_hash) {
-    return json({ ok: false, error: 'Invalid email or password' }, 401);
-  }
+const computedHash = await hashPassword(password, user.salt);
+if (computedHash !== user.password_hash) {
+return json({ ok: false, error: 'Invalid email or password' }, 401);
+}
 
-  if (!user.email_verified) {
-    return json({ ok: false, error: 'Please verify your email before logging in. Check your inbox for the verification link.' }, 403);
-  }
-  if (user.status === 'pending_approval') {
-    return json({ ok: false, error: "Your account is pending approval from your company's admin." }, 403);
-  }
-  if (user.status === 'rejected') {
-    return json({ ok: false, error: 'Your access request was declined. Contact your company admin.' }, 403);
-  }
+if (!user.email_verified) {
+return json({ ok: false, error: 'Please verify your email before logging in. Check your inbox for the verification link.' }, 403);
+}
+if (user.status === 'pending_approval') {
+return json({ ok: false, error: "Your account is pending approval from your company's admin." }, 403);
+}
+if (user.status === 'rejected') {
+return json({ ok: false, error: 'Your access request was declined. Contact your company admin.' }, 403);
+}
 
-  const tenant = await env.DB.prepare('SELECT * FROM tenants WHERE id = ?').bind(user.tenant_id).first();
-  if (tenant && user.role === 'admin' && (tenant.status === 'verified' || tenant.status === 'payment_pending')) {
-    const plan = tenant.recommended_plan || 'starter';
-    const link = STRIPE_LINKS[plan];
-    if (link) {
-      const paymentUrl = link + '?prefilled_email=' + encodeURIComponent(user.email) + '&client_reference_id=' + tenant.id;
-      return json({ ok: false, error: 'Your company account is verified â finish payment to activate it.', redirect: paymentUrl }, 403);
-    }
-    return json({ ok: false, error: 'Your plan requires a custom quote. Our team will reach out shortly, or contact hndrx@claims-collection.net.' }, 403);
-  }
-  if (tenant && tenant.status !== 'active' && user.role !== 'admin') {
-    return json({ ok: false, error: "Your company's account setup is not finished yet. Please contact your admin." }, 403);
-  }
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=*');
+if (tenant && user.role === 'admin' && (tenant.status === 'verified' || tenant.status === 'payment_pending')) {
+const plan = tenant.recommended_plan || 'starter';
+const link = STRIPE_LINKS[plan];
+if (link) {
+const paymentUrl = link + '?prefilled_email=' + encodeURIComponent(user.email) + '&client_reference_id=' + tenant.id;
+return json({ ok: false, error: 'Your company account is verified — finish payment to activate it.', redirect: paymentUrl }, 403);
+}
+return json({ ok: false, error: 'Your plan requires a custom quote. Our team will reach out shortly, or contact hndrx@claims-collection.net.' }, 403);
+}
+if (tenant && tenant.status !== 'active' && user.role !== 'admin') {
+return json({ ok: false, error: "Your company's account setup is not finished yet. Please contact your admin." }, 403);
+}
 
-  const token = randomToken();
-  const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
-  await env.DB.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').bind(token, user.id, expiresAt).run();
+const token = randomToken();
+const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
+await pgInsert(env, 'sessions', { token: token, user_id: user.id, expires_at: expiresAt });
 
-  const cookie = SESSION_COOKIE + '=' + token + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
-  return new Response(JSON.stringify({ ok: true, redirect: '/account' }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
-  });
+const cookie = SESSION_COOKIE + '=' + token + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
+return new Response(JSON.stringify({ ok: true, redirect: '/account' }), {
+status: 200,
+headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
+});
 }
 
 async function handleEscalateNotify(request, env) {
@@ -3287,16 +3339,16 @@ return json({ ok: true, sent: !!result.ok });
 }
 
 async function handleLogout(request, env) {
-  const cookies = parseCookies(request);
-  const token = cookies[SESSION_COOKIE];
-  if (token) {
-    await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
-  }
-  const cookie = SESSION_COOKIE + '=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
-  return new Response(JSON.stringify({ ok: true, redirect: '/' }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
-  });
+const cookies = parseCookies(request);
+const token = cookies[SESSION_COOKIE];
+if (token) {
+await pgDelete(env, 'sessions', 'token=' + pgEq(token));
+}
+const cookie = SESSION_COOKIE + '=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+return new Response(JSON.stringify({ ok: true, redirect: '/' }), {
+status: 200,
+headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
+});
 }
 
 const MY_ACCOUNT_LINK_SCRIPT = '<script>' +
