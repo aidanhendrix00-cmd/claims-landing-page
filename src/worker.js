@@ -3018,6 +3018,122 @@ await pgDelete(env, 'documents', 'id=' + pgEq(row.id));
 return json({ ok: true });
 }
 
+
+/* ---------------------------------------------------------------------------
+   Invoice edits and payments
+   The dashboard used to hold these purely in memory, so a refresh threw them
+   away. Everything a user changes now round-trips through Supabase, scoped to
+   their tenant and office by accountForUser().
+   --------------------------------------------------------------------------- */
+const INVOICE_EDITABLE = {
+noilSent: 'noil_sent_at',
+lienFiled: 'lien_filed',
+waSent: 'wa_sent',
+cosSent: 'cos_sent',
+docsComplete: 'docs_complete',
+waSignedDate: 'wa_signed_at',
+cosSignedDate: 'cos_signed_at',
+projectedPaymentDate: 'projected_payment_date',
+paymentType: 'payment_type',
+currentlyWith: 'currently_with',
+lastContact: 'last_contact',
+responded: 'responded',
+responseSummary: 'response_summary',
+note: 'note',
+followups: 'follow_up_count',
+escalated: 'escalated',
+notifiedName: 'notified_name',
+notifiedAt: 'notified_at',
+cadenceSent: 'cadence_sent'
+};
+
+function normalizeDateOnly(v) {
+if (v === null || v === undefined || v === '') return null;
+const s = String(v);
+return s.length > 10 ? s.slice(0, 10) : s;
+}
+
+async function handleInvoiceUpdate(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const account = await accountForUser(env, user, body.accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const patch = {};
+Object.keys(INVOICE_EDITABLE).forEach(function (key) {
+if (!Object.prototype.hasOwnProperty.call(body, key)) return;
+const column = INVOICE_EDITABLE[key];
+let value = body[key];
+if (column === 'noil_sent_at') { patch[column] = value ? (normalizeDateOnly(body.noilSentAt) || new Date().toISOString()) : null; return; }
+if (column === 'wa_signed_at' || column === 'cos_signed_at' || column === 'projected_payment_date' || column === 'last_contact') { patch[column] = normalizeDateOnly(value); return; }
+if (column === 'follow_up_count') { patch[column] = parseInt(value, 10) || 0; return; }
+if (column === 'cadence_sent') { patch[column] = (value && typeof value === 'object') ? value : {}; return; }
+if (column === 'lien_filed' || column === 'wa_sent' || column === 'cos_sent' || column === 'docs_complete' || column === 'escalated') { patch[column] = !!value; return; }
+patch[column] = (value === '' ? null : value);
+});
+if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
+patch.updated_at = new Date().toISOString();
+await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
+return json({ ok: true, updated: Object.keys(patch).length - 1 });
+}
+
+async function handleInvoicePayment(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+// Same rule the dashboard enforces in the UI, restated here so it holds
+// even if the request does not come from our own page.
+if (user.role !== 'admin' && user.role !== 'manager') {
+return json({ ok: false, error: 'Only managers and admins can record payments.' }, 403);
+}
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const account = await accountForUser(env, user, body.accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const amount = Number(body.amount);
+if (!isFinite(amount) || amount <= 0) return json({ ok: false, error: 'Enter a valid payment amount.' }, 400);
+const full = await pgSelectOne(env, 'accounts', 'id=' + pgEq(account.id) + '&select=amount,paid_amount');
+const invoiceTotal = Number((full && full.amount) || 0);
+const alreadyPaid = Number((full && full.paid_amount) || 0);
+const newPaid = Math.round((alreadyPaid + amount) * 100) / 100;
+const depositedOn = normalizeDateOnly(body.depositedOn) || normalizeDateOnly(new Date().toISOString());
+await pgInsert(env, 'invoice_payments', {
+tenant_id: user.tenant_id,
+account_id: account.id,
+amount: amount,
+method: body.method ? String(body.method).slice(0, 40) : null,
+deposited_on: depositedOn,
+payer_name: body.payerName ? String(body.payerName).slice(0, 160) : null,
+reference: body.reference ? String(body.reference).slice(0, 80) : null,
+bank_name: body.bankName ? String(body.bankName).slice(0, 120) : null,
+memo: body.memo ? String(body.memo).slice(0, 500) : null,
+recorded_by: user.id
+});
+// A partial payment leaves the invoice open with the balance tracked; it only
+// moves to paid once the full amount has been received.
+const fullyPaid = invoiceTotal > 0 && newPaid + 0.005 >= invoiceTotal;
+const patch = { paid_amount: newPaid, updated_at: new Date().toISOString() };
+if (fullyPaid) { patch.status = 'paid'; patch.paid_at = new Date(depositedOn + 'T12:00:00Z').toISOString(); }
+if (body.paymentType) patch.payment_type = String(body.paymentType).slice(0, 40);
+await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
+return json({ ok: true, paidAmount: newPaid, remaining: Math.max(0, Math.round((invoiceTotal - newPaid) * 100) / 100), fullyPaid: fullyPaid });
+}
+
+async function handleInvoicePaymentList(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+const accountId = url.searchParams.get('accountId');
+let q = 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=deposited_on.desc';
+if (accountId) {
+const account = await accountForUser(env, user, accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+q = 'account_id=' + pgEq(account.id) + '&' + q;
+}
+const rows = await pgSelect(env, 'invoice_payments', q);
+return json({ ok: true, payments: rows || [] });
+}
+
 async function handleAccounts(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -3057,6 +3173,19 @@ waSignedDate: a.wa_signed_at,
 followups: a.follow_up_count,
 note: a.note,
 paidAmount: a.paid_amount,
+lienFiled: !!a.lien_filed,
+cosSent: !!a.cos_sent,
+cosSignedDate: a.cos_signed_at,
+paymentType: a.payment_type,
+projectedPaymentDate: a.projected_payment_date,
+currentlyWith: a.currently_with,
+lastContact: a.last_contact,
+responded: a.responded,
+responseSummary: a.response_summary,
+docsComplete: !!a.docs_complete,
+cadenceSent: a.cadence_sent || {},
+notifiedName: a.notified_name,
+notifiedAt: a.notified_at,
 paidDate: a.paid_at
 };
 });
@@ -4011,6 +4140,15 @@ return handleAdminBillingPage();
 }
 if (url.pathname === '/api/admin/billing' && request.method === 'GET') {
 return handleAdminBillingData(request, env);
+}
+if (url.pathname === '/api/invoices/update' && request.method === 'POST') {
+return handleInvoiceUpdate(request, env);
+}
+if (url.pathname === '/api/invoices/payment' && request.method === 'POST') {
+return handleInvoicePayment(request, env);
+}
+if (url.pathname === '/api/invoices/payments' && request.method === 'GET') {
+return handleInvoicePaymentList(request, env);
 }
 if (url.pathname === '/api/documents' && request.method === 'GET') {
 return handleDocumentList(request, env);
