@@ -1480,8 +1480,27 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   }
 
   async function saveState(){
-    try{ await window.storage.set(STORAGE_KEY, JSON.stringify(state), false); }
-    catch(e){ memoryFallback = state; }
+    memoryFallback = state;
+    // window.storage never existed, so every change used to die with the tab.
+    try{ window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch(e){ /* private mode or quota - memoryFallback still holds this session */ }
+  }
+
+  // Real accounts are owned by Supabase, so user edits are pushed there and
+  // survive a refresh for everyone on the account, not just this browser.
+  function isRemoteInvoice(inv){
+    return !!(inv && inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/) && state.currentUser);
+  }
+  function persistInvoice(inv, fields){
+    if(!isRemoteInvoice(inv)) return Promise.resolve(null);
+    const payload = { accountId: inv.id };
+    (fields || []).forEach(function(f){ payload[f] = inv[f]; });
+    if(Object.keys(payload).length < 2) return Promise.resolve(null);
+    return fetch('/api/invoices/update', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(r){ return r.json(); }).catch(function(){ return null; });
   }
 
   async function init(){
@@ -2197,6 +2216,7 @@ saveState(); renderAll();
     const inv = findInv(id);
     if(!inv) return;
     inv[field] = val;
+    persistInvoice(inv, [field]);
     const labels = { waSent: 'Work Authorization', cosSent: 'Certificate of Satisfaction', noilSent: 'NOIL', lienFiled: 'Lien' };
     const verb = field === 'lienFiled' ? (val ? 'filed' : 'not filed') : (val ? 'sent' : 'not sent');
     addActivity(inv, `${labels[field]} marked ${verb} (manual edit via A/R spreadsheet).`, 'manual');
@@ -2206,6 +2226,7 @@ saveState(); renderAll();
     const inv = findInv(id);
     if(!inv) return;
     inv[field] = val || null;
+    persistInvoice(inv, [field]);
     const label = field === 'waSignedDate' ? 'Work Authorization' : 'Certificate of Satisfaction';
     addActivity(inv, val ? `${label} signature date recorded: ${fmtDate(val)}.` : `${label} signature date cleared.`, 'manual');
     saveState(); renderAll();
@@ -2214,6 +2235,7 @@ saveState(); renderAll();
     const inv = findInv(id);
     if(!inv) return;
     inv.projectedPaymentDate = val;
+    persistInvoice(inv, ['projectedPaymentDate']);
     addActivity(inv, `Projected payment date updated to ${fmtDate(val)}.`, 'manual');
     saveState(); renderAll();
   }
@@ -2221,6 +2243,7 @@ saveState(); renderAll();
     const inv = findInv(id);
     if(!inv) return;
     inv.paymentType = val || null;
+    persistInvoice(inv, ['paymentType']);
     addActivity(inv, `Payment type set to ${val ? PAYMENT_TYPE_LABELS[val] : 'unspecified'}.`, 'manual');
     saveState(); renderAll();
   }
@@ -2937,6 +2960,26 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     saveState(); renderAll();
     closePaymentForm();
     showToast(`Payment of $${amount.toLocaleString(undefined,{minimumFractionDigits:2})} recorded for ${inv.name}`);
+    // Persist to Supabase, then re-read so the stored balance is the one shown.
+    if(isRemoteInvoice(inv)){
+      fetch('/api/invoices/payment', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: inv.id,
+          amount: amount,
+          method: details.method,
+          depositedOn: details.paidDate,
+          payerName: details.payerName,
+          reference: details.checkNumber || details.referenceNumber,
+          bankName: details.bankName,
+          memo: details.memo
+        })
+      }).then(function(r){ return r.json(); }).then(function(res){
+        if(!res || !res.ok){ showToast((res && res.error) || 'Payment was not saved. Please try again.'); return; }
+        return loadRealAccounts();
+      }).catch(function(){ showToast('Payment was not saved. Please try again.'); });
+    }
   }
 
   function setCurrentlyWith(val){
@@ -2945,6 +2988,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const old = inv.currentlyWith;
     if(old === val) return;
     inv.currentlyWith = val;
+    persistInvoice(inv, ['currentlyWith']);
     addActivity(inv, `File manually moved from ${CURRENTLY_WITH_LABELS[old]} to ${CURRENTLY_WITH_LABELS[val]}.`, 'manual');
     saveState();
     document.querySelectorAll('#currently-with-toggle .cw-btn').forEach(btn => {
