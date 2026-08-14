@@ -2855,6 +2855,165 @@ status: act.status ? String(act.status).slice(0,40) : null
 return json({ ok: true, processed });
 }
 
+
+/* ---------------------------------------------------------------------------
+   Documents
+   Real uploads to Supabase Storage (private bucket). Every read and write is
+   scoped to the caller's tenant, and downloads go out as short-lived signed
+   URLs so the bucket never has to be public.
+   --------------------------------------------------------------------------- */
+const DOC_BUCKET = 'documents';
+const DOC_MAX_BYTES = 25 * 1024 * 1024;
+const DOC_KINDS = ['Estimate','Photos','Invoice','Contract','WorkAuth','COS','MoistureLog','Other'];
+
+function safeFileName(name) {
+const base = String(name || 'file').split('/').pop().split('\\').pop();
+const cleaned = base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/^[._-]+/, '');
+return (cleaned || 'file').slice(0, 120);
+}
+
+async function storageUpload(env, path, body, contentType) {
+const res = await fetch(env.SUPABASE_URL + '/storage/v1/object/' + DOC_BUCKET + '/' + path, {
+method: 'POST',
+headers: {
+'apikey': env.SUPABASE_SERVICE_KEY,
+'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY,
+'Content-Type': contentType || 'application/octet-stream',
+'x-upsert': 'false'
+},
+body: body
+});
+if (!res.ok) {
+const text = await res.text();
+return { ok: false, error: 'Storage upload failed: ' + res.status + ' ' + text };
+}
+return { ok: true };
+}
+
+async function storageSignedUrl(env, path, expiresIn) {
+const res = await fetch(env.SUPABASE_URL + '/storage/v1/object/sign/' + DOC_BUCKET + '/' + path, {
+method: 'POST',
+headers: {
+'apikey': env.SUPABASE_SERVICE_KEY,
+'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY,
+'Content-Type': 'application/json'
+},
+body: JSON.stringify({ expiresIn: expiresIn || 300 })
+});
+if (!res.ok) return null;
+const data = await res.json();
+if (!data || !data.signedURL) return null;
+return env.SUPABASE_URL + '/storage/v1' + data.signedURL;
+}
+
+async function storageDelete(env, path) {
+await fetch(env.SUPABASE_URL + '/storage/v1/object/' + DOC_BUCKET + '/' + path, {
+method: 'DELETE',
+headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY }
+});
+}
+
+function documentToJson(row) {
+return {
+id: row.id,
+accountId: row.account_id,
+name: row.file_name,
+kind: row.doc_kind,
+label: row.doc_label || null,
+contentType: row.content_type,
+size: row.size_bytes,
+createdAt: row.created_at,
+auto: false
+};
+}
+
+// Confirms the account belongs to the caller's company before anything is
+// written or read, so a guessed account id cannot reach another tenant.
+async function accountForUser(env, user, accountId) {
+if (!accountId) return null;
+return await pgSelectOne(env, 'accounts', 'id=' + pgEq(accountId) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id');
+}
+
+async function handleDocumentList(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+const accountId = url.searchParams.get('accountId');
+if (!accountId) return json({ ok: false, error: 'accountId is required' }, 400);
+const account = await accountForUser(env, user, accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const rows = await pgSelect(env, 'documents', 'account_id=' + pgEq(accountId) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=created_at.asc');
+return json({ ok: true, documents: (rows || []).map(documentToJson) });
+}
+
+async function handleDocumentUpload(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let form;
+try { form = await request.formData(); } catch (e) { return json({ ok: false, error: 'Expected a file upload.' }, 400); }
+const file = form.get('file');
+if (!file || typeof file === 'string' || !file.arrayBuffer) return json({ ok: false, error: 'Please choose a file to upload.' }, 400);
+const accountId = String(form.get('accountId') || '').trim();
+const account = await accountForUser(env, user, accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+let kind = String(form.get('kind') || 'Other').trim();
+if (DOC_KINDS.indexOf(kind) === -1) kind = 'Other';
+const label = String(form.get('label') || '').trim().slice(0, 120);
+if (kind === 'Other' && !label) return json({ ok: false, error: 'Please name the document.' }, 400);
+const size = file.size || 0;
+if (size <= 0) return json({ ok: false, error: 'That file appears to be empty.' }, 400);
+if (size > DOC_MAX_BYTES) return json({ ok: false, error: 'Files must be 25 MB or smaller.' }, 413);
+const cleanName = safeFileName(file.name);
+const path = 'tenant_' + user.tenant_id + '/account_' + accountId + '/' + Date.now() + '_' + randomToken().slice(0, 8) + '_' + cleanName;
+const bytes = await file.arrayBuffer();
+const up = await storageUpload(env, path, bytes, file.type || 'application/octet-stream');
+if (!up.ok) return json({ ok: false, error: up.error }, 502);
+let row;
+try {
+row = await pgInsert(env, 'documents', {
+tenant_id: user.tenant_id,
+account_id: accountId,
+storage_path: path,
+file_name: cleanName,
+doc_kind: kind,
+doc_label: label || null,
+content_type: file.type || null,
+size_bytes: size,
+uploaded_by: user.id
+});
+} catch (e) {
+// Do not leave an orphaned object behind if the row insert fails.
+await storageDelete(env, path);
+return json({ ok: false, error: 'Could not save that document.' }, 500);
+}
+return json({ ok: true, document: documentToJson(row) });
+}
+
+async function handleDocumentDownload(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+const id = url.searchParams.get('id');
+if (!id) return json({ ok: false, error: 'id is required' }, 400);
+const row = await pgSelectOne(env, 'documents', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=*');
+if (!row) return json({ ok: false, error: 'Document not found' }, 404);
+const signed = await storageSignedUrl(env, row.storage_path, 300);
+if (!signed) return json({ ok: false, error: 'Could not open that document.' }, 502);
+return json({ ok: true, url: signed, name: row.file_name });
+}
+
+async function handleDocumentDelete(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const row = await pgSelectOne(env, 'documents', 'id=' + pgEq(body.id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=*');
+if (!row) return json({ ok: false, error: 'Document not found' }, 404);
+await storageDelete(env, row.storage_path);
+await pgDelete(env, 'documents', 'id=' + pgEq(row.id));
+return json({ ok: true });
+}
+
 async function handleAccounts(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -3848,6 +4007,18 @@ return handleAdminBillingPage();
 }
 if (url.pathname === '/api/admin/billing' && request.method === 'GET') {
 return handleAdminBillingData(request, env);
+}
+if (url.pathname === '/api/documents' && request.method === 'GET') {
+return handleDocumentList(request, env);
+}
+if (url.pathname === '/api/documents/upload' && request.method === 'POST') {
+return handleDocumentUpload(request, env);
+}
+if (url.pathname === '/api/documents/download' && request.method === 'GET') {
+return handleDocumentDownload(request, env);
+}
+if (url.pathname === '/api/documents/delete' && request.method === 'POST') {
+return handleDocumentDelete(request, env);
 }
 if (url.pathname === '/api/admin/accounts-export' && request.method === 'GET') {
 return handleAdminAccountsExport(request, env);
