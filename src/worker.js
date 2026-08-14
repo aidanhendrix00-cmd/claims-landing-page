@@ -2838,6 +2838,9 @@ wa_signed_at: rawWaSignedAt
 }));
 acctId = inserted ? inserted.id : null;
 }
+// Pull any CRM-side notes and files attached to this account.
+if (raw.notes) { await ingestCrmNotes(env, integration.tenant_id, acctId, raw.notes); }
+if (raw.documents) { await ingestCrmDocuments(env, integration.tenant_id, acctId, raw.documents); }
 processed++;
 if (Array.isArray(raw.activities) && raw.activities.length && acctId) {
 for (const act of raw.activities.slice(0, 25)) {
@@ -2992,6 +2995,9 @@ uploaded_by: user.id
 await storageDelete(env, path);
 return json({ ok: false, error: 'Could not save that document.' }, 500);
 }
+await enqueueOutbox(env, user.tenant_id, account.id, 'document', row && row.id, {
+name: cleanName, kind: kind, label: label || null, contentType: file.type || null, size: size
+});
 return json({ ok: true, document: documentToJson(row) });
 }
 
@@ -3266,11 +3272,11 @@ kind: due.kind, recipient_role: recipient.role, recipient_email: to || null,
 subject: null, status: settings.require_review ? 'held_for_review' : 'no_recipient',
 error: settings.require_review ? null : 'No contact email on the account'
 });
-await pgInsert(env, 'account_activity', {
+await pgInsert(env, 'account_notes', {
 tenant_id: settings.tenant_id, account_id: account.id,
 body: 'Day ' + due.day + ' cadence checkpoint reached (' + due.kind + ') - ' +
 (settings.require_review ? 'held for review before sending.' : 'no contact email on file.'),
-source: 'automation'
+author_name: 'clAIms automation', source: 'automation'
 }).catch(function () {});
 summary.held++;
 continue;
@@ -3310,10 +3316,10 @@ const marks = Object.assign({}, account.cadence_sent || {});
 marks[String(due.day)] = true;
 patch.cadence_sent = marks;
 await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
-await pgInsert(env, 'account_activity', {
+await pgInsert(env, 'account_notes', {
 tenant_id: settings.tenant_id, account_id: account.id,
 body: 'Day ' + due.day + ' follow-up sent to ' + recipient.label + ' (' + to + ').',
-source: 'automation'
+author_name: 'clAIms automation', source: 'automation'
 }).catch(function () {});
 } else {
 summary.failed++;
@@ -3331,6 +3337,195 @@ try { results.push(await runCadenceForTenant(env, settings, now)); }
 catch (e) { results.push({ tenantId: settings.tenant_id, error: String(e) }); }
 }
 return results;
+}
+
+
+/* ---------------------------------------------------------------------------
+   CRM note and document sync
+   Notes and files flow both ways. Anything the CRM pushes in shows up in the
+   A/R Spreadsheet 'Recent Update' column; anything created here is queued in
+   integration_outbox for the connector to pull and write back to the CRM.
+   External ids make both directions idempotent, so replays cannot duplicate.
+   --------------------------------------------------------------------------- */
+async function enqueueOutbox(env, tenantId, accountId, entityType, entityId, payload) {
+try {
+await pgInsert(env, 'integration_outbox', {
+tenant_id: tenantId, account_id: accountId || null,
+entity_type: entityType, entity_id: entityId || null,
+payload: payload || {}
+});
+} catch (e) { /* never block the user's action on queueing */ }
+}
+
+function noteToJson(row) {
+return {
+id: row.id,
+accountId: row.account_id,
+text: row.body,
+author: row.author_name || null,
+source: row.source,
+url: row.external_url || null,
+ts: row.occurred_at
+};
+}
+
+// Called by the integration sync for each account in the payload.
+async function ingestCrmNotes(env, tenantId, accountId, notes) {
+let added = 0;
+for (const raw of (notes || [])) {
+if (!raw || !raw.body) continue;
+const externalId = raw.externalId ? String(raw.externalId).slice(0, 120) : null;
+if (externalId) {
+const existing = await pgSelectOne(env, 'account_notes',
+'tenant_id=' + pgEq(tenantId) + '&external_id=' + pgEq(externalId) + '&select=id');
+if (existing) continue;
+}
+await pgInsert(env, 'account_notes', {
+tenant_id: tenantId, account_id: accountId,
+body: String(raw.body).slice(0, 4000),
+author_name: raw.author ? String(raw.author).slice(0, 120) : null,
+source: 'crm',
+external_id: externalId,
+external_url: raw.url ? String(raw.url).slice(0, 500) : null,
+occurred_at: raw.occurredAt ? String(raw.occurredAt) : new Date().toISOString()
+});
+added++;
+}
+return added;
+}
+
+// CRM-hosted files are referenced by URL rather than copied into our bucket.
+async function ingestCrmDocuments(env, tenantId, accountId, docs) {
+let added = 0;
+for (const raw of (docs || [])) {
+if (!raw || !raw.name) continue;
+const externalId = raw.externalId ? String(raw.externalId).slice(0, 120) : null;
+if (externalId) {
+const existing = await pgSelectOne(env, 'documents',
+'tenant_id=' + pgEq(tenantId) + '&external_id=' + pgEq(externalId) + '&select=id');
+if (existing) continue;
+}
+let kind = raw.kind ? String(raw.kind) : 'Other';
+if (DOC_KINDS.indexOf(kind) === -1) kind = 'Other';
+await pgInsert(env, 'documents', {
+tenant_id: tenantId, account_id: accountId,
+storage_path: null,
+file_name: safeFileName(raw.name),
+doc_kind: kind,
+doc_label: raw.label ? String(raw.label).slice(0, 120) : null,
+content_type: raw.contentType || null,
+size_bytes: raw.size ? Number(raw.size) : null,
+source: 'crm',
+external_id: externalId,
+external_url: raw.url ? String(raw.url).slice(0, 500) : null
+});
+added++;
+}
+return added;
+}
+
+async function handleAccountNotesList(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+const accountId = url.searchParams.get('accountId');
+if (!accountId) return json({ ok: false, error: 'accountId is required' }, 400);
+const account = await accountForUser(env, user, accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const rows = await pgSelect(env, 'account_notes',
+'account_id=' + pgEq(account.id) + '&select=*&order=occurred_at.desc&limit=50');
+return json({ ok: true, notes: (rows || []).map(noteToJson) });
+}
+
+async function handleAccountNoteCreate(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const account = await accountForUser(env, user, body.accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const text = String(body.body || '').trim();
+if (!text) return json({ ok: false, error: 'Note cannot be empty.' }, 400);
+const row = await pgInsert(env, 'account_notes', {
+tenant_id: user.tenant_id, account_id: account.id,
+body: text.slice(0, 4000),
+author_name: user.full_name || user.email,
+source: body.source === 'automation' ? 'automation' : 'dashboard',
+occurred_at: new Date().toISOString()
+});
+await enqueueOutbox(env, user.tenant_id, account.id, 'note', row && row.id, {
+body: text.slice(0, 4000),
+author: user.full_name || user.email,
+occurredAt: new Date().toISOString(),
+externalAccountId: account.external_id || null
+});
+return json({ ok: true, note: noteToJson(row) });
+}
+
+// The CRM connector polls this with its integration key and acknowledges what
+// it wrote back, so delivery survives connector downtime.
+async function integrationFromKey(request, env) {
+const authHeader = request.headers.get('Authorization') || '';
+const match = authHeader.match(/^Bearer\s+(.+)$/i);
+if (!match) return null;
+return await pgSelectOne(env, 'integrations',
+'api_key=' + pgEq(match[1].trim()) + '&status=' + pgEq('connected') + '&select=id,tenant_id');
+}
+
+async function handleOutboxPull(request, env) {
+const integration = await integrationFromKey(request, env);
+if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
+const url = new URL(request.url);
+const limit = Math.min(parseInt(url.searchParams.get('limit'), 10) || 50, 200);
+const rows = await pgSelect(env, 'integration_outbox',
+'tenant_id=' + pgEq(integration.tenant_id) + '&status=' + pgEq('pending') +
+'&select=*&order=created_at.asc&limit=' + limit) || [];
+const items = [];
+for (const row of rows) {
+let externalAccountId = null;
+if (row.account_id) {
+const acct = await pgSelectOne(env, 'accounts', 'id=' + pgEq(row.account_id) + '&select=external_id');
+externalAccountId = acct ? acct.external_id : null;
+}
+items.push({
+id: row.id,
+entityType: row.entity_type,
+entityId: row.entity_id,
+accountId: row.account_id,
+externalAccountId: externalAccountId,
+payload: row.payload,
+createdAt: row.created_at
+});
+}
+return json({ ok: true, items: items });
+}
+
+async function handleOutboxAck(request, env) {
+const integration = await integrationFromKey(request, env);
+if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const ids = Array.isArray(body.ids) ? body.ids : (body.id ? [body.id] : []);
+if (!ids.length) return json({ ok: false, error: 'No ids supplied' }, 400);
+const failed = !!body.failed;
+let updated = 0;
+for (const id of ids) {
+const row = await pgSelectOne(env, 'integration_outbox',
+'id=' + pgEq(id) + '&tenant_id=' + pgEq(integration.tenant_id) + '&select=id,attempts');
+if (!row) continue;
+await pgUpdate(env, 'integration_outbox', 'id=' + pgEq(row.id), failed ? {
+status: 'pending',
+attempts: (row.attempts || 0) + 1,
+last_error: body.error ? String(body.error).slice(0, 500) : 'Connector reported failure'
+} : {
+status: 'delivered',
+attempts: (row.attempts || 0) + 1,
+delivered_at: new Date().toISOString(),
+last_error: null
+});
+updated++;
+}
+return json({ ok: true, updated: updated });
 }
 
 async function handleAccounts(request, env) {
@@ -4350,6 +4545,18 @@ return handleInvoicePayment(request, env);
 }
 if (url.pathname === '/api/invoices/payments' && request.method === 'GET') {
 return handleInvoicePaymentList(request, env);
+}
+if (url.pathname === '/api/accounts/notes' && request.method === 'GET') {
+return handleAccountNotesList(request, env);
+}
+if (url.pathname === '/api/accounts/notes' && request.method === 'POST') {
+return handleAccountNoteCreate(request, env);
+}
+if (url.pathname === '/api/integrations/outbox' && request.method === 'GET') {
+return handleOutboxPull(request, env);
+}
+if (url.pathname === '/api/integrations/outbox/ack' && request.method === 'POST') {
+return handleOutboxAck(request, env);
 }
 if (url.pathname === '/api/documents' && request.method === 'GET') {
 return handleDocumentList(request, env);
