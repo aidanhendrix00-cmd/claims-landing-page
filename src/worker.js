@@ -1313,7 +1313,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
-const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';if(u.indexOf('/api/escalate-notify')!==-1){return Promise.resolve(new Response(JSON.stringify({ok:true,sent:true,demo:true,notifiedName:'Dana Whitfield',notifiedEmail:'dana.whitfield@example.com'}),{status:200,headers:{'Content-Type':'application/json'}}));}for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
+const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';if(u.indexOf('/api/documents')!==-1){var J=function(o){return Promise.resolve(new Response(JSON.stringify(o),{status:200,headers:{'Content-Type':'application/json'}}));};if(u.indexOf('/api/documents/upload')!==-1){var f=null,k='Other',lb='';try{var B=init&&init.body;if(B&&B.get){f=B.get('file');k=B.get('kind')||'Other';lb=B.get('label')||'';}}catch(e2){}return J({ok:true,demo:true,document:{id:'demo-'+Date.now(),name:(f&&f.name)||'document.pdf',kind:k,label:lb||null,size:(f&&f.size)||0,contentType:(f&&f.type)||null,createdAt:new Date().toISOString(),auto:false}});}if(u.indexOf('/api/documents/delete')!==-1){return J({ok:true,demo:true});}if(u.indexOf('/api/documents/download')!==-1){return J({ok:false,demo:true,error:'Sample document in the demo - not a stored file.'});}return J({ok:true,demo:true,documents:[]});}if(u.indexOf('/api/escalate-notify')!==-1){return Promise.resolve(new Response(JSON.stringify({ok:true,sent:true,demo:true,notifiedName:'Dana Whitfield',notifiedEmail:'dana.whitfield@example.com'}),{status:200,headers:{'Content-Type':'application/json'}}));}for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
 const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '.cdap-trigger{position:fixed;top:16px;right:16px;z-index:99996;background:#171717;color:#fff;border:none;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);cursor:pointer;} ' +
   '#clmsAcctOverlay{display:none;position:fixed;inset:0;background:#F5F2EA;z-index:999995;overflow-y:auto;font-family:"IBM Plex Sans",Arial,sans-serif;color:#171717;} ' +
@@ -2931,7 +2931,11 @@ auto: false
 // written or read, so a guessed account id cannot reach another tenant.
 async function accountForUser(env, user, accountId) {
 if (!accountId) return null;
-return await pgSelectOne(env, 'accounts', 'id=' + pgEq(accountId) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id');
+let q = 'id=' + pgEq(accountId) + '&tenant_id=' + pgEq(user.tenant_id);
+// Mirror the visibility rules used by /api/accounts so a guessed id cannot
+// reach another company, or another office within the same company.
+if (user.role !== 'admin') q += '&office=' + pgEq(user.office || '__none__');
+return await pgSelectOne(env, 'accounts', q + '&select=id');
 }
 
 async function handleDocumentList(request, env) {
