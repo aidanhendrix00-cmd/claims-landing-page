@@ -1631,6 +1631,37 @@ async function removeTeamMember(id) {
   } catch (err) {}
 }
 
+// Notes arrive from the company CRM through the integration sync, from this
+// dashboard, or from automation. They drive the Recent Update column.
+async function loadAccountNotes(invoices){
+  const remote = (invoices || []).filter(function(inv){
+    return inv && inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/);
+  });
+  await Promise.all(remote.map(function(inv){
+    return fetch('/api/accounts/notes?accountId=' + encodeURIComponent(inv.id), { credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(!res || !res.ok || !res.notes || !res.notes.length) return;
+        inv.activity = res.notes.map(function(n){
+          let ts = n.ts;
+          try { ts = new Date(n.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); } catch(e){}
+          return { id: n.id, ts: ts, text: n.text, source: n.source, author: n.author, url: n.url };
+        });
+      })
+      .catch(function(){});
+  }));
+}
+
+function postAccountNote(inv, text){
+  if(!inv || !text) return Promise.resolve(null);
+  if(!(inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/))) return Promise.resolve(null);
+  return fetch('/api/accounts/notes', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountId: inv.id, body: text })
+  }).then(function(r){ return r.json(); }).catch(function(){ return null; });
+}
+
 async function loadRealAccounts(){
     try {
       const res = await fetch('/api/accounts', { credentials: 'include' });
@@ -1733,6 +1764,7 @@ async function loadRealAccounts(){
         }
       });
       state.invoices = invoices;
+      await loadAccountNotes(invoices);
       state.paymentsLog = paymentsLog;
       if (typeof saveState === 'function') saveState();
       if (typeof renderAll === 'function') renderAll();
@@ -1797,6 +1829,9 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
      ============================================================ */
   function findInv(id){ return state.invoices.find(i=>i.id===id); }
   function addActivity(inv, text, source){
+    // Manual notes are persisted and queued for the CRM; automation notes are
+    // already written server-side, so pushing them again would duplicate.
+    if((source || 'manual') === 'manual'){ postAccountNote(inv, text); }
     inv.activity = inv.activity || [];
     inv.activity.unshift({ ts: new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}), text, source: source || 'manual' });
     // Tracked on the simulated cadence clock (inv.days), not real wall-clock time,
