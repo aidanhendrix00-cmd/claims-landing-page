@@ -3152,7 +3152,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         if(btn){ btn.disabled = false; btn.textContent = '+ Upload Document'; }
         if(res && res.ok && res.document){
           inv.documents = inv.documents || [];
-          inv.documents.push(Object.assign({ remote: true }, res.document));
+          // A simulated upload in the Interactive Demo is not a stored file,
+          // so it must not offer Open or Remove against real storage.
+          inv.documents.push(Object.assign({ remote: !res.demo }, res.document));
           addActivity(inv, (res.document.label || res.document.name) + ' uploaded.', 'manual');
           saveState(); renderDetailDocs(inv); renderDetailActivity(inv);
           uploadNote('Uploaded ' + res.document.name + '.', 'good');
