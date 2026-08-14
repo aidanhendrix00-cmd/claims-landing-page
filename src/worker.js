@@ -8,6 +8,7 @@ const VERIFICATION_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 const RESET_TTL_SECONDS = 60 * 60; // 1 hour
 const NOTIFY_EMAIL = 'hndrx@claims-collection.net';
 const SUPPORT_EMAIL = 'support@claims-collection.net';
+const SALES_EMAIL = 'salesnmarketing@claims-collection.net';
 const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
 const OPERATIONS_FROM_EMAIL = 'clAIms Operations <operations@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
@@ -304,10 +305,19 @@ const CONTACT_FORM_SCRIPT = '<script>' +
   'bodyLines.push("");' +
   'bodyLines.push("Anything else: "+(message||"(none)"));' +
   'var body=bodyLines.join("\\n");' +
-  'var contactEmail="salesnmarketing@claims-collection.net";' +
-  'try{if(typeof CONTACT_EMAIL!=="undefined"&&CONTACT_EMAIL){contactEmail=CONTACT_EMAIL;}}catch(e){}' +
-  'var mailto="mailto:"+contactEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body);' +
-  'window.location.href=mailto;' +
+  // Post the lead straight to us. The old mailto handoff silently lost anyone
+  // without a configured mail client, and left no record on our side.
+  'var btn=document.querySelector(".contact-submit");' +
+  'var noteEl=document.querySelector(".contact-note");' +
+  'var fail=function(msg){if(noteEl){noteEl.textContent=msg;noteEl.style.color="#8A1C13";}if(btn){btn.disabled=false;btn.textContent="Send inquiry";}};' +
+  'if(btn){btn.disabled=true;btn.textContent="Sending...";}' +
+  'fetch("/api/get-started",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fullName:name,email:email,companyName:company,topic:topic,topicLabel:topicLabel,details:otherDetail,message:message,summary:body})})' +
+  '.then(function(r){return r.json();})' +
+  '.then(function(d){' +
+  'if(d&&d.ok){if(noteEl){noteEl.textContent="Thanks - we have your details and will follow up within one business day.";noteEl.style.color="#1F5346";}if(btn){btn.textContent="Sent";}}' +
+  'else{fail((d&&d.error)||"Something went wrong. Please email salesnmarketing@claims-collection.net directly.");}' +
+  '})' +
+  '.catch(function(){fail("Could not send right now. Please email salesnmarketing@claims-collection.net directly.");});' +
   '};' +
   '});' +
   '})();' +
@@ -2328,17 +2338,23 @@ async function handleGetStarted(request, env) {
   const zip = (body.zip || '').trim();
   const companySize = (body.companySize || '').trim();
   const desiredPlan = (body.desiredPlan || '').trim();
+  const topicLabel = (body.topicLabel || '').trim();
+  const details = (body.details || '').trim();
+  const message = (body.message || '').trim();
 
-  if (!fullName || !email || !companyName || !desiredPlan) {
-    return json({ ok: false, error: 'Please fill out all required fields.' }, 400);
+  // The marketing contact form sends name/email only; the fuller Get Started
+  // payload also carries company, plan and terms. Accept both shapes.
+  if (!fullName || !email) {
+    return json({ ok: false, error: 'Please enter your name and work email.' }, 400);
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
   }
-  if (['starter', 'growth', 'enterprise'].indexOf(desiredPlan) === -1) {
+  if (desiredPlan && ['starter', 'growth', 'enterprise'].indexOf(desiredPlan) === -1) {
     return json({ ok: false, error: 'Please select a valid plan.' }, 400);
   }
-  if (!body.agreeToTerms) {
+  // Terms only apply to the plan-selecting flow, not a general enquiry.
+  if (desiredPlan && !body.agreeToTerms) {
     return json({ ok: false, error: 'You must agree to the Terms & Conditions to continue.' }, 400);
   }
 
@@ -2354,10 +2370,15 @@ async function handleGetStarted(request, env) {
     '<tr><td style="padding:4px 8px;font-weight:600;">Desired plan</td><td style="padding:4px 8px;">' + escapeHtml(desiredPlan) + '</td></tr>' +
     '</table>' +
     '</div>';
+  const extraRows =
+    (topicLabel ? '<tr><td style="padding:4px 8px;font-weight:600;">Asking about</td><td style="padding:4px 8px;">' + escapeHtml(topicLabel) + '</td></tr>' : '') +
+    (details ? '<tr><td style="padding:4px 8px;font-weight:600;">Details</td><td style="padding:4px 8px;">' + escapeHtml(details) + '</td></tr>' : '') +
+    (message ? '<tr><td style="padding:4px 8px;font-weight:600;">Message</td><td style="padding:4px 8px;">' + escapeHtml(message) + '</td></tr>' : '');
+  const leadHtml = extraRows ? notifyHtml.replace('</table>', extraRows + '</table>') : notifyHtml;
   const result = await sendEmail(env, {
-    to: 'info@claims-collection.net',
-    subject: 'NEW CUSTOMER ' + companyName,
-    html: notifyHtml,
+    to: SALES_EMAIL,
+    subject: 'NEW LEAD ' + (companyName || fullName),
+    html: leadHtml,
     kind: 'get_started_lead'
   });
 
