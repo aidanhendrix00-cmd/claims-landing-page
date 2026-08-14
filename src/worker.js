@@ -2797,6 +2797,8 @@ office: office, customer_name: String(raw.customerName).slice(0,200),
 meta: raw.meta ? String(raw.meta).slice(0,300) : null,
 payer: raw.payer ? String(raw.payer).slice(0,40) : null,
 contact: raw.contact ? String(raw.contact).slice(0,120) : null,
+contact_email: raw.contactEmail ? String(raw.contactEmail).trim().slice(0,200) : null,
+claim_number: raw.claimNumber ? String(raw.claimNumber).slice(0,80) : null,
 amount: Number(raw.amount) || 0,
 invoiced_at: raw.invoicedAt ? String(raw.invoicedAt) : null,
 status: status,
@@ -3134,6 +3136,203 @@ const rows = await pgSelect(env, 'invoice_payments', q);
 return json({ ok: true, payments: rows || [] });
 }
 
+
+/* ---------------------------------------------------------------------------
+   Autonomous follow-up cadence
+   This used to run in the browser, so follow-ups only advanced while someone
+   had a tab open and nothing was ever actually sent. It now runs on the Worker
+   cron: every hour it walks each tenant's open invoices, works out which
+   cadence checkpoints are due, and sends through Resend.
+
+   Safety: cadence_settings.enabled defaults to FALSE for every tenant, and
+   require_review defaults to TRUE. A company has to deliberately switch both
+   before a single automated email reaches one of their customers.
+   --------------------------------------------------------------------------- */
+const CADENCE_OPEN_STATUSES = ['in_ar', 'in_progress', 'work_completed', 'pending_start'];
+
+function cadenceCheckpointsFor(settings) {
+const list = [];
+(settings.contact_days || []).forEach(function (day) {
+list.push({ day: Number(day), kind: day === 1 ? 'first_contact' : 'followup' });
+});
+if (settings.demand_letter_day) list.push({ day: Number(settings.demand_letter_day), kind: 'demand_letter' });
+if (settings.noil_day) list.push({ day: Number(settings.noil_day), kind: 'noil' });
+return list.filter(function (c) { return isFinite(c.day) && c.day > 0; }).sort(function (a, b) { return a.day - b.day; });
+}
+
+// Quiet hours can wrap midnight (e.g. 20:00 to 08:00), so compare in minutes.
+function withinQuietHours(settings, now) {
+const tz = settings.time_zone || 'America/Chicago';
+let hh = 0, mm = 0;
+try {
+const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour12: false, hour: '2-digit', minute: '2-digit' }).formatToParts(now);
+hh = parseInt((parts.find(function (p) { return p.type === 'hour'; }) || {}).value, 10) || 0;
+mm = parseInt((parts.find(function (p) { return p.type === 'minute'; }) || {}).value, 10) || 0;
+} catch (e) {}
+const cur = hh * 60 + mm;
+function toMin(t) { const s = String(t || '00:00').split(':'); return (parseInt(s[0], 10) || 0) * 60 + (parseInt(s[1], 10) || 0); }
+const start = toMin(settings.quiet_start);
+const end = toMin(settings.quiet_end);
+if (start === end) return false;
+return start < end ? (cur >= start && cur < end) : (cur >= start || cur < end);
+}
+
+function cadenceRecipient(account) {
+const role = (account.currently_with || '').toLowerCase();
+if (role === 'adjuster') return { role: 'adjuster', label: 'Adjuster' };
+if (role === 'pm') return { role: 'pm', label: 'Property Manager' };
+if (role === 'homeowner') return { role: 'homeowner', label: 'Homeowner' };
+const payer = (account.payer || '').toLowerCase();
+if (payer === 'insurance') return { role: 'adjuster', label: 'Adjuster' };
+if (payer === 'pm') return { role: 'pm', label: 'Property Manager' };
+return { role: 'homeowner', label: 'Homeowner' };
+}
+
+function cadenceEmailBody(account, checkpoint, recipient, settings, balance) {
+const money = '$' + Number(balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const who = escapeHtml(recipient.label);
+const name = escapeHtml(account.customer_name || 'your account');
+const invoiceRef = escapeHtml('INV-' + (10000 + account.id));
+const claimBit = account.claim_number ? ('<tr><td style="padding:4px 10px 4px 0;color:#615D53;">Claim</td><td style="padding:4px 0;font-weight:600;">' + escapeHtml(account.claim_number) + '</td></tr>') : '';
+let opening;
+if (checkpoint.kind === 'first_contact') {
+opening = 'We are following up on the invoice below for ' + name + '.';
+} else if (checkpoint.kind === 'demand_letter') {
+opening = 'This is a formal demand for payment on the past-due invoice below for ' + name + '.';
+} else if (checkpoint.kind === 'noil') {
+opening = 'This is a Notice of Intent to Lien regarding the past-due invoice below for ' + name + '.';
+} else {
+opening = 'Following up again on the outstanding invoice below for ' + name + '.';
+}
+return '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;">' +
+'<p>Hello ' + who + ',</p>' +
+'<p>' + escapeHtml(opening) + '</p>' +
+'<table style="border-collapse:collapse;margin:12px 0;">' +
+'<tr><td style="padding:4px 10px 4px 0;color:#615D53;">Invoice</td><td style="padding:4px 0;font-weight:600;">' + invoiceRef + '</td></tr>' +
+'<tr><td style="padding:4px 10px 4px 0;color:#615D53;">Balance due</td><td style="padding:4px 0;font-weight:600;">' + escapeHtml(money) + '</td></tr>' +
+claimBit +
+'</table>' +
+'<p>If payment has already been sent, please reply with the details and we will reconcile it.</p>' +
+'<p style="margin-top:18px;">Thank you,<br>' + escapeHtml(settings.sender_name || 'Accounts Receivable') + '</p>' +
+'</div>';
+}
+
+async function runCadenceForTenant(env, settings, now) {
+const summary = { tenantId: settings.tenant_id, considered: 0, sent: 0, held: 0, skipped: 0, failed: 0 };
+if (!settings.enabled) { summary.skipped = -1; return summary; }
+if (withinQuietHours(settings, now)) { summary.skipped = -2; return summary; }
+
+const statusFilter = 'status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')';
+const accounts = await pgSelect(env, 'accounts',
+'tenant_id=' + pgEq(settings.tenant_id) + '&' + statusFilter + '&select=*&order=id.asc'
+) || [];
+const checkpoints = cadenceCheckpointsFor(settings);
+const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
+
+for (const account of accounts) {
+if (account.escalated) { summary.skipped++; continue; }
+if (!account.invoiced_at) { summary.skipped++; continue; }
+const balance = Number(account.amount || 0) - Number(account.paid_amount || 0);
+if (balance <= 0) { summary.skipped++; continue; }
+
+const ageDays = Math.floor((now.getTime() - new Date(account.invoiced_at).getTime()) / 86400000);
+if (ageDays < 1) { summary.skipped++; continue; }
+summary.considered++;
+
+// The highest checkpoint that is due but not yet logged. Older ones are
+// treated as already past so a new invoice does not fire a burst of emails.
+const due = checkpoints.filter(function (c) { return c.day <= ageDays; }).pop();
+if (!due) { summary.skipped++; continue; }
+
+const already = await pgSelectOne(env, 'invoice_comms',
+'account_id=' + pgEq(account.id) + '&cadence_day=' + pgEq(due.day) + '&select=id'
+);
+if (already) { summary.skipped++; continue; }
+
+const recent = await pgSelect(env, 'invoice_comms',
+'account_id=' + pgEq(account.id) + '&sent_at=gte.' + encodeURIComponent(weekAgo) + '&status=' + pgEq('sent') + '&select=id'
+) || [];
+if (recent.length >= (settings.max_per_week || 2)) { summary.skipped++; continue; }
+
+const recipient = cadenceRecipient(account);
+const to = (account.contact_email || '').trim();
+
+// Held for review, or no deliverable address: log it and flag the account so
+// it surfaces in the queue instead of silently doing nothing.
+if (settings.require_review || !to) {
+await pgInsert(env, 'invoice_comms', {
+tenant_id: settings.tenant_id, account_id: account.id, cadence_day: due.day,
+kind: due.kind, recipient_role: recipient.role, recipient_email: to || null,
+subject: null, status: settings.require_review ? 'held_for_review' : 'no_recipient',
+error: settings.require_review ? null : 'No contact email on the account'
+});
+await pgInsert(env, 'account_activity', {
+tenant_id: settings.tenant_id, account_id: account.id,
+body: 'Day ' + due.day + ' cadence checkpoint reached (' + due.kind + ') - ' +
+(settings.require_review ? 'held for review before sending.' : 'no contact email on file.'),
+source: 'automation'
+}).catch(function () {});
+summary.held++;
+continue;
+}
+
+const subject = due.kind === 'noil' ? 'Notice of Intent to Lien - ' + (account.customer_name || 'Invoice')
+: due.kind === 'demand_letter' ? 'Demand for payment - ' + (account.customer_name || 'Invoice')
+: 'Outstanding invoice - ' + (account.customer_name || 'Invoice');
+const html = cadenceEmailBody(account, due, recipient, settings, balance);
+let result = null;
+try {
+result = await sendEmail(env, {
+to: to, subject: subject, html: html, kind: 'cadence_' + due.kind,
+tenantId: settings.tenant_id, from: OPERATIONS_FROM_EMAIL,
+replyTo: settings.reply_to || undefined
+});
+} catch (e) { result = { ok: false, error: String(e) }; }
+
+await pgInsert(env, 'invoice_comms', {
+tenant_id: settings.tenant_id, account_id: account.id, cadence_day: due.day,
+kind: due.kind, recipient_role: recipient.role, recipient_email: to,
+subject: subject, status: (result && result.ok) ? 'sent' : 'failed',
+error: (result && result.ok) ? null : String((result && result.error) || 'Send failed')
+});
+
+if (result && result.ok) {
+summary.sent++;
+const patch = {
+follow_up_count: (parseInt(account.follow_up_count, 10) || 0) + 1,
+last_contact: now.toISOString().slice(0, 10),
+responded: account.responded || 'sent',
+updated_at: now.toISOString()
+};
+if (due.kind === 'noil') patch.noil_sent_at = now.toISOString();
+if (due.kind === 'demand_letter') patch.demand_letter_sent_at = now.toISOString();
+const marks = Object.assign({}, account.cadence_sent || {});
+marks[String(due.day)] = true;
+patch.cadence_sent = marks;
+await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
+await pgInsert(env, 'account_activity', {
+tenant_id: settings.tenant_id, account_id: account.id,
+body: 'Day ' + due.day + ' follow-up sent to ' + recipient.label + ' (' + to + ').',
+source: 'automation'
+}).catch(function () {});
+} else {
+summary.failed++;
+}
+}
+return summary;
+}
+
+async function runCadenceSweep(env) {
+const now = new Date();
+const settingsRows = await pgSelect(env, 'cadence_settings', 'select=*&enabled=is.true') || [];
+const results = [];
+for (const settings of settingsRows) {
+try { results.push(await runCadenceForTenant(env, settings, now)); }
+catch (e) { results.push({ tenantId: settings.tenant_id, error: String(e) }); }
+}
+return results;
+}
+
 async function handleAccounts(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -3156,6 +3355,8 @@ name: a.customer_name,
 meta: a.meta,
 payer: a.payer,
 contact: a.contact,
+contactEmail: a.contact_email,
+claimNumber: a.claim_number,
 amount: a.amount,
 invoicedDate: a.invoiced_at,
 days: days,
@@ -4282,6 +4483,9 @@ const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10);
 if (weekday === 'Wed' && hour === 18) {
 ctx.waitUntil(runWeeklyDigest(env));
 }
+// Follow-up cadence runs every hour; each tenant's own quiet hours and
+// weekly send cap decide whether anything actually goes out.
+ctx.waitUntil(runCadenceSweep(env));
 }
 };
 
