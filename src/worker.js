@@ -3149,6 +3149,266 @@ async function verifyStripeSignature(env, sigHeader, rawBody) {
   return expected === v1;
 }
 
+
+/* ---------------------------------------------------------------------------
+   Billing mirror
+   Stripe stays the source of truth for money. These helpers keep a read-only
+   copy in Supabase so the app can gate on plan and status, and so billing can
+   be reported across every company without a Stripe round trip per request.
+   --------------------------------------------------------------------------- */
+const PLAN_KEYS = ['starter', 'growth', 'enterprise'];
+
+async function pgUpsert(env, table, data, conflictColumn) {
+return await pgFetch(env, 'POST', table, 'on_conflict=' + encodeURIComponent(conflictColumn), data, 'resolution=merge-duplicates');
+}
+
+function isoFromUnix(ts) {
+return ts ? new Date(ts * 1000).toISOString() : null;
+}
+
+// Derive our plan key from whatever Stripe gives us, checking lookup key,
+// nickname, metadata, product name and finally the price id.
+function planFromStripePrice(price) {
+if (!price) return null;
+const product = price.product && typeof price.product === 'object' ? price.product : null;
+const haystack = [
+price.lookup_key,
+price.nickname,
+price.metadata && price.metadata.plan,
+product && product.name,
+product && product.metadata && product.metadata.plan,
+price.id
+].filter(Boolean).join(' ').toLowerCase();
+for (let i = 0; i < PLAN_KEYS.length; i++) {
+if (haystack.indexOf(PLAN_KEYS[i]) !== -1) return PLAN_KEYS[i];
+}
+return null;
+}
+
+function subscriptionStatusToTenantStatus(status) {
+if (status === 'past_due' || status === 'unpaid') return 'past_due';
+if (status === 'canceled' || status === 'incomplete_expired') return 'canceled';
+return 'active';
+}
+
+async function tenantIdForStripeCustomer(env, customerId, fallbackTenantId) {
+if (fallbackTenantId) return fallbackTenantId;
+if (!customerId) return null;
+const row = await pgSelectOne(env, 'tenants', 'stripe_customer_id=' + pgEq(customerId) + '&select=id');
+return row ? row.id : null;
+}
+
+async function mirrorSubscription(env, sub, tenantIdHint) {
+if (!sub || !sub.id) return null;
+const tenantId = await tenantIdForStripeCustomer(env, sub.customer, tenantIdHint);
+if (!tenantId) return null;
+const item = sub.items && sub.items.data && sub.items.data[0];
+const price = item && item.price;
+const plan = planFromStripePrice(price);
+const productId = price ? (typeof price.product === 'string' ? price.product : (price.product && price.product.id) || null) : null;
+await pgUpsert(env, 'subscriptions', {
+tenant_id: tenantId,
+stripe_subscription_id: sub.id,
+stripe_customer_id: sub.customer || null,
+stripe_price_id: price ? price.id : null,
+stripe_product_id: productId,
+plan: plan,
+status: sub.status || 'unknown',
+quantity: item ? item.quantity : null,
+unit_amount: price && price.unit_amount != null ? price.unit_amount / 100 : null,
+currency: price ? price.currency : null,
+billing_interval: price && price.recurring ? price.recurring.interval : null,
+current_period_start: isoFromUnix(sub.current_period_start),
+current_period_end: isoFromUnix(sub.current_period_end),
+cancel_at_period_end: !!sub.cancel_at_period_end,
+canceled_at: isoFromUnix(sub.canceled_at),
+updated_at: new Date().toISOString()
+}, 'stripe_subscription_id');
+const patch = { status: subscriptionStatusToTenantStatus(sub.status) };
+if (plan) patch.selected_plan = plan;
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
+return tenantId;
+}
+
+async function mirrorInvoice(env, invoice, statusOverride) {
+if (!invoice || !invoice.id) return null;
+const tenantId = await tenantIdForStripeCustomer(env, invoice.customer, null);
+const line = invoice.lines && invoice.lines.data && invoice.lines.data[0];
+await pgUpsert(env, 'payments', {
+tenant_id: tenantId,
+stripe_invoice_id: invoice.id,
+stripe_customer_id: invoice.customer || null,
+stripe_subscription_id: invoice.subscription || null,
+stripe_payment_intent_id: typeof invoice.payment_intent === 'string' ? invoice.payment_intent : null,
+description: (line && line.description) || invoice.description || 'Subscription',
+amount_due: invoice.amount_due != null ? invoice.amount_due / 100 : null,
+amount_paid: invoice.amount_paid != null ? invoice.amount_paid / 100 : null,
+currency: invoice.currency || null,
+status: statusOverride || invoice.status || 'open',
+failure_reason: (invoice.last_finalization_error && invoice.last_finalization_error.message) || null,
+period_start: isoFromUnix(invoice.period_start),
+period_end: isoFromUnix(invoice.period_end),
+paid_at: isoFromUnix(invoice.status_transitions && invoice.status_transitions.paid_at),
+hosted_invoice_url: invoice.hosted_invoice_url || null,
+invoice_pdf: invoice.invoice_pdf || null,
+updated_at: new Date().toISOString()
+}, 'stripe_invoice_id');
+return tenantId;
+}
+
+
+// Internal billing roll-up. Reads only from the Supabase mirror, so it is fast
+// and works even if Stripe is unreachable. Gated on the same export key as the
+// accounts export rather than a customer session.
+async function handleAdminBillingData(request, env) {
+const url = new URL(request.url);
+const key = url.searchParams.get('key') || request.headers.get('X-Export-Key') || '';
+if (!env.ADMIN_EXPORT_KEY || key !== env.ADMIN_EXPORT_KEY) {
+return json({ ok: false, error: 'Not authorized' }, 401);
+}
+const tenants = await pgSelect(env, 'tenants', 'select=id,slug,company_name,status,selected_plan,recommended_plan,integration_status,stripe_customer_id,created_at&order=id.asc');
+const subs = await pgSelect(env, 'subscriptions', 'select=*&order=updated_at.desc');
+const pays = await pgSelect(env, 'payments', 'select=*&order=paid_at.desc.nullslast&limit=500');
+const subsByTenant = {};
+subs.forEach(function (s) { if (!subsByTenant[s.tenant_id]) subsByTenant[s.tenant_id] = s; });
+const paysByTenant = {};
+pays.forEach(function (p) { if (!paysByTenant[p.tenant_id]) paysByTenant[p.tenant_id] = []; paysByTenant[p.tenant_id].push(p); });
+const rows = tenants.map(function (t) {
+const sub = subsByTenant[t.id] || null;
+const list = paysByTenant[t.id] || [];
+const paid = list.filter(function (p) { return p.status === 'paid'; });
+const failed = list.filter(function (p) { return p.status === 'payment_failed'; });
+const lastPaid = paid[0] || null;
+let mrr = 0;
+if (sub && (sub.status === 'active' || sub.status === 'trialing') && sub.unit_amount != null) {
+const qty = sub.quantity || 1;
+mrr = Number(sub.unit_amount) * qty;
+if (sub.billing_interval === 'year') mrr = mrr / 12;
+}
+return {
+tenantId: t.id,
+company: t.company_name,
+slug: t.slug,
+tenantStatus: t.status,
+plan: (sub && sub.plan) || t.selected_plan || t.recommended_plan || null,
+subscriptionStatus: sub ? sub.status : null,
+cancelAtPeriodEnd: sub ? !!sub.cancel_at_period_end : false,
+currentPeriodEnd: sub ? sub.current_period_end : null,
+mrr: Math.round(mrr * 100) / 100,
+lastPaymentAt: lastPaid ? lastPaid.paid_at : null,
+lastPaymentAmount: lastPaid ? Number(lastPaid.amount_paid || 0) : null,
+lifetimePaid: Math.round(paid.reduce(function (sum, p) { return sum + Number(p.amount_paid || 0); }, 0) * 100) / 100,
+failedCount: failed.length,
+hasBilling: !!t.stripe_customer_id,
+createdAt: t.created_at
+};
+});
+const totals = {
+companies: rows.length,
+paying: rows.filter(function (r) { return r.subscriptionStatus === 'active' || r.subscriptionStatus === 'trialing'; }).length,
+pastDue: rows.filter(function (r) { return r.tenantStatus === 'past_due' || r.subscriptionStatus === 'past_due'; }).length,
+canceling: rows.filter(function (r) { return r.cancelAtPeriodEnd; }).length,
+mrr: Math.round(rows.reduce(function (s, r) { return s + r.mrr; }, 0) * 100) / 100,
+lifetime: Math.round(rows.reduce(function (s, r) { return s + r.lifetimePaid; }, 0) * 100) / 100
+};
+return json({ ok: true, totals: totals, companies: rows, recentPayments: pays.slice(0, 50) });
+}
+
+
+const ADMIN_BILLING_PAGE_HTML = '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+'<meta name="viewport" content="width=device-width,initial-scale=1">' +
+'<meta name="robots" content="noindex,nofollow">' +
+'<title>Billing - Internal</title>' +
+'<style>' +
+'body{margin:0;background:#F5F2EA;color:#171717;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;}' +
+'.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px;}' +
+'h1{font-size:22px;margin:0 0 4px;}' +
+'.sub{color:#615D53;font-size:13px;margin:0 0 22px;}' +
+'.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px;}' +
+'.card{background:#fff;border:1px solid #E5E0D2;border-radius:10px;padding:14px 16px;}' +
+'.card .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#8a8378;}' +
+'.card .v{font-size:22px;font-weight:600;margin-top:4px;}' +
+'table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #E5E0D2;border-radius:10px;overflow:hidden;}' +
+'th{text-align:left;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8a8378;padding:10px 12px;border-bottom:1px solid #E5E0D2;}' +
+'td{padding:10px 12px;border-bottom:1px solid #F0EDE3;font-size:13px;}' +
+'tr:last-child td{border-bottom:none;}' +
+'.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}' +
+'.ok{background:#DFEEE9;color:#1F5346;}.warn{background:#FBE9D8;color:#8A4B18;}.bad{background:#FADBD8;color:#8A1C13;}.mut{background:#EFEDE6;color:#615D53;}' +
+'.gate{max-width:340px;margin:80px auto;background:#fff;border:1px solid #E5E0D2;border-radius:10px;padding:22px;}' +
+'input{width:100%;padding:9px;border:1px solid #E5E0D2;border-radius:6px;font-size:14px;box-sizing:border-box;}' +
+'button{margin-top:10px;width:100%;padding:9px;border:none;border-radius:6px;background:#171717;color:#fff;font-size:14px;cursor:pointer;}' +
+'h2{font-size:15px;margin:26px 0 10px;}' +
+'</style></head><body>' +
+'<div class="wrap">' +
+'<div id="gate" class="gate"><div style="font-weight:600;margin-bottom:8px;">Internal billing</div>' +
+'<input id="key" type="password" placeholder="Export key" autocomplete="off">' +
+'<button id="go">View</button>' +
+'<div id="err" style="color:#8A1C13;font-size:12px;margin-top:8px;"></div></div>' +
+'<div id="view" style="display:none;">' +
+'<h1>Billing</h1><p class="sub">Synced from Stripe by webhook. Stripe remains the source of truth.</p>' +
+'<div class="cards" id="cards"></div>' +
+'<h2>Companies</h2><table id="co"></table>' +
+'<h2>Recent payments</h2><table id="pay"></table>' +
+'</div></div>' +
+'<scr' + 'ipt>' +
+'(function(){' +
+'function money(n){ return n==null ? String.fromCharCode(8212) : "$" + Number(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }' +
+'function day(s){ if(!s) return String.fromCharCode(8212); var d=new Date(s); return isNaN(d.getTime()) ? String.fromCharCode(8212) : d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}); }' +
+'function esc(v){ var t = String(v==null?"":v); t = t.split("&").join("&amp;").split("<").join("&lt;").split(">").join("&gt;"); return t.split(String.fromCharCode(34)).join("&quot;"); }' +
+'function pill(text, cls){ return "<span class=\\"pill " + cls + "\\">" + esc(text) + "</span>"; }' +
+'function statusPill(r){' +
+'  var s = r.subscriptionStatus || r.tenantStatus || "none";' +
+'  var cls = (s==="active"||s==="trialing") ? "ok" : (s==="past_due"||s==="unpaid") ? "bad" : (s==="canceled") ? "mut" : "warn";' +
+'  return pill(s, cls) + (r.cancelAtPeriodEnd ? " " + pill("canceling","warn") : "");' +
+'}' +
+'function load(k){' +
+'  fetch("/api/admin/billing?key=" + encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){' +
+'    if(!d || !d.ok){ document.getElementById("err").textContent = (d && d.error) || "Not authorized"; return; }' +
+'    document.getElementById("gate").style.display = "none";' +
+'    document.getElementById("view").style.display = "block";' +
+'    var t = d.totals;' +
+'    document.getElementById("cards").innerHTML =' +
+'      card("Monthly recurring", money(t.mrr)) + card("Collected all time", money(t.lifetime)) +' +
+'      card("Paying companies", t.paying + " / " + t.companies) + card("Past due", t.pastDue) + card("Canceling", t.canceling);' +
+'    var co = "<tr><th>Company</th><th>Plan</th><th>Status</th><th>MRR</th><th>Renews</th><th>Last payment</th><th>Lifetime</th><th>Failed</th></tr>";' +
+'    d.companies.forEach(function(r){' +
+'      co += "<tr><td><b>" + esc(r.company || r.slug || ("Tenant " + r.tenantId)) + "</b></td>" +' +
+'        "<td>" + esc(r.plan || String.fromCharCode(8212)) + "</td>" +' +
+'        "<td>" + statusPill(r) + "</td>" +' +
+'        "<td>" + money(r.mrr) + "</td>" +' +
+'        "<td>" + day(r.currentPeriodEnd) + "</td>" +' +
+'        "<td>" + day(r.lastPaymentAt) + (r.lastPaymentAmount ? " " + String.fromCharCode(183) + " " + money(r.lastPaymentAmount) : "") + "</td>" +' +
+'        "<td>" + money(r.lifetimePaid) + "</td>" +' +
+'        "<td>" + (r.failedCount ? pill(r.failedCount, "bad") : String.fromCharCode(8212)) + "</td></tr>";' +
+'    });' +
+'    document.getElementById("co").innerHTML = co;' +
+'    var pv = "<tr><th>Date</th><th>Company</th><th>Description</th><th>Amount</th><th>Status</th><th>Invoice</th></tr>";' +
+'    var names = {};' +
+'    d.companies.forEach(function(r){ names[r.tenantId] = r.company || r.slug; });' +
+'    d.recentPayments.forEach(function(p){' +
+'      var cls = p.status === "paid" ? "ok" : (p.status === "payment_failed" ? "bad" : "warn");' +
+'      pv += "<tr><td>" + day(p.paid_at || p.period_start) + "</td>" +' +
+'        "<td>" + esc(names[p.tenant_id] || String.fromCharCode(8212)) + "</td>" +' +
+'        "<td>" + esc(p.description) + "</td>" +' +
+'        "<td>" + money(p.amount_paid != null ? p.amount_paid : p.amount_due) + "</td>" +' +
+'        "<td>" + pill(p.status, cls) + "</td>" +' +
+'        "<td>" + (p.hosted_invoice_url ? ("<a href=\\"" + esc(p.hosted_invoice_url) + "\\" target=\\"_blank\\" rel=\\"noopener\\">View</a>") : String.fromCharCode(8212)) + "</td></tr>";' +
+'    });' +
+'    document.getElementById("pay").innerHTML = pv;' +
+'  }).catch(function(){ document.getElementById("err").textContent = "Could not load billing data."; });' +
+'}' +
+'function card(k,v){ return "<div class=\\"card\\"><div class=\\"k\\">" + k + "</div><div class=\\"v\\">" + v + "</div></div>"; }' +
+'document.getElementById("go").addEventListener("click", function(){ load(document.getElementById("key").value.trim()); });' +
+'document.getElementById("key").addEventListener("keydown", function(e){ if(e.key === "Enter"){ load(e.target.value.trim()); } });' +
+'})();' +
+'</scr' + 'ipt></body></html>';
+
+function handleAdminBillingPage() {
+return new Response(ADMIN_BILLING_PAGE_HTML, {
+headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' }
+});
+}
+
 async function handleStripeWebhook(request, env) {
 const rawBody = await request.text();
 const sigHeader = request.headers.get('Stripe-Signature') || '';
@@ -3163,13 +3423,53 @@ if (event.type === 'checkout.session.completed') {
 const session = event.data.object;
 const tenantId = session.client_reference_id;
 if (tenantId) {
-await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { status: 'active', integration_status: 'not_started', stripe_customer_id: session.customer || null });
+const existingTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=integration_status');
+const tenantPatch = { status: 'active', stripe_customer_id: session.customer || null };
+// Only seed integration_status on first checkout - a re-checkout or plan change
+// must not wipe out a company's onboarding progress.
+if (!existingTenant || !existingTenant.integration_status) { tenantPatch.integration_status = 'not_started'; }
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), tenantPatch);
+if (session.subscription) {
+const subRes = await stripeRequest(env, 'GET', 'subscriptions/' + session.subscription, { 'expand[]': 'items.data.price.product' });
+if (subRes && subRes.ok && subRes.data) { await mirrorSubscription(env, subRes.data, tenantId); }
+}
 await pgUpdate(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&role=' + pgEq('admin'), { status: 'active' });
 
 const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=*');
 if (tenant) {
 const notifyHtml = '<div style="font-family:sans-serif;"><h2>Payment received</h2><p>' + escapeHtml(tenant.company_name) + ' has completed payment and is now active. Plan: ' + escapeHtml(tenant.selected_plan || tenant.recommended_plan || 'n/a') + '.</p></div>';
 await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Payment received: ' + tenant.company_name, html: notifyHtml, kind: 'payment_received', tenantId: tenant.id });
+}
+}
+}
+
+// Plan changes and cancellations made in the Stripe billing portal only reach
+// us through these events; without them tenants.selected_plan and status go stale.
+if (event.type === 'customer.subscription.created' ||
+event.type === 'customer.subscription.updated' ||
+event.type === 'customer.subscription.deleted') {
+await mirrorSubscription(env, event.data.object, null);
+}
+
+if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
+await mirrorInvoice(env, event.data.object, 'paid');
+}
+
+if (event.type === 'invoice.payment_failed') {
+const invoice = event.data.object;
+const failedTenantId = await mirrorInvoice(env, invoice, 'payment_failed');
+if (failedTenantId) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(failedTenantId), { status: 'past_due' });
+const failedTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(failedTenantId) + '&select=*');
+if (failedTenant) {
+const amountDue = invoice.amount_due != null ? (invoice.amount_due / 100).toFixed(2) : '0.00';
+const failHtml = '<div style="font-family:sans-serif;">' +
+'<h2>Payment failed</h2>' +
+'<p><b>' + escapeHtml(failedTenant.company_name || 'A company') + '</b> could not be charged ' +
+escapeHtml(String(invoice.currency || 'usd').toUpperCase()) + ' ' + amountDue + '.</p>' +
+'<p>The account has been marked past due. Stripe will retry automatically.</p>' +
+'</div>';
+await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Payment failed: ' + (failedTenant.company_name || 'Unknown company'), html: failHtml, kind: 'payment_failed', tenantId: failedTenant.id });
 }
 }
 }
@@ -3521,6 +3821,12 @@ return handleEscalateNotify(request, env);
 }
 if (url.pathname === '/api/me' && request.method === 'GET') {
 return handleMe(request, env);
+}
+if (url.pathname === '/admin/billing' && request.method === 'GET') {
+return handleAdminBillingPage();
+}
+if (url.pathname === '/api/admin/billing' && request.method === 'GET') {
+return handleAdminBillingData(request, env);
 }
 if (url.pathname === '/api/admin/accounts-export' && request.method === 'GET') {
 return handleAdminAccountsExport(request, env);
