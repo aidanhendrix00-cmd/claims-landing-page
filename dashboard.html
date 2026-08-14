@@ -881,7 +881,7 @@ custom-integrations"></div>
       <button class="btn-ghost" onclick="openDrawer(currentDetailId, 'followup')">Draft Follow-Up</button>
       <button class="btn-amber" id="detail-demand-btn" style="display:none;" onclick="openDrawer(currentDetailId, 'demand')">Draft Demand Letter</button>
       <button class="btn-rust" id="detail-noil-btn" style="display:none;" onclick="openDrawer(currentDetailId, 'noil')">Draft NOIL</button>
-      <button class="btn-solid" id="detail-payment-btn" onclick="openPaymentForm(currentDetailId)">Record a Payment</button>
+      <button class="btn-solid" id="detail-payment-btn" data-manager-only="1" onclick="openPaymentForm(currentDetailId)">Record a Payment</button>
     </div>
   </div>
 </div>
@@ -1505,6 +1505,10 @@ await loadRealIntegrations();
     state.currentUser = { email: data.email, role: data.role, office: data.office || null };
     document.querySelectorAll('[data-admin-only]').forEach(function(el){
       el.style.display = (state.currentUser.role === 'admin') ? '' : 'none';
+    });
+    const elevated = (state.currentUser.role === 'admin' || state.currentUser.role === 'manager');
+    document.querySelectorAll('[data-manager-only]').forEach(function(el){
+      el.style.display = elevated ? '' : 'none';
     });
     if (state.currentUser.role === 'admin') renderTeam();
   } catch (err) { console.error('loadCurrentUser failed', err); }
@@ -2869,7 +2873,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('detail-noil-btn').style.display = inv.days >= 40 ? 'inline-block' : 'none';
     document.getElementById('detail-escalate-btn').textContent = inv.escalated ? 'Un-escalate' : 'Escalate';
     document.getElementById('detail-escalate-btn').onclick = inv.escalated ? () => { unescalateInvoice(id); closeDetail(); } : () => escalateFromDetail();
-    document.getElementById('detail-payment-btn').style.display = inv.jobStatus === 'paid' ? 'none' : 'inline-block';
+    document.getElementById('detail-payment-btn').style.display = (inv.jobStatus === 'paid' || !canRecordPayments()) ? 'none' : 'inline-block';
     document.getElementById('overlay-detail').classList.add('open');
   }
   function closeDetail(){ document.getElementById('overlay-detail').classList.remove('open'); currentDetailId = null; renderAll(); }
@@ -2877,8 +2881,18 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   /* ============================================================
      MANUAL "RECORD A PAYMENT" FORM
      ============================================================ */
+  // Recording payments is limited to managers and admins. With no session role
+  // present (the public Interactive Demo) the demo persona keeps full access.
+  function canRecordPayments(){
+    const r = state.currentUser && state.currentUser.role;
+    if(!r) return true;
+    return r === 'admin' || r === 'manager';
+  }
+  function paymentsDeniedToast(){ showToast('Only managers and admins can record payments.'); }
+
   let paymentFormInvoiceId = null;
   function openPaymentForm(id){
+    if(!canRecordPayments()){ paymentsDeniedToast(); return; }
     const inv = findInv(id);
     if(!inv) return;
     paymentFormInvoiceId = id;
@@ -2903,6 +2917,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('pf-refnum-row').style.display = method === 'check' ? 'none' : 'block';
   }
   function submitPaymentForm(){
+    if(!canRecordPayments()){ paymentsDeniedToast(); return; }
     const inv = findInv(paymentFormInvoiceId);
     if(!inv) return;
     const amount = parseFloat(document.getElementById('pf-amount').value);
