@@ -854,7 +854,7 @@ custom-integrations"></div>
       <h4>Documents (Salesforce Files)</h4>
       <div id="detail-docs"></div>
       <div class="upload-row">
-        <select id="detail-upload-type">
+        <select id="detail-upload-type" onchange="syncUploadOther()">
           <option value="Estimate">Estimate</option>
           <option value="Photos">Photos</option>
           <option value="Invoice">Invoice</option>
@@ -864,8 +864,11 @@ custom-integrations"></div>
           <option value="MoistureLog">Moisture Log</option>
           <option value="Other">Other</option>
         </select>
-        <button class="btn-small" onclick="addMockDocument()">+ New Upload</button>
+        <input type="text" id="detail-upload-name" placeholder="Name this document" style="display:none;flex:1;min-width:150px;padding:6px 8px;border:1px solid #E5E0D2;border-radius:6px;font-size:12px;">
+        <input type="file" id="detail-upload-file" style="display:none;" onchange="uploadDocument()">
+        <button class="btn-small" id="detail-upload-btn" onclick="chooseDocumentFile()">+ Upload Document</button>
       </div>
+      <div class="hint" id="detail-upload-note"></div>
     </div>
 
     <div class="drawer-section">
@@ -2859,6 +2862,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     renderDetailCadence(inv);
     renderDetailDocs(inv);
     renderDetailActivity(inv);
+    syncUploadOther();
+    uploadNote('');
+    loadRemoteDocuments(inv);
     document.getElementById('detail-demand-btn').style.display = inv.days >= 30 ? 'inline-block' : 'none';
     document.getElementById('detail-noil-btn').style.display = inv.days >= 40 ? 'inline-block' : 'none';
     document.getElementById('detail-escalate-btn').textContent = inv.escalated ? 'Un-escalate' : 'Escalate';
@@ -2945,10 +2951,11 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   function renderDetailDocs(inv){
     document.getElementById('detail-docs').innerHTML = inv.documents.map(d => `
       <div class="doc-row">
-        <div class="doc-left"><div class="doc-icon ${d.auto?'auto':''}">${d.kind.slice(0,3).toUpperCase()}</div> ${d.name}</div>
+        <div class="doc-left"><div class="doc-icon ${d.auto?'auto':''}">${String(d.kind||'DOC').slice(0,3).toUpperCase()}</div> ${d.label ? d.label + ' &middot; ' : ''}${d.name}</div>
         <div class="doc-row-actions">
           <button class="btn-small" onclick="previewDocument('${d.id}')">Preview</button>
-          <button class="btn-small" onclick="downloadDoc('${d.id}')">Download</button>
+          <button class="btn-small" onclick="downloadDoc('${d.id}')">${d.remote ? 'Open' : 'Download'}</button>
+          ${d.remote ? `<button class=\"btn-small\" onclick=\"deleteDoc('${d.id}')\">Remove</button>` : ''}
         </div>
       </div>
     `).join('');
@@ -2964,8 +2971,19 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
 
   function downloadDoc(docId){
     const inv = findInv(currentDetailId);
-    const doc = inv && inv.documents.find(d => d.id === docId);
-    showToast(`Downloading ${doc ? doc.name : 'file'} (placeholder \u2014 pulls from Salesforce Files in production)`);
+    const doc = inv && inv.documents.find(function(x){ return String(x.id) === String(docId); });
+    if(!doc) return;
+    if(!doc.remote){
+      showToast(doc.name + ' is sample data in this demo, not a stored file.');
+      return;
+    }
+    fetch('/api/documents/download?id=' + encodeURIComponent(doc.id), { credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(res && res.ok && res.url){ window.open(res.url, '_blank', 'noopener'); }
+        else { showToast((res && res.error) || 'Could not open that document.'); }
+      })
+      .catch(function(){ showToast('Could not open that document.'); });
   }
 
   /* ============================================================
@@ -3081,19 +3099,106 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     Other: (n) => `Document ${n}.pdf`
   };
 
-  function addMockDocument(){
+  function syncUploadOther(){
+    const sel = document.getElementById('detail-upload-type');
+    const nameEl = document.getElementById('detail-upload-name');
+    if(!sel || !nameEl) return;
+    const isOther = sel.value === 'Other';
+    nameEl.style.display = isOther ? 'block' : 'none';
+    if(!isOther) nameEl.value = '';
+  }
+
+  function uploadNote(msg, tone){
+    const note = document.getElementById('detail-upload-note');
+    if(!note) return;
+    note.textContent = msg || '';
+    note.style.color = tone === 'bad' ? '#8A1C13' : (tone === 'good' ? '#1F5346' : '');
+  }
+
+  function chooseDocumentFile(){
+    const sel = document.getElementById('detail-upload-type');
+    const nameEl = document.getElementById('detail-upload-name');
+    if(sel && sel.value === 'Other' && (!nameEl || !nameEl.value.trim())){
+      uploadNote('Give the document a name first.', 'bad');
+      if(nameEl) nameEl.focus();
+      return;
+    }
+    uploadNote('');
+    const f = document.getElementById('detail-upload-file');
+    if(f){ f.value = ''; f.click(); }
+  }
+
+  function uploadDocument(){
     const inv = findInv(currentDetailId);
     if(!inv) return;
-    const kind = document.getElementById('detail-upload-type').value;
-    const countOfKind = inv.documents.filter(d => d.kind === kind).length + 1;
-    const name = (UPLOAD_FILENAME_MAP[kind] || UPLOAD_FILENAME_MAP.Other)(countOfKind);
-    const id = 'doc' + (state.nextDocId++);
-    inv.documents.push({ id, name, kind, auto:false });
-    addActivity(inv, `${name} uploaded to Salesforce and synced to Dryline.`, 'automation');
-    saveState();
-    renderDetailDocs(inv);
-    renderDetailActivity(inv);
-    showToast(`Simulated upload: ${name}`);
+    const fileEl = document.getElementById('detail-upload-file');
+    const file = fileEl && fileEl.files && fileEl.files[0];
+    if(!file) return;
+    const sel = document.getElementById('detail-upload-type');
+    const nameEl = document.getElementById('detail-upload-name');
+    const btn = document.getElementById('detail-upload-btn');
+    const kind = sel ? sel.value : 'Other';
+    const label = nameEl ? nameEl.value.trim() : '';
+    if(btn){ btn.disabled = true; btn.textContent = 'Uploading...'; }
+    uploadNote('Uploading ' + file.name + '...');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('accountId', inv.id);
+    fd.append('kind', kind);
+    fd.append('label', label);
+    fetch('/api/documents/upload', { method: 'POST', credentials: 'same-origin', body: fd })
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(btn){ btn.disabled = false; btn.textContent = '+ Upload Document'; }
+        if(res && res.ok && res.document){
+          inv.documents = inv.documents || [];
+          inv.documents.push(Object.assign({ remote: true }, res.document));
+          addActivity(inv, (res.document.label || res.document.name) + ' uploaded.', 'manual');
+          saveState(); renderDetailDocs(inv); renderDetailActivity(inv);
+          uploadNote('Uploaded ' + res.document.name + '.', 'good');
+          if(nameEl) nameEl.value = '';
+          syncUploadOther();
+          showToast('Uploaded ' + res.document.name);
+        } else {
+          uploadNote((res && res.error) || 'Upload failed.', 'bad');
+        }
+      })
+      .catch(function(){
+        if(btn){ btn.disabled = false; btn.textContent = '+ Upload Document'; }
+        uploadNote('Upload failed. Please try again.', 'bad');
+      });
+  }
+
+  // Pull the account's real files whenever the drawer opens, keeping any
+  // seeded demo entries that are not backed by storage.
+  function loadRemoteDocuments(inv){
+    if(!inv || inv.id === undefined || inv.id === null) return;
+    fetch('/api/documents?accountId=' + encodeURIComponent(inv.id), { credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(!res || !res.ok || !res.documents) return;
+        const seeded = (inv.documents || []).filter(function(x){ return !x.remote; });
+        inv.documents = seeded.concat(res.documents.map(function(x){ return Object.assign({ remote: true }, x); }));
+        if(currentDetailId === inv.id) renderDetailDocs(inv);
+      })
+      .catch(function(){});
+  }
+
+  function deleteDoc(docId){
+    const inv = findInv(currentDetailId);
+    const doc = inv && inv.documents.find(function(x){ return String(x.id) === String(docId); });
+    if(!doc || !doc.remote) return;
+    if(!confirm('Remove ' + doc.name + '?')) return;
+    fetch('/api/documents/delete', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: doc.id }) })
+      .then(function(r){ return r.json(); })
+      .then(function(res){
+        if(res && res.ok){
+          inv.documents = inv.documents.filter(function(x){ return String(x.id) !== String(docId); });
+          saveState(); renderDetailDocs(inv);
+          showToast('Removed ' + doc.name);
+        } else { showToast((res && res.error) || 'Could not remove that document.'); }
+      })
+      .catch(function(){ showToast('Could not remove that document.'); });
   }
 
   /* ============================================================
