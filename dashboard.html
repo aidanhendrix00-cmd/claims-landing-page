@@ -3481,8 +3481,10 @@ Do not invent facts beyond what's given.`;
 
   function recordSend(inv, draftType, draftText, source, recipient, subject){
     recipient = recipient || recipientDefault(inv);
+    // Real sends start as 'sent'; opens and replies come from the provider, not a guess.
+    const isRemoteInv = inv && inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/) && state.currentUser;
     const statuses = ['sent','opened','replied'];
-    const status = statuses[Math.floor(Math.random()*statuses.length)];
+    const status = isRemoteInv ? 'sent' : statuses[Math.floor(Math.random()*statuses.length)];
     const typeLabels = { followup: 'Follow-Up', demand: 'Demand Letter', noil: 'NOIL' };
     const recipientLabel = recipientDisplayName(inv, recipient);
     const now = new Date();
@@ -3611,15 +3613,53 @@ Do not invent facts beyond what's given.`;
 
   function approveSend(){
     const approveBtn = document.getElementById('approve-btn');
-    approveBtn.textContent = "Sent";
-    approveBtn.disabled = true;
     const inv = currentInvoice;
-    const subject = currentRecipient === 'adjuster' ? (inv.claimNumber || null) : null;
-    recordSend(inv, currentDraftType, document.getElementById('draft-text').value, 'manual', currentRecipient, subject);
-    saveState(); renderAll();
     const typeLabels = { followup: 'Follow-Up', demand: 'Demand Letter', noil: 'NOIL' };
     const recipientLabel = recipientDisplayName(inv, currentRecipient);
-    setTimeout(() => { closeDrawer(); approveBtn.textContent = "Approve & Send"; showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} for ${inv.name}`); }, 500);
+    const bodyText = document.getElementById('draft-text').value;
+    const subject = currentRecipient === 'adjuster' ? (inv.claimNumber || null) : null;
+
+    // Demo invoices are not real accounts, so keep the simulated behaviour there.
+    const isRemote = inv && inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/) && state.currentUser;
+    if(!isRemote){
+      approveBtn.textContent = "Sent";
+      approveBtn.disabled = true;
+      recordSend(inv, currentDraftType, bodyText, 'manual', currentRecipient, subject);
+      saveState(); renderAll();
+      setTimeout(() => { closeDrawer(); approveBtn.disabled = false; approveBtn.textContent = "Approve & Send"; showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} for ${inv.name}`); }, 500);
+      return;
+    }
+
+    approveBtn.textContent = "Sending...";
+    approveBtn.disabled = true;
+    const subjectLine = (currentDraftType === 'noil' ? 'Notice of Intent to Lien - ' : currentDraftType === 'demand' ? 'Demand for payment - ' : 'Outstanding invoice - ') + (inv.name || '');
+    fetch('/api/invoices/send', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accountId: inv.id,
+        subject: subjectLine,
+        body: bodyText,
+        draftType: currentDraftType,
+        recipient: currentRecipient
+      })
+    }).then(function(r){ return r.json(); }).then(function(res){
+      approveBtn.disabled = false;
+      approveBtn.textContent = "Approve & Send";
+      if(!res || !res.ok){
+        showToast((res && res.error) || 'The email could not be sent.');
+        return;
+      }
+      recordSend(inv, currentDraftType, bodyText, 'manual', currentRecipient, subject);
+      saveState();
+      closeDrawer();
+      showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} (${res.to})`);
+      loadRealAccounts();
+    }).catch(function(){
+      approveBtn.disabled = false;
+      approveBtn.textContent = "Approve & Send";
+      showToast('The email could not be sent. Please try again.');
+    });
   }
 
   /* ============================================================
