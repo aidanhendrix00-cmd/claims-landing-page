@@ -385,6 +385,9 @@ const GET_STARTED_FORM_SCRIPT = '<script>' +
   'zip:fieldVal("su-zip"),' +
   'companySize:fieldVal("su-size"),' +
   'desiredPlan:planEl?planEl.value:"",' +
+  'currentCrm:fieldVal("su-crm"),' +
+  'currentAccounting:fieldVal("su-accounting"),' +
+  'currentSoftwareOther:fieldVal("su-software-other"),' +
   'agreeToTerms:(document.getElementById("su-terms")?document.getElementById("su-terms").checked:false)' +
   '};' +
   'if(!payload.fullName||!payload.email||!payload.companyName||!payload.desiredPlan||!payload.agreeToTerms){' +
@@ -2349,6 +2352,9 @@ const currentCrm = (body.currentCrm || '').trim().slice(0, 60);
 const currentAccounting = (body.currentAccounting || '').trim().slice(0, 60);
 const currentSoftwareOther = (body.currentSoftwareOther || '').trim().slice(0, 200);
   const desiredPlan = (body.desiredPlan || '').trim();
+  const currentCrm = (body.currentCrm || '').trim().slice(0, 60);
+  const currentAccounting = (body.currentAccounting || '').trim().slice(0, 60);
+  const currentSoftwareOther = (body.currentSoftwareOther || '').trim().slice(0, 200);
   const topicLabel = (body.topicLabel || '').trim();
   const details = (body.details || '').trim();
   const message = (body.message || '').trim();
@@ -2381,7 +2387,13 @@ const currentSoftwareOther = (body.currentSoftwareOther || '').trim().slice(0, 2
     '<tr><td style="padding:4px 8px;font-weight:600;">Desired plan</td><td style="padding:4px 8px;">' + escapeHtml(desiredPlan) + '</td></tr>' +
     '</table>' +
     '</div>';
-  const extraRows =
+  const softwareRow = function (label, value) {
+    return value ? ('<tr><td style="padding:4px 8px;font-weight:600;">' + label + '</td><td style="padding:4px 8px;">' + escapeHtml(value) + '</td></tr>') : '';
+  };
+  const softwareRows = softwareRow('Current CRM', currentCrm) +
+    softwareRow('Current accounting', currentAccounting) +
+    softwareRow('Other systems', currentSoftwareOther);
+  const extraRows = softwareRows +
     (topicLabel ? '<tr><td style="padding:4px 8px;font-weight:600;">Asking about</td><td style="padding:4px 8px;">' + escapeHtml(topicLabel) + '</td></tr>' : '') +
     (details ? '<tr><td style="padding:4px 8px;font-weight:600;">Details</td><td style="padding:4px 8px;">' + escapeHtml(details) + '</td></tr>' : '') +
     (message ? '<tr><td style="padding:4px 8px;font-weight:600;">Message</td><td style="padding:4px 8px;">' + escapeHtml(message) + '</td></tr>' : '');
