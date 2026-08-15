@@ -22,6 +22,7 @@
   h2{font-size:18px;margin:36px 0 10px;color:var(--ink);}
   p, li{color:var(--ink-soft);font-size:14.5px;}
   ul{padding-left:22px;}
+  code{background:var(--gold-soft);border:1px solid var(--gold-line);border-radius:4px;padding:1px 5px;font-size:13px;}
   .callout{
     background:var(--gold-soft);border:1px solid var(--gold-line);border-radius:10px;
     padding:18px 22px;margin:18px 0;font-weight:600;color:var(--ink);
@@ -42,7 +43,7 @@
 </header>
 <main>
   <h1>Terms &amp; Conditions</h1>
-  <div class="updated">Effective date: August 9, 2026 &mdash; Version 1</div>
+  <div class="updated">Effective date: August 15, 2026 &mdash; Version 2</div>
 
   <div class="callout">
     <strong>No refunds on payments already received.</strong> All fees paid to clAIms Collection (HNDRX Enterprise LLC), including monthly subscription fees and one-time implementation fees, are non-refundable once received, regardless of usage level, cancellation, downgrade, or termination of the account. See Section 6 for full detail.
@@ -57,6 +58,7 @@
     <a href="#refunds">6. No Refund Policy</a>
     <a href="#termination">7. Term &amp; Termination</a>
     <a href="#data">8. Data, Privacy &amp; Security</a>
+    <a href="#mailbox">8A. Connected Email Accounts (Google &amp; Microsoft)</a>
     <a href="#ip">9. Intellectual Property</a>
     <a href="#warranty">10. Disclaimer of Warranties</a>
     <a href="#liability">11. Limitation of Liability</a>
@@ -91,6 +93,13 @@
 
   <h2 id="data">8. Data, Privacy &amp; Security</h2>
   <p>clAIms collects and processes account information (including company name, address, company size, and billing details) and operational data you input into the Service in order to provide, secure, and improve the Service, to communicate with you, and to comply with legal obligations. Passwords are never stored in plain text; they are hashed using industry-standard salted PBKDF2 hashing. We use commercially reasonable administrative, technical, and physical safeguards designed to protect your data, but no method of transmission or storage is 100% secure, and clAIms cannot guarantee absolute security. If you enable optional third-party data integrations, you authorize clAIms to exchange data with those third-party providers as necessary to provide the integration, subject to those providers' own terms.</p>
+
+  <h2 id="mailbox">8A. Connected Email Accounts (Google &amp; Microsoft)</h2>
+  <p>The Service offers an optional "Connect my email" feature that allows you to authorize clAIms to send collections emails from your own Google or Microsoft mailbox, so that messages reach your customers from your real business address and appear in your own Sent folder. This feature is entirely optional and is never enabled without your explicit authorization through Google's or Microsoft's own consent screen.</p>
+  <p><strong>Scope of access.</strong> When you connect a Google account, clAIms requests only the <code>gmail.send</code> scope. When you connect a Microsoft account, clAIms requests only the delegated <code>Mail.Send</code> permission together with sign-in scopes. These permissions allow clAIms to send messages on your behalf and nothing more. <strong>clAIms cannot and does not read, search, download, delete, or modify the contents of your mailbox, and does not access your contacts, calendar, drive, or any other data associated with your account.</strong> clAIms does not store the contents of your mailbox at any time.</p>
+  <p><strong>Token handling.</strong> The access and refresh tokens issued by Google or Microsoft are encrypted at rest using envelope encryption: each token is encrypted with a unique data key, and that data key is itself encrypted with a master key held separately in a managed secret store and never stored alongside the data. Tokens are decrypted only in memory, and only at the moment a message you have approved is being sent.</p>
+  <p><strong>Revocation.</strong> You may disconnect your mailbox at any time from your clAIms account page, which deletes the stored tokens. You may also revoke access directly at any time from your Google Account permissions page or your Microsoft account settings, independently of clAIms. Revoking access does not delete your clAIms account or other Customer Data.</p>
+  <p><strong>Google Limited Use disclosure.</strong> clAIms' use and transfer of information received from Google APIs to any other app will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements. Specifically: clAIms uses Google user data solely to provide and improve the user-facing email-sending feature described above; clAIms does not transfer Google user data to third parties except as necessary to provide this feature, to comply with applicable law, or as part of a merger or acquisition; clAIms does not use Google user data for serving advertisements; and clAIms does not allow humans to read Google user data unless we have your affirmative agreement for specific messages, it is necessary for security purposes such as investigating abuse, it is required to comply with applicable law, or the data has been aggregated and anonymized.</p>
 
   <h2 id="ip">9. Intellectual Property</h2>
   <p>clAIms and its licensors retain all right, title, and interest in and to the Service, including all software, designs, text, and trademarks, excluding any data you input into the Service ("Customer Data"). You retain ownership of your Customer Data and grant clAIms a limited, non-exclusive license to host, process, and display that data solely as necessary to provide the Service to you. clAIms grants you a limited, revocable, non-transferable license to access and use the Service during your subscription term, solely for your internal business purposes.</p>
