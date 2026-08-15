@@ -3548,6 +3548,173 @@ updated++;
 return json({ ok: true, updated: updated });
 }
 
+
+/* ---------------------------------------------------------------------------
+   Outbound customer email
+   A company's mail can only carry their own from-address once they have
+   verified their domain (Resend requires it: unverified senders are rejected
+   or fail SPF/DKIM and land in spam). Until then we send from operations with
+   their name in the display, and always set reply-to to the actual user so the
+   customer's reply reaches that person rather than us.
+   --------------------------------------------------------------------------- */
+function emailDomainOf(address) {
+const s = String(address || '');
+const at = s.lastIndexOf('@');
+return at === -1 ? '' : s.slice(at + 1).trim().toLowerCase();
+}
+
+function quoteDisplayName(name) {
+return String(name || '').replace(/["\\]/g, '').replace(/[\r\n]/g, ' ').trim();
+}
+
+// Returns the From header to use plus whether it is genuinely the user's own address.
+async function resolveSender(env, user) {
+const userEmail = String(user.email || '').trim();
+const display = quoteDisplayName(user.full_name || userEmail.split('@')[0]);
+const company = quoteDisplayName(user.company_name || '');
+const label = company ? (display + ' (' + company + ')') : display;
+const fallback = { from: '"' + label + '" <' + OPERATIONS_FROM_EMAIL.replace(/^.*</, '').replace(/>$/, '') + '>', replyTo: userEmail, ownDomain: false };
+const domain = emailDomainOf(userEmail);
+if (!domain) return fallback;
+const row = await pgSelectOne(env, 'sending_domains',
+'tenant_id=' + pgEq(user.tenant_id) + '&status=' + pgEq('verified') + '&select=domain');
+if (!row || !row.domain) return fallback;
+const verified = String(row.domain).trim().toLowerCase();
+// Allow the exact domain or a subdomain of it.
+const matches = (domain === verified) || domain.endsWith('.' + verified);
+if (!matches) return fallback;
+return { from: '"' + label + '" <' + userEmail + '>', replyTo: userEmail, ownDomain: true };
+}
+
+async function handleInvoiceSend(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const account = await accountForUser(env, user, body.accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const full = await pgSelectOne(env, 'accounts', 'id=' + pgEq(account.id) + '&select=*');
+if (!full) return json({ ok: false, error: 'Account not found' }, 404);
+
+const to = String(body.to || full.contact_email || '').trim();
+if (!to || to.indexOf('@') === -1) {
+return json({ ok: false, error: 'No contact email on this account. Add one before sending.' }, 400);
+}
+const text = String(body.body || '').trim();
+if (!text) return json({ ok: false, error: 'The message is empty.' }, 400);
+const subject = String(body.subject || ('Outstanding invoice - ' + (full.customer_name || ''))).slice(0, 200);
+const draftType = String(body.draftType || 'followup').slice(0, 40);
+
+const sender = await resolveSender(env, user);
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;white-space:pre-wrap;">' +
+escapeHtml(text) + '</div>';
+
+let result = null;
+try {
+result = await sendEmail(env, {
+to: to, subject: subject, html: html,
+kind: 'manual_' + draftType,
+tenantId: user.tenant_id, userId: user.id,
+from: sender.from, replyTo: sender.replyTo
+});
+} catch (e) { result = { ok: false, error: String(e) }; }
+
+const okSent = !!(result && result.ok);
+await pgInsert(env, 'invoice_comms', {
+tenant_id: user.tenant_id, account_id: account.id, cadence_day: null,
+kind: 'manual_' + draftType, recipient_role: body.recipient || null, recipient_email: to,
+subject: subject, status: okSent ? 'sent' : 'failed',
+error: okSent ? null : String((result && result.error) || 'Send failed')
+});
+
+if (!okSent) {
+return json({ ok: false, error: (result && result.error) || 'The email could not be sent.' }, 502);
+}
+
+const now = new Date();
+await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), {
+follow_up_count: (parseInt(full.follow_up_count, 10) || 0) + 1,
+last_contact: now.toISOString().slice(0, 10),
+responded: full.responded && full.responded !== 'none' ? full.responded : 'sent',
+updated_at: now.toISOString()
+});
+await pgInsert(env, 'account_notes', {
+tenant_id: user.tenant_id, account_id: account.id,
+body: (draftType === 'noil' ? 'NOIL' : draftType === 'demand' ? 'Demand letter' : 'Follow-up') +
+' sent to ' + to + ' by ' + (user.full_name || user.email) + '.',
+author_name: user.full_name || user.email, source: 'dashboard'
+}).catch(function () {});
+
+return json({ ok: true, sentFrom: sender.from, ownDomain: sender.ownDomain, replyTo: sender.replyTo, to: to });
+}
+
+// Admins register their company's sending domain, get the DNS records to add,
+// and re-check until Resend reports it verified.
+async function resendDomainRequest(env, method, path, payload) {
+if (!env.RESEND_API_KEY) return { ok: false, error: 'Email sending is not configured.' };
+try {
+const res = await fetch('https://api.resend.com/domains' + (path || ''), {
+method: method,
+headers: { 'Authorization': 'Bearer ' + env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+body: payload ? JSON.stringify(payload) : undefined
+});
+const data = await res.json().catch(function () { return null; });
+if (!res.ok) return { ok: false, error: (data && (data.message || data.error)) || ('Resend returned ' + res.status) };
+return { ok: true, data: data };
+} catch (e) { return { ok: false, error: String(e) }; }
+}
+
+async function handleSendingDomainGet(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const row = await pgSelectOne(env, 'sending_domains', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*');
+if (!row) return json({ ok: true, domain: null });
+return json({ ok: true, domain: { domain: row.domain, status: row.status, dnsRecords: row.dns_records || [], verifiedAt: row.verified_at } });
+}
+
+async function handleSendingDomainCreate(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const domain = String(body.domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+if (!domain || domain.indexOf('.') === -1) return json({ ok: false, error: 'Enter a valid domain, for example mail.yourcompany.com' }, 400);
+const created = await resendDomainRequest(env, 'POST', '', { name: domain });
+if (!created.ok) return json({ ok: false, error: created.error }, 502);
+const d = created.data || {};
+const existing = await pgSelectOne(env, 'sending_domains', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id');
+const record = {
+tenant_id: user.tenant_id, domain: domain,
+status: d.status === 'verified' ? 'verified' : 'pending',
+resend_domain_id: d.id || null,
+dns_records: d.records || [],
+last_checked_at: new Date().toISOString()
+};
+if (existing) { await pgUpdate(env, 'sending_domains', 'id=' + pgEq(existing.id), record); }
+else { await pgInsert(env, 'sending_domains', record); }
+return json({ ok: true, domain: domain, status: record.status, dnsRecords: record.dns_records });
+}
+
+async function handleSendingDomainVerify(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+const row = await pgSelectOne(env, 'sending_domains', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*');
+if (!row || !row.resend_domain_id) return json({ ok: false, error: 'No sending domain registered yet.' }, 404);
+await resendDomainRequest(env, 'POST', '/' + row.resend_domain_id + '/verify', null);
+const check = await resendDomainRequest(env, 'GET', '/' + row.resend_domain_id, null);
+if (!check.ok) return json({ ok: false, error: check.error }, 502);
+const status = (check.data && check.data.status) === 'verified' ? 'verified' : 'pending';
+await pgUpdate(env, 'sending_domains', 'id=' + pgEq(row.id), {
+status: status,
+dns_records: (check.data && check.data.records) || row.dns_records,
+last_checked_at: new Date().toISOString(),
+verified_at: status === 'verified' ? new Date().toISOString() : null
+});
+return json({ ok: true, status: status, dnsRecords: (check.data && check.data.records) || row.dns_records });
+}
+
 async function handleAccounts(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -4577,6 +4744,18 @@ return handleOutboxPull(request, env);
 }
 if (url.pathname === '/api/integrations/outbox/ack' && request.method === 'POST') {
 return handleOutboxAck(request, env);
+}
+if (url.pathname === '/api/invoices/send' && request.method === 'POST') {
+return handleInvoiceSend(request, env);
+}
+if (url.pathname === '/api/sending-domain' && request.method === 'GET') {
+return handleSendingDomainGet(request, env);
+}
+if (url.pathname === '/api/sending-domain' && request.method === 'POST') {
+return handleSendingDomainCreate(request, env);
+}
+if (url.pathname === '/api/sending-domain/verify' && request.method === 'POST') {
+return handleSendingDomainVerify(request, env);
 }
 if (url.pathname === '/api/documents' && request.method === 'GET') {
 return handleDocumentList(request, env);
