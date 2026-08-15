@@ -4402,6 +4402,45 @@ if (haystack.indexOf(PLAN_KEYS[i]) !== -1) return PLAN_KEYS[i];
 return null;
 }
 
+// Non-payment locks a company; it is never deleted. Every record stays in
+// place and access resumes the moment a payment succeeds.
+const LOCKED_TENANT_STATUSES = new Set(['past_due', 'canceled']);
+function isTenantLocked(status) { return LOCKED_TENANT_STATUSES.has(String(status || '')); }
+// Paths an admin still needs in order to pay their way back out of a lock.
+function allowedWhileLocked(pathname) {
+return pathname === '/api/me' ||
+pathname === '/api/logout' ||
+pathname === '/api/login' ||
+pathname === '/api/billing-portal' ||
+pathname === '/api/stripe-webhook';
+}
+async function lockedTenantFor(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return null;
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=id,status,company_name');
+if (!tenant || !isTenantLocked(tenant.status)) return null;
+return { user: user, tenant: tenant };
+}
+function lockedPageHtml(info) {
+const isAdmin = info.user.role === 'admin';
+const company = escapeHtml(info.tenant.company_name || 'Your company');
+const action = isAdmin
+? '<p style="margin:28px 0;"><a href="/account" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Update payment</a></p>'
+: '<p style="color:#615D53;">Ask an admin at your company to update the payment method.</p>';
+return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
+'<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+'<title>Account locked - clAIms</title></head>' +
+'<body style="margin:0;background:#F5F2EA;font-family:IBM Plex Sans,Arial,sans-serif;color:#171717;">' +
+'<div style="max-width:560px;margin:14vh auto;background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:36px 40px;">' +
+'<div style="font-size:12px;letter-spacing:.08em;color:#C29B57;font-weight:700;">ACCOUNT LOCKED</div>' +
+'<h1 style="font-size:24px;margin:10px 0 14px;">' + company + ' is temporarily locked</h1>' +
+'<p style="color:#2B2A27;line-height:1.6;">Your subscription is not currently active, so dashboard access is paused. ' +
+'<strong>Nothing has been deleted.</strong> Your accounts, notes, documents and payment history are all still here, and they reappear the moment a payment goes through.</p>' +
+action +
+'<p style="color:#9C978A;font-size:12.5px;">Questions? Email support@claims-collection.net</p>' +
+'</div></body></html>';
+}
+
 function subscriptionStatusToTenantStatus(status) {
 if (status === 'past_due' || status === 'unpaid') return 'past_due';
 if (status === 'canceled' || status === 'incomplete_expired') return 'canceled';
@@ -4444,6 +4483,11 @@ updated_at: new Date().toISOString()
 const patch = { status: subscriptionStatusToTenantStatus(sub.status) };
 if (plan) patch.selected_plan = plan;
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
+// End live sessions on lock so it applies immediately rather than lingering
+// for the remainder of a 7-day session cookie.
+if (isTenantLocked(patch.status)) {
+await pgDelete(env, 'sessions', 'tenant_id=' + pgEq(tenantId));
+}
 return tenantId;
 }
 
@@ -4947,6 +4991,13 @@ return '<script>(function(){' +
 }
 
 async function handleDashboard(request, env) {
+  const lockedInfo = await lockedTenantFor(request, env);
+  if (lockedInfo) {
+    return new Response(lockedPageHtml(lockedInfo), {
+      status: 402,
+      headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE }
+    });
+  }
   const user = await getSessionUser(request, env);
   if (!user) {
     return new Response(null, {
@@ -5026,6 +5077,17 @@ headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE, 'Acces
 export default {
 async fetch(request, env, ctx) {
 const url = new URL(request.url);
+
+// A locked company keeps every record but loses access until payment resumes.
+if (url.pathname.indexOf('/api/') === 0 && !allowedWhileLocked(url.pathname)) {
+const lockedCtx = await lockedTenantFor(request, env);
+if (lockedCtx) {
+return json({ ok: false, locked: true, role: lockedCtx.user.role,
+error: lockedCtx.user.role === 'admin'
+? 'Your subscription is not active. Update payment to restore access.'
+: 'This account is locked. Ask your company admin to update payment.' }, 402);
+}
+}
 
 if (url.pathname === '/api/login' && request.method === 'POST') {
 return handleLogin(request, env);
