@@ -708,7 +708,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '</div> ' +
   ' ' +
   '<div class="acct-card" id="integrationsCardOuter"> ' +
-  '<h3>Integrations<span class="mock-flag">sample</span></h3> ' +
+  '<h3>Integrations</h3> ' +
   '<div class="acct-card-sub" id="integrationsSub">Software connected to your dashboard.</div> ' +
   '<div id="integrationsRestricted" class="restricted-box" style="display:none;">Only admins can add or change integrations. Ask your company admin to make changes here.</div> ' +
   '<div id="integrationsContent" style="display:none;"> ' +
@@ -763,7 +763,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   'var ROLE_RANK={admin:0,manager:1,employee:2}; ' +
   'var ROLE_LABEL={admin:"Admin",manager:"Manager",employee:"Employee"}; ' +
  'var INTEGRATION_CATEGORIES=["Accounting","CRM","ERP","Estimating","E-Signature","Payments","Storage","Other"]; ' +
- 'var INTEGRATIONS_CATALOG=[{id:"quickbooks",name:"QuickBooks",category:"Accounting",connected:true},{id:"salesforce",name:"Salesforce",category:"CRM",connected:false},{id:"netsuite",name:"NetSuite",category:"ERP",connected:false},{id:"xactimate",name:"Xactimate",category:"Estimating",connected:false},{id:"docusign",name:"DocuSign",category:"E-Signature",connected:false}]; ' +
+ 'var INTEGRATIONS_CATALOG=[{id:"quickbooks",name:"QuickBooks",category:"Accounting",connected:false},{id:"salesforce",name:"Salesforce",category:"CRM",connected:false},{id:"netsuite",name:"NetSuite",category:"ERP",connected:false},{id:"xactimate",name:"Xactimate",category:"Estimating",connected:false},{id:"docusign",name:"DocuSign",category:"E-Signature",connected:false}]; ' +
   ' ' +
   'var PLAN_FEATURES={ ' +
   '  starter:{name:"Starter",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]}, ' +
@@ -876,32 +876,62 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  } ' +
   ' ' +
    'function renderIntegrationsSummary(){ ' +
+ 'if(!window.__integrationsLoaded){ window.__integrationsLoaded=true; loadIntegrations().then(function(){ renderIntegrationsSummary(); renderIntegrationsModalList(); }); } ' +
  'var grid=document.getElementById("integrationsSummaryGrid"); ' +
  'if(!grid) return; ' +
  'var connected=INTEGRATIONS_CATALOG.filter(function(i){return i.connected;}); ' +
  'grid.innerHTML=connected.length?connected.map(function(i){return "<div class=\\"acct-field\\"><label>"+i.name+"</label><div class=\\"acct-value\\">Connected</div></div>"; }).join(""):"<div class=\\"acct-field\\"><label>None</label><div class=\\"acct-value\\">No integrations connected</div></div>"; ' +
  '} ' +
- 'function renderIntegrationsModalList(){ ' +
- 'var wrap=document.getElementById("integrationsModalList"); ' +
- 'if(!wrap) return; ' +
- 'wrap.innerHTML=INTEGRATIONS_CATALOG.map(function(i,idx){ ' +
- 'var opts=INTEGRATION_CATEGORIES.map(function(c){return "<option value=\\""+c+"\\""+(c===i.category?" selected":"")+">"+c+"</option>"; }).join(""); ' +
- 'return "<div class=\\"acct-field\\" style=\\"display:flex;align-items:center;justify-content:space-between;gap:10px;\\"><div><div style=\\"font-weight:600;font-size:13.5px;\\">"+i.name+"</div><select onchange=\\"setIntegrationCategory("+idx+",this.value)\\" style=\\"margin-top:4px;font-size:11.5px;padding:4px 8px;border-radius:6px;border:1.5px solid #E5E0D2;\\">"+opts+"</select></div><button class=\\"btn-outline btn-sm\\" onclick=\\"toggleIntegration("+idx+")\\">"+(i.connected?"Remove":"Add")+"</button></div>"; ' +
- '}).join(""); ' +
- '} ' +
- 'function setIntegrationCategory(idx,val){ ' +
- 'INTEGRATIONS_CATALOG[idx].category=val; ' +
- '} ' +
- 'function toggleIntegration(idx){ ' +
- 'INTEGRATIONS_CATALOG[idx].connected=!INTEGRATIONS_CATALOG[idx].connected; ' +
- 'renderIntegrationsModalList(); ' +
- 'renderIntegrationsSummary(); ' +
- '} ' +
- 'function openManageIntegrations(){ ' +
- 'renderIntegrationsModalList(); ' +
- 'document.getElementById("integrationsModalBackdrop").classList.add("open"); ' +
- '} ' +
- 'function closeManageIntegrations(){ ' +
+ 'function integrationsMsg(t){ ' +
+'var wrap=document.getElementById("integrationsModalList"); if(!wrap) return; ' +
+'var m=document.getElementById("integrationsMsg"); ' +
+'if(!m){ m=document.createElement("div"); m.id="integrationsMsg"; m.style.cssText="font-size:12px;color:#B4462F;margin-bottom:10px;"; wrap.parentNode.insertBefore(m,wrap); } ' +
+'m.textContent=t||""; ' +
+'} ' +
+'function loadIntegrations(){ ' +
+'return fetch("/api/integrations",{credentials:"same-origin",cache:"no-store"}) ' +
+'.then(function(r){ return r.json(); }) ' +
+'.then(function(d){ ' +
+'if(!d||!d.ok) return; ' +
+'var rows=d.integrations||[]; ' +
+'INTEGRATIONS_CATALOG.forEach(function(i){ i.connected=false; i.dbId=null; }); ' +
+'rows.forEach(function(row){ ' +
+'var nm=String(row.provider||""); var hit=null; ' +
+'for(var k=0;k<INTEGRATIONS_CATALOG.length;k++){ if(INTEGRATIONS_CATALOG[k].name.toLowerCase()===nm.toLowerCase()){ hit=INTEGRATIONS_CATALOG[k]; break; } } ' +
+'if(!hit){ hit={id:nm.toLowerCase(),name:nm,category:"Other",connected:false,dbId:null}; INTEGRATIONS_CATALOG.push(hit); } ' +
+'hit.dbId=row.id; if(row.status==="connected") hit.connected=true; ' +
+'}); ' +
+'}) ' +
+'.catch(function(){}); ' +
+'} ' +
+'function renderIntegrationsModalList(){ ' +
+'var wrap=document.getElementById("integrationsModalList"); ' +
+'if(!wrap) return; ' +
+'wrap.innerHTML=INTEGRATIONS_CATALOG.map(function(i,idx){ ' +
+'var label=i.busy?"Working...":(i.connected?"Remove":"Add"); ' +
+'var dis=i.busy?" disabled":""; ' +
+'return "<div class=\\"acct-field\\" style=\\"display:flex;align-items:center;justify-content:space-between;gap:10px;\\"><div><div style=\\"font-weight:600;font-size:13.5px;\\">"+i.name+"</div><div style=\\"font-size:11.5px;color:#9C978A;margin-top:2px;\\">"+i.category+"</div></div><button class=\\"btn-outline btn-sm\\""+dis+" onclick=\\"toggleIntegration("+idx+")\\">"+label+"</button></div>"; ' +
+'}).join(""); ' +
+'} ' +
+'function toggleIntegration(idx){ ' +
+'var it=INTEGRATIONS_CATALOG[idx]; if(!it||it.busy) return; ' +
+'integrationsMsg(""); ' +
+'it.busy=true; renderIntegrationsModalList(); ' +
+'var url=it.connected?"/api/integrations/disconnect":"/api/integrations/connect"; ' +
+'var payload=it.connected?{id:it.dbId}:{provider:it.name}; ' +
+'fetch(url,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}) ' +
+'.then(function(r){ return r.json().catch(function(){ return {ok:false}; }); }) ' +
+'.then(function(d){ if(!d||!d.ok){ integrationsMsg((d&&d.error)||"Could not update that integration."); } return loadIntegrations(); }) ' +
+'.catch(function(){ integrationsMsg("Network error. Please try again."); }) ' +
+'.then(function(){ it.busy=false; renderIntegrationsModalList(); renderIntegrationsSummary(); }); ' +
+'} ' +
+'function openManageIntegrations(){ ' +
+'document.getElementById("integrationsModalBackdrop").classList.add("open"); ' +
+'renderIntegrationsModalList(); ' +
+'loadIntegrations().then(function(){ renderIntegrationsModalList(); renderIntegrationsSummary(); }); ' +
+'} ' +
+
+'function closeManageIntegrations(){ ' +
  'document.getElementById("integrationsModalBackdrop").classList.remove("open"); ' +
  '} ' +
  ' ' +
@@ -1058,7 +1088,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      renderTeamTab(); ' +
   '    }); ' +
   '  } ' +
-  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ window.location.href="/account/subscription"; } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.team&&d.team.length){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", dept:titleCase(u.department||u.dept)||EMDASH, office:titleCase(u.office)||EMDASH, role:u.role||"employee", status:u.status||"active" }; }); } }).catch(function(){}); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; window.setIntegrationCategory=setIntegrationCategory; wireTabs(); wireEditModal(); wireChangePassword(); function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db);n.textContent="A copy of everything you send is saved in your own Sent folder.";return;} if(mb){s.textContent=mb.email+" needs to be reconnected.";s.style.color="#8A1C13";}else{s.textContent="Not connected. Emails send from the clAIms address with your name on them.";s.style.color="";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){if(!confirm("Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; } return loadTeam(); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
+  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ window.location.href="/account/subscription"; } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.team&&d.team.length){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", dept:titleCase(u.department||u.dept)||EMDASH, office:titleCase(u.office)||EMDASH, role:u.role||"employee", status:u.status||"active" }; }); } }).catch(function(){}); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db);n.textContent="A copy of everything you send is saved in your own Sent folder.";return;} if(mb){s.textContent=mb.email+" needs to be reconnected.";s.style.color="#8A1C13";}else{s.textContent="Not connected. Emails send from the clAIms address with your name on them.";s.style.color="";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){if(!confirm("Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; } return loadTeam(); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
   '}); ' +
   '})(); ' +
   '</script> ' +
