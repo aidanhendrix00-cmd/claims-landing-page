@@ -2229,6 +2229,9 @@ const city = (body.city || '').trim();
 const state = (body.state || '').trim();
 const zip = (body.zip || '').trim();
 const companySize = (body.companySize || '').trim();
+const currentCrm = (body.currentCrm || '').trim().slice(0, 60);
+const currentAccounting = (body.currentAccounting || '').trim().slice(0, 60);
+const currentSoftwareOther = (body.currentSoftwareOther || '').trim().slice(0, 200);
 
 if (!fullName || !email || !password || !companyName || !companySize) {
 return json({ ok: false, error: 'Please fill out all required fields.' }, 400);
@@ -2278,7 +2281,9 @@ const slug = await uniqueSlug(env, slugify(companyName));
 tenant = await pgInsert(env, 'tenants', {
 slug: slug, company_name: companyName, domain: isPersonalDomain ? null : domain,
 address: address, city: city, state: state, zip: zip, company_size: companySize,
-recommended_plan: recommendedPlan, status: 'pending_verification'
+recommended_plan: recommendedPlan, status: 'pending_verification',
+current_crm: currentCrm || null, current_accounting: currentAccounting || null,
+current_software_other: currentSoftwareOther || null
 });
 }
 
@@ -2317,6 +2322,9 @@ const notifyHtml =
 '<tr><td style="padding:4px 8px;font-weight:600;">Address</td><td style="padding:4px 8px;">' + escapeHtml(address) + ', ' + escapeHtml(city) + ', ' + escapeHtml(state) + ' ' + escapeHtml(zip) + '</td></tr>' +
 '<tr><td style="padding:4px 8px;font-weight:600;">Company size</td><td style="padding:4px 8px;">' + escapeHtml(companySize) + '</td></tr>' +
 '<tr><td style="padding:4px 8px;font-weight:600;">Recommended plan</td><td style="padding:4px 8px;">' + escapeHtml(tenant.recommended_plan || 'n/a') + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Current CRM</td><td style="padding:4px 8px;">' + escapeHtml(currentCrm || 'not provided') + '</td></tr>' +
+'<tr><td style="padding:4px 8px;font-weight:600;">Current accounting</td><td style="padding:4px 8px;">' + escapeHtml(currentAccounting || 'not provided') + '</td></tr>' +
+(currentSoftwareOther ? ('<tr><td style="padding:4px 8px;font-weight:600;">Software detail</td><td style="padding:4px 8px;">' + escapeHtml(currentSoftwareOther) + '</td></tr>') : '') +
 '<tr><td style="padding:4px 8px;font-weight:600;">Signup type</td><td style="padding:4px 8px;">' + (isNewTenant ? 'New company (' + escapeHtml(tenant.slug) + ')' : 'Joined existing company: ' + escapeHtml(tenant.company_name) + ' (pending admin approval)') + '</td></tr>' +
 '</table>' +
 '</div>';
@@ -2337,6 +2345,9 @@ async function handleGetStarted(request, env) {
   const state = (body.state || '').trim();
   const zip = (body.zip || '').trim();
   const companySize = (body.companySize || '').trim();
+const currentCrm = (body.currentCrm || '').trim().slice(0, 60);
+const currentAccounting = (body.currentAccounting || '').trim().slice(0, 60);
+const currentSoftwareOther = (body.currentSoftwareOther || '').trim().slice(0, 200);
   const desiredPlan = (body.desiredPlan || '').trim();
   const topicLabel = (body.topicLabel || '').trim();
   const details = (body.details || '').trim();
