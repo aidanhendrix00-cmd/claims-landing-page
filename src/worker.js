@@ -1058,7 +1058,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      renderTeamTab(); ' +
   '    }); ' +
   '  } ' +
-  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ window.location.href="/account/subscription"; } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.team&&d.team.length){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", dept:titleCase(u.department||u.dept)||EMDASH, office:titleCase(u.office)||EMDASH, role:u.role||"employee", status:u.status||"active" }; }); } }).catch(function(){}); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; window.setIntegrationCategory=setIntegrationCategory; wireTabs(); wireEditModal(); wireChangePassword(); function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db);n.textContent="A copy of everything you send is saved in your own Sent folder.";return;} if(mb){s.textContent=mb.email+" needs to be reconnected.";s.style.color="#8A1C13";}else{s.textContent="Not connected. Emails send from the clAIms address with your name on them.";s.style.color="";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){if(!confirm("Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; } return loadTeam(); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
+  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ window.location.href="/account/subscription"; } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.team&&d.team.length){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", dept:titleCase(u.department||u.dept)||EMDASH, office:titleCase(u.office)||EMDASH, role:u.role||"employee", status:u.status||"active" }; }); } }).catch(function(){}); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; window.setIntegrationCategory=setIntegrationCategory; wireTabs(); wireEditModal(); wireChangePassword(); function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db);n.textContent="A copy of everything you send is saved in your own Sent folder.";return;} if(mb){s.textContent=mb.email+" needs to be reconnected.";s.style.color="#8A1C13";}else{s.textContent="Not connected. Emails send from the clAIms address with your name on them.";s.style.color="";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){if(!confirm("Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; } return loadTeam(); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
   '}); ' +
   '})(); ' +
   '</script> ' +
@@ -3774,6 +3774,71 @@ const data = JSON.parse(atob(pad + '==='.slice((pad.length + 3) % 4)));
 return data.email || data.preferred_username || data.upn || null;
 } catch (e) { return null; }
 }
+
+/* ---------------------------------------------------------------------------
+   Envelope encryption for stored credentials
+   Every secret gets its own random data key. That key is itself encrypted with
+   a master key held only as a Worker secret, so the database on its own never
+   contains anything usable. Per-record keys limit the blast radius of any one
+   leak, and the master key can be rotated by re-wrapping data keys without
+   touching the ciphertext.
+   --------------------------------------------------------------------------- */
+const ENVELOPE_PREFIX = 'v1';
+
+function bytesToB64(buf) {
+const arr = new Uint8Array(buf);
+let s = '';
+for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
+return btoa(s);
+}
+function b64ToBytes(str) {
+const bin = atob(String(str));
+const arr = new Uint8Array(bin.length);
+for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+return arr;
+}
+
+async function importMasterKey(env) {
+const raw = env.TOKEN_ENCRYPTION_KEY;
+if (!raw) return null;
+let bytes;
+try { bytes = b64ToBytes(String(raw).trim()); } catch (e) { return null; }
+if (bytes.length !== 32) return null;
+try {
+return await crypto.subtle.importKey('raw', bytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+} catch (e) { return null; }
+}
+
+function encryptionReady(env) { return !!env.TOKEN_ENCRYPTION_KEY; }
+
+async function encryptSecret(env, plaintext) {
+if (plaintext === null || plaintext === undefined || plaintext === '') return null;
+const master = await importMasterKey(env);
+if (!master) throw new Error('TOKEN_ENCRYPTION_KEY is missing or not a 32-byte base64 value');
+const dekBytes = crypto.getRandomValues(new Uint8Array(32));
+const dek = await crypto.subtle.importKey('raw', dekBytes, { name: 'AES-GCM' }, false, ['encrypt']);
+const dataIv = crypto.getRandomValues(new Uint8Array(12));
+const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dataIv }, dek, new TextEncoder().encode(String(plaintext)));
+const keyIv = crypto.getRandomValues(new Uint8Array(12));
+const wrappedDek = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: keyIv }, master, dekBytes);
+return [ENVELOPE_PREFIX, bytesToB64(keyIv), bytesToB64(wrappedDek), bytesToB64(dataIv), bytesToB64(ciphertext)].join(':');
+}
+
+async function decryptSecret(env, payload) {
+if (!payload) return null;
+const parts = String(payload).split(':');
+// Anything not in envelope form predates this change and is still plaintext.
+if (parts.length !== 5 || parts[0] !== ENVELOPE_PREFIX) return String(payload);
+const master = await importMasterKey(env);
+if (!master) return null;
+try {
+const dekBytes = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(parts[1]) }, master, b64ToBytes(parts[2]));
+const dek = await crypto.subtle.importKey('raw', dekBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(parts[3]) }, dek, b64ToBytes(parts[4]));
+return new TextDecoder().decode(plain);
+} catch (e) { return null; }
+}
+
 async function handleMailboxStatus(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -3790,6 +3855,8 @@ const key = (url.searchParams.get('provider') || 'google').toLowerCase();
 const provider = MAILBOX_PROVIDERS[key];
 if (!provider) return redirectTo('/account?mailbox=failed');
 if (!providerConfigured(env, key)) return redirectTo('/account?mailbox=not_configured');
+// Fail before consent rather than storing a credential we cannot encrypt.
+if (!encryptionReady(env)) return redirectTo('/account?mailbox=no_encryption_key');
 const state = randomToken();
 await pgInsert(env, 'oauth_states', { state: state, user_id: user.id, provider: key, redirect_to: '/account',
 expires_at: new Date(Date.now() + 600000).toISOString() });
@@ -3821,7 +3888,7 @@ const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(st.user_id) + '&selec
 if (!owner) return redirectTo('/account?mailbox=failed');
 const record = { user_id: owner.id, tenant_id: owner.tenant_id, provider: st.provider,
 email: emailFromIdToken(tokens.id_token) || owner.email,
-access_token: tokens.access_token || null, refresh_token: tokens.refresh_token || null,
+access_token: await encryptSecret(env, tokens.access_token), refresh_token: await encryptSecret(env, tokens.refresh_token),
 expires_at: new Date(Date.now() + ((Number(tokens.expires_in) || 3600) * 1000)).toISOString(),
 scope: tokens.scope || provider.scope, status: 'connected', last_error: null, updated_at: new Date().toISOString() };
 const existing = await pgSelectOne(env, 'user_mailboxes', 'user_id=' + pgEq(owner.id) + '&select=id,refresh_token');
@@ -3843,11 +3910,13 @@ return json({ ok: true });
 async function mailboxAccessToken(env, mailbox) {
 const provider = MAILBOX_PROVIDERS[mailbox.provider];
 if (!provider) return null;
-if (mailbox.access_token && mailbox.expires_at && (new Date(mailbox.expires_at).getTime() - Date.now() > 120000)) return mailbox.access_token;
-if (!mailbox.refresh_token) return null;
+const currentAccess = await decryptSecret(env, mailbox.access_token);
+if (currentAccess && mailbox.expires_at && (new Date(mailbox.expires_at).getTime() - Date.now() > 120000)) return currentAccess;
+const refreshToken = await decryptSecret(env, mailbox.refresh_token);
+if (!refreshToken) return null;
 try {
 const res = await fetch(provider.tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-body: new URLSearchParams({ refresh_token: mailbox.refresh_token, client_id: env[provider.clientIdVar],
+body: new URLSearchParams({ refresh_token: refreshToken, client_id: env[provider.clientIdVar],
 client_secret: env[provider.clientSecretVar], grant_type: 'refresh_token' }).toString() });
 const data = await res.json();
 if (!res.ok || !data.access_token) {
@@ -3855,7 +3924,7 @@ await pgUpdate(env, 'user_mailboxes', 'id=' + pgEq(mailbox.id), { status: 'needs
 last_error: (data && (data.error_description || data.error)) || 'Token refresh failed', updated_at: new Date().toISOString() });
 return null;
 }
-await pgUpdate(env, 'user_mailboxes', 'id=' + pgEq(mailbox.id), { access_token: data.access_token,
+await pgUpdate(env, 'user_mailboxes', 'id=' + pgEq(mailbox.id), { access_token: await encryptSecret(env, data.access_token),
 expires_at: new Date(Date.now() + ((Number(data.expires_in) || 3600) * 1000)).toISOString(),
 status: 'connected', last_error: null, updated_at: new Date().toISOString() });
 return data.access_token;
