@@ -2029,6 +2029,12 @@ async function handleSupportRequest(request, env) {
   return json({ ok: true, message: 'Thanks — we got your message.' });
 }
 
+// ILIKE treats % and _ as wildcards, so an address like "%@%.%" would match an
+// arbitrary account. Escape them so the value is compared literally.
+function likeEscape(value) {
+return String(value).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 async function handleForgotPassword(request, env) {
 let body;
 try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
@@ -2040,8 +2046,14 @@ if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
 return json({ ok: false, error: 'Please enter a valid email address.' }, 400);
 }
 
-const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=*');
+const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(likeEscape(email)) + '&select=*');
 if (user) {
+// At most one reset email per account per minute, so this cannot be used to
+// flood an inbox. The response stays generic either way.
+const issuedAt = user.reset_expires ? (new Date(user.reset_expires).getTime() - RESET_TTL_SECONDS * 1000) : 0;
+if (issuedAt && (Date.now() - issuedAt) < 60000) {
+return json({ ok: true, message: genericMessage });
+}
 const token = randomToken();
 const expires = new Date(Date.now() + RESET_TTL_SECONDS * 1000).toISOString();
 await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { reset_token: token, reset_expires: expires });
@@ -2074,7 +2086,7 @@ try { body = await request.json(); } catch (e) { return json({ ok: false, error:
 const email = (body.email || '').trim().toLowerCase();
 if (!email) return json({ ok: false, error: 'Email is required' }, 400);
 try {
-const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=*');
+const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(likeEscape(email)) + '&select=*');
 if (user && user.email_verified && user.status !== 'pending_approval' && user.status !== 'rejected') {
 const token = randomToken();
 const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
@@ -2289,7 +2301,7 @@ if (!body.agreeToTerms) {
 return json({ ok: false, error: 'You must agree to the Terms & Conditions to create an account.' }, 400);
 }
 
-const existingUser = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=id');
+const existingUser = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(likeEscape(email)) + '&select=id');
 if (existingUser) {
 return json({ ok: false, error: 'An account with this email already exists.' }, 409);
 }
@@ -4784,7 +4796,7 @@ if (!email || !password) {
 return json({ ok: false, error: 'Email and password are required' }, 400);
 }
 
-const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(email) + '&select=*');
+const user = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(likeEscape(email)) + '&select=*');
 if (!user) {
 return json({ ok: false, error: 'Invalid email or password' }, 401);
 }
