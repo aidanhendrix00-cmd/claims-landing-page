@@ -3801,12 +3801,23 @@ return arr;
 async function importMasterKey(env) {
 const raw = env.TOKEN_ENCRYPTION_KEY;
 if (!raw) return null;
+// Tolerate line wrapping, stray whitespace, base64url and missing padding -
+// all normal when a key is copied out of a terminal.
+let cleaned = String(raw).replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+while (cleaned.length % 4 !== 0) cleaned += '=';
 let bytes;
-try { bytes = b64ToBytes(String(raw).trim()); } catch (e) { return null; }
-if (bytes.length !== 32) return null;
+try { bytes = b64ToBytes(cleaned); }
+catch (e) {
+console.log('TOKEN_ENCRYPTION_KEY_BAD reason=not_base64 rawLen=' + String(raw).length + ' startsWith=' + String(raw).slice(0, 7));
+return null;
+}
+if (bytes.length !== 32) {
+console.log('TOKEN_ENCRYPTION_KEY_BAD reason=wrong_size rawLen=' + String(raw).length + ' cleanedLen=' + cleaned.length + ' decodedBytes=' + bytes.length + ' needBytes=32 startsWith=' + String(raw).slice(0, 7));
+return null;
+}
 try {
 return await crypto.subtle.importKey('raw', bytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-} catch (e) { return null; }
+} catch (e) { console.log('TOKEN_ENCRYPTION_KEY_BAD reason=import_failed ' + (e && e.message)); return null; }
 }
 
 function encryptionReady(env) { return !!env.TOKEN_ENCRYPTION_KEY; }
@@ -3899,6 +3910,8 @@ return redirectTo('/account?mailbox=token_failed');
 }
 const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(st.user_id) + '&select=id,tenant_id,email');
 if (!owner) return redirectTo('/account?mailbox=failed');
+// Validate the key before encrypting so a bad value is a message, not a 500.
+if (!(await importMasterKey(env))) return redirectTo('/account?mailbox=no_encryption_key');
 const record = { user_id: owner.id, tenant_id: owner.tenant_id, provider: st.provider,
 email: emailFromIdToken(tokens.id_token) || owner.email,
 access_token: await encryptSecret(env, tokens.access_token), refresh_token: await encryptSecret(env, tokens.refresh_token),
