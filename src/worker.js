@@ -1920,6 +1920,7 @@ return { ok: false, skipped: true };
 }
 try {
 const payload = { from: fromAddr, to: [to], subject: subject, html: html };
+if (opts.cc && opts.cc.length) payload.cc = opts.cc;
 if (replyTo) payload.reply_to = replyTo;
 const res = await fetch('https://api.resend.com/emails', {
 method: 'POST',
@@ -3658,6 +3659,8 @@ const to = String(body.to || full.contact_email || '').trim();
 if (!to || to.indexOf('@') === -1) {
 return json({ ok: false, error: 'No contact email on this account. Add one before sending.' }, 400);
 }
+// Optional manual CC, entered by the user in the send dialog.
+const ccList = parseCcList(body.cc, to);
 const text = String(body.body || '').trim();
 if (!text) return json({ ok: false, error: 'The message is empty.' }, 400);
 const subject = String(body.subject || ('Outstanding invoice - ' + (full.customer_name || ''))).slice(0, 200);
@@ -3674,7 +3677,7 @@ if (mailbox) {
 // Goes out through the user's own mailbox: genuinely from them, and a copy
 // lands in their Sent folder.
 result = await sendViaMailbox(env, mailbox, {
-to: to, subject: subject, html: html, fromName: quoteDisplayName(user.full_name || mailbox.email)
+to: to, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(user.full_name || mailbox.email)
 });
 if (result && result.ok) { sentVia = 'mailbox'; }
 else {
@@ -3688,7 +3691,7 @@ result = null;
 if (!result) {
 try {
 result = await sendEmail(env, {
-to: to, subject: subject, html: html,
+to: to, cc: ccList, subject: subject, html: html,
 kind: 'manual_' + draftType,
 tenantId: user.tenant_id, userId: user.id,
 from: sender.from, replyTo: sender.replyTo
@@ -4008,22 +4011,43 @@ return data.access_token;
 } catch (e) { return null; }
 }
 // RFC 2822 message for the Gmail API.
-function buildMimeMessage(fromName, fromEmail, to, subject, html) {
+// Normalises a CC value (string or array) into a clean, de-duplicated list.
+// Anything without an "@" is dropped, the To address is never duplicated into
+// CC, and the list is capped so one request cannot fan out to a mailing list.
+function parseCcList(raw, excludeTo) {
+const parts = Array.isArray(raw) ? raw : String(raw || '').split(/[,;]/);
+const skip = String(excludeTo || '').trim().toLowerCase();
+const seen = {};
+const out = [];
+for (let i = 0; i < parts.length; i++) {
+const addr = String(parts[i] || '').trim();
+if (!addr || addr.indexOf('@') === -1) continue;
+const key = addr.toLowerCase();
+if (key === skip || seen[key]) continue;
+seen[key] = true;
+out.push(addr);
+if (out.length >= 10) break;
+}
+return out;
+}
+function buildMimeMessage(fromName, fromEmail, to, subject, html, cc) {
 const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
-return [
+const lines = [
 'From: "' + String(fromName).replace(/"/g, '') + '" <' + fromEmail + '>',
-'To: ' + to,
-'Subject: ' + subject,
-'MIME-Version: 1.0',
-'Content-Type: text/html; charset=UTF-8'
-].join(CRLF) + CRLF + CRLF + html;
+'To: ' + to
+];
+if (cc && cc.length) lines.push('Cc: ' + cc.join(', '));
+lines.push('Subject: ' + subject);
+lines.push('MIME-Version: 1.0');
+lines.push('Content-Type: text/html; charset=UTF-8');
+return lines.join(CRLF) + CRLF + CRLF + html;
 }
 async function sendViaMailbox(env, mailbox, opts) {
 const token = await mailboxAccessToken(env, mailbox);
 if (!token) return { ok: false, error: 'Your connected email needs to be reconnected.', needsReconnect: true };
 try {
 if (mailbox.provider === 'google') {
-const mime = buildMimeMessage(opts.fromName || mailbox.email, mailbox.email, opts.to, opts.subject, opts.html);
+const mime = buildMimeMessage(opts.fromName || mailbox.email, mailbox.email, opts.to, opts.subject, opts.html, opts.cc);
 const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
 method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
 body: JSON.stringify({ raw: base64UrlEncode(new TextEncoder().encode(mime)) }) });
@@ -4034,7 +4058,8 @@ if (mailbox.provider === 'microsoft') {
 const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
 method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
 body: JSON.stringify({ message: { subject: opts.subject, body: { contentType: 'HTML', content: opts.html },
-toRecipients: [{ emailAddress: { address: opts.to } }] }, saveToSentItems: true }) });
+toRecipients: [{ emailAddress: { address: opts.to } }],
+ccRecipients: (opts.cc || []).map(function(a){ return { emailAddress: { address: a } }; }) }, saveToSentItems: true }) });
 if (!res.ok) { const t = await res.text(); return { ok: false, error: 'Outlook rejected the message: ' + res.status + ' ' + t.slice(0, 200) }; }
 return { ok: true, via: 'microsoft' };
 }
