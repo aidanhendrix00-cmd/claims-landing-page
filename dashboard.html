@@ -750,6 +750,16 @@ custom-integrations"></div>
         </button>
       </div>
       <div class="hint" id="recipient-hint"></div>
+      <div style="margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);background:#FAF8F2;">
+          <span style="font-size:11.5px;font-weight:700;color:var(--slate);width:26px;">To</span>
+          <span id="draft-to-display" style="font-size:13px;color:var(--ink);"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;">
+          <span style="font-size:11.5px;font-weight:700;color:var(--slate);width:26px;">Cc</span>
+          <input id="draft-cc" type="text" autocomplete="off" placeholder="Add emails, separated by commas" style="flex:1;border:none;outline:none;font-size:13px;background:transparent;color:var(--ink);" />
+        </div>
+      </div>
     </div>
 
     <div class="drawer-section">
@@ -3529,6 +3539,14 @@ Do not invent facts beyond what's given.`;
   function updateRecipientUI(){
     const inv = currentInvoice;
     if(!inv) return;
+    const toEl = document.getElementById('draft-to-display');
+    if(toEl){
+      toEl.textContent = inv.contactEmail || inv.contact_email || 'Contact email on file for this account';
+      const ccEl = document.getElementById('draft-cc');
+      // Reset Cc when switching accounts, so one job's copy list never
+      // silently follows you to the next job.
+      if(ccEl && ccEl.dataset.invId !== String(inv.id)){ ccEl.value = ''; ccEl.dataset.invId = String(inv.id); }
+    }
     document.getElementById('recipient-sub-homeowner').textContent = inv.payer === 'pm' ? 'Property manager on file' : 'Property owner on file';
     document.getElementById('recipient-sub-adjuster').textContent = inv.payer === 'insurance' ? 'Handling this claim' : 'If applicable to this job';
     document.getElementById('recipient-btn-homeowner').classList.toggle('active', currentRecipient === 'homeowner');
@@ -3641,7 +3659,8 @@ Do not invent facts beyond what's given.`;
         subject: subjectLine,
         body: bodyText,
         draftType: currentDraftType,
-        recipient: currentRecipient
+        recipient: currentRecipient,
+        cc: (function(){ const el = document.getElementById('draft-cc'); return el ? el.value : ''; })()
       })
     }).then(function(r){ return r.json(); }).then(function(res){
       approveBtn.disabled = false;
