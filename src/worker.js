@@ -2264,7 +2264,16 @@ await sendEmail(env, { to: inviter.email, subject: 'NEW USER ADDED - clAIms', ht
 }
 } catch (notifyErr) {}
 
-return json({ ok: true, message: 'Password updated successfully.' });
+// The token proved control of the mailbox and every prior session was just
+// cleared, so issue a fresh one and drop them straight into the dashboard.
+const newSessionToken = randomToken();
+const newSessionExpires = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
+await pgInsert(env, 'sessions', { token: newSessionToken, user_id: user.id, expires_at: newSessionExpires });
+const newSessionCookie = SESSION_COOKIE + '=' + newSessionToken + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
+return new Response(JSON.stringify({ ok: true, message: 'Password updated successfully.', redirect: '/dashboard' }), {
+status: 200,
+headers: { 'Content-Type': 'application/json', 'Set-Cookie': newSessionCookie, 'Cache-Control': NO_STORE }
+});
 }
 
 async function handleSignup(request, env) {
@@ -4483,11 +4492,8 @@ updated_at: new Date().toISOString()
 const patch = { status: subscriptionStatusToTenantStatus(sub.status) };
 if (plan) patch.selected_plan = plan;
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
-// End live sessions on lock so it applies immediately rather than lingering
-// for the remainder of a 7-day session cookie.
-if (isTenantLocked(patch.status)) {
-await pgDelete(env, 'sessions', 'tenant_id=' + pgEq(tenantId));
-}
+// The lock is enforced per-request in fetch() and handleDashboard, so it applies
+// immediately without purging session rows here.
 return tenantId;
 }
 
