@@ -3685,7 +3685,10 @@ else {
 if (result && result.needsReconnect) {
 return json({ ok: false, error: 'Your connected email needs to be reconnected in Account settings.', needsReconnect: true }, 400);
 }
-result = null;
+// The user expects this to leave from their own address. Surfacing the
+// failure beats silently sending from a clAIms address instead.
+console.log('MAILBOX_SEND_REFUSED detail=' + String((result && result.error) || 'unknown').slice(0, 300));
+return json({ ok: false, error: (result && result.error) || 'Your connected email refused this message. Nothing was sent.' }, 502);
 }
 }
 if (!result) {
@@ -4051,7 +4054,11 @@ const mime = buildMimeMessage(opts.fromName || mailbox.email, mailbox.email, opt
 const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
 method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
 body: JSON.stringify({ raw: base64UrlEncode(new TextEncoder().encode(mime)) }) });
-if (!res.ok) { const t = await res.text(); return { ok: false, error: 'Gmail rejected the message: ' + res.status + ' ' + t.slice(0, 200) }; }
+if (!res.ok) {
+const t = await res.text();
+console.log('MAILBOX_SEND_FAILED provider=google status=' + res.status + ' body=' + t.slice(0, 300));
+return { ok: false, error: 'Gmail rejected the message: ' + res.status + ' ' + t.slice(0, 200) };
+}
 return { ok: true, via: 'google' };
 }
 if (mailbox.provider === 'microsoft') {
@@ -4060,7 +4067,11 @@ method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': '
 body: JSON.stringify({ message: { subject: opts.subject, body: { contentType: 'HTML', content: opts.html },
 toRecipients: [{ emailAddress: { address: opts.to } }],
 ccRecipients: (opts.cc || []).map(function(a){ return { emailAddress: { address: a } }; }) }, saveToSentItems: true }) });
-if (!res.ok) { const t = await res.text(); return { ok: false, error: 'Outlook rejected the message: ' + res.status + ' ' + t.slice(0, 200) }; }
+if (!res.ok) {
+const t = await res.text();
+console.log('MAILBOX_SEND_FAILED provider=microsoft status=' + res.status + ' body=' + t.slice(0, 300));
+return { ok: false, error: 'Outlook rejected the message: ' + res.status + ' ' + t.slice(0, 200) };
+}
 return { ok: true, via: 'microsoft' };
 }
 return { ok: false, error: 'Unsupported mail provider.' };
