@@ -3308,8 +3308,15 @@ if (!settings.enabled) { summary.skipped = -1; return summary; }
 if (withinQuietHours(settings, now)) { summary.skipped = -2; return summary; }
 
 const statusFilter = 'status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')';
+// A per-user settings row only automates accounts its owner can already see:
+// admins cover the whole tenant, everyone else their own office.
+let officeFilter = '';
+if (settings.user_id) {
+const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + '&select=role,office');
+if (owner && owner.role !== 'admin' && owner.office) officeFilter = '&office=' + pgEq(owner.office);
+}
 const accounts = await pgSelect(env, 'accounts',
-'tenant_id=' + pgEq(settings.tenant_id) + '&' + statusFilter + '&select=*&order=id.asc'
+'tenant_id=' + pgEq(settings.tenant_id) + '&' + statusFilter + officeFilter + '&select=*&order=id.asc'
 ) || [];
 const checkpoints = cadenceCheckpointsFor(settings);
 const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
@@ -3405,6 +3412,42 @@ summary.failed++;
 }
 }
 return summary;
+}
+
+// ---- Per-user automation settings ------------------------------------------
+// Each user owns one cadence_settings row (tenant_id, user_id). Turning
+// automation on only covers accounts that user can already see: admins run
+// tenant-wide, managers and employees are scoped to their office by the sweep.
+const CADENCE_DEFAULTS = { enabled: false, require_review: true, max_per_week: 2 };
+async function handleCadenceSettingsGet(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const row = await pgSelectOne(env, 'cadence_settings',
+'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=*');
+return json({ ok: true, settings: row || Object.assign({ tenant_id: user.tenant_id, user_id: user.id }, CADENCE_DEFAULTS) });
+}
+async function handleCadenceSettingsSave(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const patch = {};
+if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+if (typeof body.requireReview === 'boolean') patch.require_review = body.requireReview;
+if (body.maxPerWeek !== undefined) {
+const n = parseInt(body.maxPerWeek, 10);
+if (!isNaN(n) && n >= 1 && n <= 7) patch.max_per_week = n;
+}
+const existing = await pgSelectOne(env, 'cadence_settings',
+'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=id');
+if (existing) {
+await pgUpdate(env, 'cadence_settings', 'id=' + pgEq(existing.id), patch);
+} else {
+await pgInsert(env, 'cadence_settings', Object.assign({}, CADENCE_DEFAULTS, patch, { tenant_id: user.tenant_id, user_id: user.id }));
+}
+const row = await pgSelectOne(env, 'cadence_settings',
+'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=*');
+return json({ ok: true, settings: row });
 }
 
 async function runCadenceSweep(env) {
@@ -5139,6 +5182,12 @@ return handleLogout(request, env);
 }
 if (url.pathname === '/api/escalate-notify' && request.method === 'POST') {
 return handleEscalateNotify(request, env);
+}
+if (url.pathname === '/api/cadence-settings' && request.method === 'GET') {
+return handleCadenceSettingsGet(request, env);
+}
+if (url.pathname === '/api/cadence-settings' && request.method === 'POST') {
+return handleCadenceSettingsSave(request, env);
 }
 if (url.pathname === '/api/me' && request.method === 'GET') {
 return handleMe(request, env);
