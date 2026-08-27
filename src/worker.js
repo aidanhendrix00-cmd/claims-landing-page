@@ -3820,7 +3820,7 @@ function providerConfigured(env, key) { const p = MAILBOX_PROVIDERS[key]; return
 function base64UrlEncode(bytes) {
 let binary = ''; const arr = new Uint8Array(bytes);
 for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
-return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 // Decode the id_token payload only to learn which address was connected.
 function emailFromIdToken(idToken) {
