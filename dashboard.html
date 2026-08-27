@@ -770,8 +770,8 @@ custom-integrations"></div>
 
     <div class="drawer-section" id="subject-section" style="display:none;">
       <h4>Subject Line</h4>
-      <input type="text" id="draft-subject" class="subject-input" readonly="">
-      <div class="hint">Locked to the claim number for adjuster correspondence.</div>
+      <input type="text" id="draft-subject" class="subject-input" oninput="onSubjectInput()" readonly="">
+      <div class="hint" id="subject-hint">Locked to the claim number for adjuster correspondence.</div>
     </div>
 
     <div id="status-row" class="status-line" style="display:none;">
@@ -3532,6 +3532,14 @@ Do not invent facts beyond what's given.`;
   let currentInvoice = null;
   let currentDraftType = 'followup';
   let currentRecipient = 'homeowner';
+  let customSubject = null; // homeowner-tab subject the user typed for this drawer session
+
+  function defaultSubjectFor(inv, draftType){
+    return (draftType === 'noil' ? 'Notice of Intent to Lien - ' : draftType === 'demand' ? 'Demand for payment - ' : 'Outstanding invoice - ') + ((inv && inv.name) || '');
+  }
+  function onSubjectInput(){
+    if(currentRecipient !== 'adjuster'){ customSubject = document.getElementById('draft-subject').value; }
+  }
 
   function updateRecipientUI(){
     const inv = currentInvoice;
@@ -3554,11 +3562,16 @@ Do not invent facts beyond what's given.`;
 
     const subjectSection = document.getElementById('subject-section');
     const subjectInput = document.getElementById('draft-subject');
+    const subjectHint = document.getElementById('subject-hint');
+    subjectSection.style.display = 'block';
     if(currentRecipient === 'adjuster'){
-      subjectSection.style.display = 'block';
+      subjectInput.readOnly = true;
       subjectInput.value = inv.claimNumber || 'No claim number on file for this job';
+      if(subjectHint) subjectHint.textContent = 'Locked to the claim number for adjuster correspondence.';
     } else {
-      subjectSection.style.display = 'none';
+      subjectInput.readOnly = false;
+      subjectInput.value = customSubject !== null ? customSubject : defaultSubjectFor(inv, currentDraftType);
+      if(subjectHint) subjectHint.textContent = 'Sent as the email subject line - edit it before approving if needed.';
     }
   }
 
@@ -3573,6 +3586,7 @@ Do not invent facts beyond what's given.`;
     currentInvoice = findInv(id);
     if(!currentInvoice) return;
     currentRecipient = recipientDefault(currentInvoice);
+    customSubject = null;
     document.getElementById('overlay-detail').classList.remove('open');
 
     const titles = { followup: 'Draft Follow-Up', demand: 'Draft Demand Letter', noil: 'Draft Notice of Intent to Lien (NOIL)' };
@@ -3632,7 +3646,11 @@ Do not invent facts beyond what's given.`;
     const typeLabels = { followup: 'Follow-Up', demand: 'Demand Letter', noil: 'NOIL' };
     const recipientLabel = recipientDisplayName(inv, currentRecipient);
     const bodyText = document.getElementById('draft-text').value;
-    const subject = currentRecipient === 'adjuster' ? (inv.claimNumber || null) : null;
+    const subjectField = document.getElementById('draft-subject');
+    const typedSubject = (subjectField && !subjectField.readOnly && subjectField.value) ? subjectField.value.trim() : '';
+    const subject = currentRecipient === 'adjuster'
+      ? (inv.claimNumber || defaultSubjectFor(inv, currentDraftType))
+      : (typedSubject || defaultSubjectFor(inv, currentDraftType));
 
     // Demo invoices are not real accounts, so keep the simulated behaviour there.
     const isRemote = inv && inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/) && state.currentUser;
@@ -3647,13 +3665,12 @@ Do not invent facts beyond what's given.`;
 
     approveBtn.textContent = "Sending...";
     approveBtn.disabled = true;
-    const subjectLine = (currentDraftType === 'noil' ? 'Notice of Intent to Lien - ' : currentDraftType === 'demand' ? 'Demand for payment - ' : 'Outstanding invoice - ') + (inv.name || '');
     fetch('/api/invoices/send', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accountId: inv.id,
-        subject: subjectLine,
+        subject: subject,
         body: bodyText,
         draftType: currentDraftType,
         recipient: currentRecipient,
