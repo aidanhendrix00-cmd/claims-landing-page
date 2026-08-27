@@ -1456,11 +1456,9 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   let state = defaultState();
 
   async function loadState(){
-    try{
-      const result = await window.storage.get(STORAGE_KEY, false);
-      if(result && result.value) return normalizeState(JSON.parse(result.value));
-      return defaultState();
-    }catch(e){ return memoryFallback || defaultState(); }
+    // The old window.storage read always threw (that object never existed),
+    // and a per-browser copy of company data must never be a source of truth.
+    return memoryFallback || defaultState();
   }
 
   // Ensures any state saved by an older version of this app (missing newer
@@ -1490,10 +1488,9 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   }
 
   async function saveState(){
+    // Shared data lives in Supabase via the API; this keeps only the tab's
+    // in-memory working copy. Nothing is written to browser storage.
     memoryFallback = state;
-    // window.storage never existed, so every change used to die with the tab.
-    try{ window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch(e){ /* private mode or quota - memoryFallback still holds this session */ }
   }
 
   // Real accounts are owned by Supabase, so user edits are pushed there and
@@ -1785,7 +1782,7 @@ async function loadRealAccounts(){
 
   init();
 
-  setInterval(loadRealAccounts, 60000);
+  setInterval(function(){ if (document.visibilityState === 'visible') loadRealAccounts(); }, 30000);
 
 document.addEventListener('visibilitychange', function(){
 if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegrations(); }
