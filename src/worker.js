@@ -4201,7 +4201,10 @@ let rows;
 if (user.role === 'admin') {
 rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,status&order=id.asc');
 } else {
-rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&or=(office.eq.' + encodeURIComponent(user.office || '__none__') + ',role.eq.admin)&select=id,email,full_name,role,office,status&order=id.asc');
+// Managers and employees see only teammates at their own office; admins
+// (handled above) see everyone in the company. A user always sees their
+// own row, even if no office is set on their profile.
+rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&or=(office.eq.' + encodeURIComponent(user.office || '__none__') + ',id.eq.' + encodeURIComponent(user.id) + ')&select=id,email,full_name,role,office,status&order=id.asc');
 }
 return json({ ok: true, team: rows || [] });
 }
