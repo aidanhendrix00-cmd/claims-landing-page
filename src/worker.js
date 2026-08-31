@@ -2824,7 +2824,14 @@ let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const provider = (body.provider || 'accounting').toString().slice(0, 60);
 const apiKey = randomToken();
-const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&provider=' + pgEq(provider) + '&select=id');
+const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&provider=' + pgEq(provider) + '&select=id,status');
+const connLimits = planLimitsFor(user);
+if (user.tenant_slug !== 'base' && connLimits.integrations != null && (!existing || existing.status !== 'connected')) {
+const connectedCount = await countIntegrationsConnected(env, user.tenant_id);
+if (connectedCount >= connLimits.integrations) {
+return json({ ok: false, error: 'Your ' + connLimits.name + ' plan includes ' + connLimits.integrations + ' integration' + (connLimits.integrations === 1 ? '' : 's') + '. Disconnect one or upgrade your plan to connect more.', code: 'plan_limit' }, 403);
+}
+}
 if (existing) {
 await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), { status: 'connected', api_key: apiKey, connected_at: new Date().toISOString() });
 } else {
@@ -3305,6 +3312,9 @@ claimBit +
 async function runCadenceForTenant(env, settings, now) {
 const summary = { tenantId: settings.tenant_id, considered: 0, sent: 0, held: 0, skipped: 0, failed: 0 };
 if (!settings.enabled) { summary.skipped = -1; return summary; }
+// Strict enforcement: a company on billing hold sends nothing, manual or automated.
+const cadenceTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(settings.tenant_id) + '&select=id,status,slug,access_until');
+if (tenantLockState(cadenceTenant, Date.now()) === 'locked') { summary.skipped = -3; return summary; }
 if (withinQuietHours(settings, now)) { summary.skipped = -2; return summary; }
 
 const statusFilter = 'status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')';
@@ -4210,6 +4220,8 @@ const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
 if (!email || !email.includes('@')) return json({ ok: false, error: 'A valid email is required.' }, 400);
 if (role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'manager' or 'employee'." }, 400);
 if (VALID_OFFICES.indexOf(office) === -1) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
+const seatErr = await seatLimitError(env, user);
+if (seatErr) return json({ ok: false, error: seatErr, code: 'seat_limit' }, 403);
 const existing = await pgSelectOne(env, 'users', 'email=' + pgEq(email) + '&select=id');
 if (existing) return json({ ok: false, error: 'That email is already associated with an account.' }, 409);
 const throwawaySalt = randomSalt();
@@ -4419,6 +4431,10 @@ try { body = await request.json(); } catch (e) { return json({ ok: false, error:
 const targetId = body.userId;
 const target = await pgSelectOne(env, 'users', 'id=' + pgEq(targetId) + '&tenant_id=' + pgEq(admin.tenant_id) + '&select=*');
 if (!target) return json({ ok: false, error: 'User not found' }, 404);
+if (target.status !== 'active') {
+const seatErr = await seatLimitError(env, admin);
+if (seatErr) return json({ ok: false, error: seatErr, code: 'seat_limit' }, 403);
+}
 await pgUpdate(env, 'users', 'id=' + pgEq(targetId), { status: 'active' });
 return json({ ok: true });
 }
@@ -4463,6 +4479,36 @@ async function verifyStripeSignature(env, sigHeader, rawBody) {
    --------------------------------------------------------------------------- */
 const PLAN_KEYS = ['starter', 'growth', 'enterprise'];
 
+// Membership limits, enforced server-side. Seat caps use the top of each
+// plan's advertised range; null means unlimited. The base tenant is exempt.
+const PLAN_LIMITS = {
+  starter:    { name: 'Starter',    seats: 3,    integrations: 1 },
+  growth:     { name: 'Growth',     seats: 8,    integrations: null },
+  enterprise: { name: 'Enterprise', seats: null, integrations: null }
+};
+function planKeyFor(userOrTenant) {
+  const key = (userOrTenant && (userOrTenant.selected_plan || userOrTenant.recommended_plan)) || 'starter';
+  return PLAN_LIMITS[key] ? key : 'starter';
+}
+function planLimitsFor(userOrTenant) { return PLAN_LIMITS[planKeyFor(userOrTenant)]; }
+async function countSeatsUsed(env, tenantId) {
+  const rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&status=in.(active,pending)&select=id') || [];
+  return rows.length;
+}
+async function countIntegrationsConnected(env, tenantId) {
+  const rows = await pgSelect(env, 'integrations', 'tenant_id=' + pgEq(tenantId) + '&status=' + pgEq('connected') + '&select=id') || [];
+  return rows.length;
+}
+// Returns an error string when the tenant has no free seat, else null.
+async function seatLimitError(env, user) {
+  if (user.tenant_slug === 'base') return null;
+  const limits = planLimitsFor(user);
+  if (!limits.seats) return null;
+  const used = await countSeatsUsed(env, user.tenant_id);
+  if (used < limits.seats) return null;
+  return 'Your ' + limits.name + ' plan includes up to ' + limits.seats + ' user seats and all of them are in use. Remove a teammate or upgrade your plan to add more.';
+}
+
 async function pgUpsert(env, table, data, conflictColumn) {
 return await pgFetch(env, 'POST', table, 'on_conflict=' + encodeURIComponent(conflictColumn), data, 'resolution=merge-duplicates');
 }
@@ -4492,38 +4538,61 @@ return null;
 
 // Non-payment locks a company; it is never deleted. Every record stays in
 // place and access resumes the moment a payment succeeds.
-const LOCKED_TENANT_STATUSES = new Set(['past_due', 'canceled']);
-function isTenantLocked(status) { return LOCKED_TENANT_STATUSES.has(String(status || '')); }
-// Paths an admin still needs in order to pay their way back out of a lock.
+// Lock states:
+//   past_due -> locked immediately (a payment was due and was not received)
+//   canceled -> access continues until tenants.access_until (30 days after
+//               the last successful payment), then locked
+// The platform's own base tenant is never locked.
+const CANCELED_GRACE_DAYS = 30;
+function tenantLockState(tenant, now) {
+  if (!tenant) return 'ok';
+  if (tenant.slug === 'base') return 'ok';
+  const status = String(tenant.status || '');
+  if (status === 'past_due') return 'locked';
+  if (status === 'canceled') {
+    const until = tenant.access_until ? new Date(tenant.access_until).getTime() : 0;
+    return (until && (now || Date.now()) < until) ? 'grace' : 'locked';
+  }
+  return 'ok';
+}
+function isTenantLocked(tenant) { return tenantLockState(tenant, Date.now()) === 'locked'; }
+// Paths a company still needs in order to pay its way back out of a lock:
+// identity, logout, and every billing/payment surface.
 function allowedWhileLocked(pathname) {
 return pathname === '/api/me' ||
 pathname === '/api/logout' ||
 pathname === '/api/login' ||
 pathname === '/api/billing-portal' ||
+pathname === '/api/subscription' ||
+pathname === '/api/subscription/reactivate' ||
+pathname === '/api/transactions' ||
 pathname === '/api/stripe-webhook';
 }
 async function lockedTenantFor(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return null;
-const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=id,status,company_name');
-if (!tenant || !isTenantLocked(tenant.status)) return null;
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=id,status,company_name,slug,access_until');
+if (!tenant || !isTenantLocked(tenant)) return null;
 return { user: user, tenant: tenant };
 }
 function lockedPageHtml(info) {
 const isAdmin = info.user.role === 'admin';
 const company = escapeHtml(info.tenant.company_name || 'Your company');
 const action = isAdmin
-? '<p style="margin:28px 0;"><a href="/account" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Update payment</a></p>'
-: '<p style="color:#615D53;">Ask an admin at your company to update the payment method.</p>';
+? '<p style="margin:28px 0;display:flex;gap:10px;flex-wrap:wrap;">' +
+'<a href="/account/subscription" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Add or edit payment method</a>' +
+'<a href="/dashboard" style="border:1px solid #DCC393;color:#171717;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">I\'ve submitted payment &mdash; re-check</a></p>'
+: '<p style="color:#615D53;">Ask an admin at your company to add or edit the payment method. Access returns automatically once payment is received.</p>';
 return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
 '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-'<title>Account locked - clAIms</title></head>' +
+'<title>Access on hold - clAIms</title></head>' +
 '<body style="margin:0;background:#F5F2EA;font-family:IBM Plex Sans,Arial,sans-serif;color:#171717;">' +
 '<div style="max-width:560px;margin:14vh auto;background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:36px 40px;">' +
-'<div style="font-size:12px;letter-spacing:.08em;color:#C29B57;font-weight:700;">ACCOUNT LOCKED</div>' +
-'<h1 style="font-size:24px;margin:10px 0 14px;">' + company + ' is temporarily locked</h1>' +
-'<p style="color:#2B2A27;line-height:1.6;">Your subscription is not currently active, so dashboard access is paused. ' +
-'<strong>Nothing has been deleted.</strong> Your accounts, notes, documents and payment history are all still here, and they reappear the moment a payment goes through.</p>' +
+'<div style="font-size:12px;letter-spacing:.08em;color:#C29B57;font-weight:700;">ACCESS ON HOLD</div>' +
+'<h1 style="font-size:24px;margin:10px 0 14px;">Access on hold due to no payment</h1>' +
+'<p style="color:#2B2A27;line-height:1.6;">' + company + '\'s subscription payment has not come through, so access is on hold for every user. ' +
+'Add or edit your payment method, or submit payment promptly, to be granted access. ' +
+'<strong>Nothing has been deleted.</strong> Your accounts, notes, documents and payment history are all still here, and access is restored the moment a payment goes through.</p>' +
 action +
 '<p style="color:#9C978A;font-size:12.5px;">Questions? Email support@claims-collection.net</p>' +
 '</div></body></html>';
@@ -4570,6 +4639,20 @@ updated_at: new Date().toISOString()
 }, 'stripe_subscription_id');
 const patch = { status: subscriptionStatusToTenantStatus(sub.status) };
 if (plan) patch.selected_plan = plan;
+if (patch.status === 'canceled') {
+// Cancellation grace: the company keeps access until 30 days after the
+// last successful payment, then locks until a payment goes through.
+let lastPaid = null;
+try {
+const paidRows = await pgSelect(env, 'payments', 'tenant_id=' + pgEq(tenantId) + '&status=' + pgEq('paid') + '&select=paid_at&order=paid_at.desc.nullslast&limit=1');
+if (paidRows && paidRows[0] && paidRows[0].paid_at) lastPaid = new Date(paidRows[0].paid_at).getTime();
+} catch (e) {}
+if (!lastPaid && sub.current_period_start) lastPaid = sub.current_period_start * 1000;
+if (!lastPaid) lastPaid = Date.now();
+patch.access_until = new Date(lastPaid + CANCELED_GRACE_DAYS * 86400000).toISOString();
+} else if (patch.status === 'active') {
+patch.access_until = null;
+}
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
 // The lock is enforced per-request in fetch() and handleDashboard, so it applies
 // immediately without purging session rows here.
@@ -4798,7 +4881,15 @@ await mirrorSubscription(env, event.data.object, null);
 }
 
 if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
-await mirrorInvoice(env, event.data.object, 'paid');
+const paidTenantId = await mirrorInvoice(env, event.data.object, 'paid');
+// A successful payment restores access immediately for a company locked
+// for non-payment or sitting in its cancellation grace window.
+if (paidTenantId) {
+const paidTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(paidTenantId) + '&select=status');
+if (paidTenant && (paidTenant.status === 'past_due' || paidTenant.status === 'canceled')) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(paidTenantId), { status: 'active', access_until: null });
+}
+}
 }
 
 if (event.type === 'invoice.payment_failed') {
@@ -5118,8 +5209,32 @@ async function handleMe(request, env) {
     integrationStatus: user.integration_status,
     selectedPlan: user.selected_plan,
     recommendedPlan: user.recommended_plan,
-    hasBilling: !!user.stripe_customer_id
+    hasBilling: !!user.stripe_customer_id,
+    billing: await meBillingInfo(env, user)
   });
+}
+
+// Billing block for /api/me: how the dashboard knows to raise the
+// access-hold popup or the cancellation-grace banner.
+async function meBillingInfo(env, user) {
+  try {
+    const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=id,status,slug,access_until,selected_plan,recommended_plan');
+    const state = tenantLockState(tenant, Date.now());
+    const limits = planLimitsFor(tenant || user);
+    let seatsUsed = null;
+    try { seatsUsed = await countSeatsUsed(env, user.tenant_id); } catch (e) {}
+    return {
+      state: state,
+      tenantStatus: tenant ? tenant.status : (user.tenant_status || null),
+      accessUntil: tenant ? (tenant.access_until || null) : null,
+      plan: planKeyFor(tenant || user),
+      planName: limits.name,
+      seats: { used: seatsUsed, limit: limits.seats },
+      integrationsLimit: limits.integrations
+    };
+  } catch (e) {
+    return { state: 'ok' };
+  }
 }
 
 async function handleAdminAccountsExport(request, env) {
@@ -5167,10 +5282,10 @@ const url = new URL(request.url);
 if (url.pathname.indexOf('/api/') === 0 && !allowedWhileLocked(url.pathname)) {
 const lockedCtx = await lockedTenantFor(request, env);
 if (lockedCtx) {
-return json({ ok: false, locked: true, role: lockedCtx.user.role,
+return json({ ok: false, locked: true, code: 'billing_hold', role: lockedCtx.user.role,
 error: lockedCtx.user.role === 'admin'
-? 'Your subscription is not active. Update payment to restore access.'
-: 'This account is locked. Ask your company admin to update payment.' }, 402);
+? 'Access on hold due to no payment. Add or edit your payment method, or submit payment promptly, to be granted access.'
+: 'Access on hold due to no payment. Ask your company admin to add or edit the payment method.' }, 402);
 }
 }
 
