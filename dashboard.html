@@ -3934,3 +3934,127 @@ let toastTimer = null;
     toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
   }
 </script>
+
+
+<!-- ============================================================
+     BILLING ENFORCEMENT UI - access-hold popup + cancellation banner
+     Driven by /api/me (billing block) and by any API answering 402.
+     ============================================================ -->
+<style>
+  #billing-hold-overlay{position:fixed;inset:0;z-index:12000;display:none;align-items:center;justify-content:center;background:rgba(22,35,58,.62);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);padding:20px;}
+  .bh-card{background:#fff;max-width:480px;width:100%;border-radius:16px;border:1px solid var(--line,#DCE2E0);box-shadow:0 24px 70px rgba(22,35,58,.35);padding:34px 38px;font-family:var(--font-body,'IBM Plex Sans',Arial,sans-serif);color:var(--ink,#16233A);text-align:left;}
+  .bh-kicker{font-family:var(--font-mono,monospace);font-size:11px;font-weight:700;letter-spacing:.12em;color:#C29B57;margin-bottom:10px;}
+  .bh-title{font-family:var(--font-display,'Space Grotesk',sans-serif);font-size:22px;font-weight:700;margin:0 0 12px;}
+  .bh-body{font-size:14px;line-height:1.65;color:var(--slate,#5B6B73);margin:0 0 20px;}
+  .bh-actions{display:none;flex-direction:column;gap:10px;margin-bottom:16px;}
+  .bh-btn-dark{background:#171717;color:#fff;border:none;border-radius:9px;padding:12px 18px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .bh-btn-dark:hover{background:#2B2A27;}
+  .bh-btn-ghost{background:#fff;color:var(--ink,#16233A);border:1px solid #DCC393;border-radius:9px;padding:11px 18px;font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .bh-btn-ghost:hover{background:#FCF6EA;}
+  .bh-btn-ghost:disabled{opacity:.6;cursor:default;}
+  .bh-usernote{font-size:13.5px;color:var(--slate,#5B6B73);line-height:1.6;margin:0 0 4px;}
+  .bh-foot{font-size:12px;color:var(--slate-soft,#9AA7AC);border-top:1px solid var(--line,#DCE2E0);padding-top:14px;}
+  .bh-foot a{color:#C29B57;text-decoration:none;font-weight:600;}
+  #billing-grace-banner{position:fixed;top:0;left:0;right:0;z-index:11000;display:none;align-items:center;justify-content:center;gap:14px;background:#171717;color:#F3E9D8;padding:10px 46px 10px 18px;font-family:var(--font-body,'IBM Plex Sans',Arial,sans-serif);font-size:13px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.25);}
+  #billing-grace-banner a{color:#DCC393;font-weight:700;text-decoration:none;white-space:nowrap;}
+  #billing-grace-banner .bgb-x{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:#9C978A;font-size:16px;cursor:pointer;line-height:1;}
+</style>
+
+<div id="billing-hold-overlay" role="alertdialog" aria-modal="true" aria-labelledby="bh-title-el">
+  <div class="bh-card">
+    <div class="bh-kicker">ACCESS ON HOLD</div>
+    <h2 class="bh-title" id="bh-title-el">Access on hold due to no payment</h2>
+    <p class="bh-body">Add or edit your payment method, or submit payment promptly, to be granted access. Nothing has been deleted &mdash; your invoices, notes, documents and history are safe, and access is restored for your whole team the moment a payment goes through.</p>
+    <div class="bh-actions" id="bh-actions-admin">
+      <button class="bh-btn-dark" onclick="window.location.href='/account/subscription'">Add or edit payment method</button>
+      <button class="bh-btn-ghost" onclick="billingHoldRecheck(this)">I've submitted payment &mdash; re-check access</button>
+    </div>
+    <div class="bh-actions" id="bh-actions-user">
+      <p class="bh-usernote">Ask your company admin to add or edit the payment method. Access returns automatically for everyone once payment is received.</p>
+      <button class="bh-btn-ghost" onclick="billingHoldRecheck(this)">Re-check access</button>
+    </div>
+    <div class="bh-foot">Questions? <a href="mailto:support@claims-collection.net">support@claims-collection.net</a></div>
+  </div>
+</div>
+
+<div id="billing-grace-banner">
+  <span id="bgb-text"></span>
+  <a href="/account/subscription" id="bgb-link" style="display:none;">Reactivate subscription</a>
+  <button class="bgb-x" onclick="document.getElementById('billing-grace-banner').style.display='none'" aria-label="Dismiss">&#215;</button>
+</div>
+
+<script>
+  (function(){
+    var bhRole = 'employee';
+
+    window.showBillingHold = function(role){
+      bhRole = role || bhRole;
+      var ov = document.getElementById('billing-hold-overlay');
+      if(!ov) return;
+      document.getElementById('bh-actions-admin').style.display = (bhRole === 'admin') ? 'flex' : 'none';
+      document.getElementById('bh-actions-user').style.display  = (bhRole === 'admin') ? 'none' : 'flex';
+      ov.style.display = 'flex';
+    };
+
+    window.billingHoldRecheck = function(btn){
+      if(btn){ btn.disabled = true; btn.textContent = 'Checking...'; }
+      fetch('/api/me', { credentials: 'same-origin', cache: 'no-store' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d && d.ok && (!d.billing || d.billing.state !== 'locked')){
+            window.location.reload();
+          } else if(btn){
+            btn.disabled = false;
+            btn.textContent = 'Still on hold \u2014 try again in a moment';
+          }
+        })
+        .catch(function(){ if(btn){ btn.disabled = false; btn.textContent = 'Re-check access'; } });
+    };
+
+    // Preview helper: __previewBillingHold('admin') / ('employee')
+    window.__previewBillingHold = function(role){ window.showBillingHold(role || 'admin'); };
+
+    function showGraceBanner(billing, isAdmin){
+      var b = document.getElementById('billing-grace-banner');
+      if(!b) return;
+      var until = billing.accessUntil ? new Date(billing.accessUntil) : null;
+      var untilStr = (until && !isNaN(until.getTime()))
+        ? until.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+        : 'soon';
+      document.getElementById('bgb-text').textContent =
+        'Your subscription is cancelled. Your team keeps access until ' + untilStr + ', then access goes on hold.';
+      document.getElementById('bgb-link').style.display = isAdmin ? 'inline' : 'none';
+      b.style.display = 'flex';
+    }
+
+    // Raise the hold screen the moment any API reports a billing lock (402).
+    var origFetch = window.fetch;
+    window.fetch = function(input, init){
+      return origFetch.apply(this, arguments).then(function(res){
+        try{
+          var u = (typeof input === 'string') ? input : ((input && input.url) || '');
+          if(res && res.status === 402 && u.indexOf('/api/') !== -1){
+            res.clone().json().then(function(d){
+              if(d && d.locked){ window.showBillingHold(d.role || 'employee'); }
+            }).catch(function(){});
+          }
+        }catch(e){}
+        return res;
+      });
+    };
+
+    // On load: ask /api/me where billing stands.
+    function boot(){
+      fetch('/api/me', { credentials: 'same-origin' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(!d || !d.ok || !d.billing) return;
+          bhRole = d.role || 'employee';
+          if(d.billing.state === 'locked'){ window.showBillingHold(bhRole); }
+          else if(d.billing.state === 'grace'){ showGraceBanner(d.billing, bhRole === 'admin'); }
+        })
+        .catch(function(){});
+    }
+    if(document.readyState !== 'loading'){ boot(); } else { document.addEventListener('DOMContentLoaded', boot); }
+  })();
+</script>
