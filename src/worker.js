@@ -5097,6 +5097,32 @@ headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Cont
 });
 }
 
+// Server-side proxy for AI drafting: the browser never holds an API key.
+// Uses ANTHROPIC_API_KEY from the worker environment; degrades cleanly when
+// it is not configured (clients fall back to their built-in templates).
+async function handleAiDraft(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false, error: 'Not signed in' }, 401);
+if (!env.ANTHROPIC_API_KEY) return json({ ok: false, error: 'AI drafting is not configured yet.', code: 'not_configured' }, 503);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const prompt = String(body.prompt || '').slice(0, 8000);
+if (!prompt) return json({ ok: false, error: 'Missing prompt' }, 400);
+const maxTokens = Math.min(Math.max(parseInt(body.maxTokens, 10) || 1000, 100), 1500);
+try {
+const res = await fetch('https://api.anthropic.com/v1/messages', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] })
+});
+const data = await res.json();
+if (!res.ok) return json({ ok: false, error: (data && data.error && data.error.message) || 'AI request failed' }, 502);
+const text = (data.content || []).map(function (b) { return b.type === 'text' ? b.text : ''; }).filter(Boolean).join('\n').trim();
+if (!text) return json({ ok: false, error: 'No draft returned' }, 502);
+return json({ ok: true, text: text });
+} catch (e) { return json({ ok: false, error: 'AI request failed' }, 502); }
+}
+
 async function handleEscalateNotify(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) {
@@ -5222,8 +5248,11 @@ async function handleDashboard(request, env) {
   const safeName = String(user.company_name || '').replace(/"/g, '&quot;');
   html = html
     .replace(/data-company-name="[^"]*"/, 'data-company-name="' + safeName + '"')
-    .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"')
-    .replace('</body>', MY_ACCOUNT_LINK_SCRIPT + dashboardRoleScript(user.role) + '</body>');
+    .replace(/data-tenant-slug="[^"]*"/, 'data-tenant-slug="' + user.tenant_slug + '"');
+  const dashInject = MY_ACCOUNT_LINK_SCRIPT + dashboardRoleScript(user.role);
+  // dashboard.html carries no literal </body> tag, so append when absent -
+  // otherwise the My Account link and role script silently never load.
+  html = html.indexOf('</body>') !== -1 ? html.replace('</body>', dashInject + '</body>') : html + dashInject;
   return injectHelpWidget(new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
 
@@ -5333,6 +5362,9 @@ return handleLogout(request, env);
 }
 if (url.pathname === '/api/escalate-notify' && request.method === 'POST') {
 return handleEscalateNotify(request, env);
+}
+if (url.pathname === '/api/ai-draft' && request.method === 'POST') {
+return handleAiDraft(request, env);
 }
 if (url.pathname === '/api/cadence-settings' && request.method === 'GET') {
 return handleCadenceSettingsGet(request, env);
