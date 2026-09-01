@@ -2684,14 +2684,20 @@ Details:
 
 Write ONE short sentence (under 25 words) summarizing what this contact would plausibly say in reply \u2014 e.g. confirming review status, requesting documents, or committing to a payment timeframe. Return only that one sentence, no greeting, no email formatting, no quotes.`;
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 200, messages: [{ role: "user", content: prompt }] })
-      });
-      const data = await response.json();
-      const text = (data.content || []).map(b => b.type === "text" ? b.text : "").filter(Boolean).join("\n").trim();
-      if(!text) throw new Error("No response text returned.");
+      let text = '';
+      try {
+        const response = await fetch("/api/ai-draft", {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: prompt, maxTokens: 200 })
+        });
+        const data = await response.json();
+        if (data && data.ok && data.text) text = String(data.text).trim();
+      } catch (aiErr) {}
+      if(!text){
+        const bank = RESPONSE_BANK[inv.payer] || [];
+        text = bank[Math.floor(Math.random()*bank.length)] || 'Received your follow-up \u2014 reviewing the invoice now and will come back to you shortly.';
+      }
 
       const now = new Date();
       inv.lastContact = isoDate(now);
@@ -3475,15 +3481,33 @@ Do not invent facts beyond what's given.`;
 
   async function fetchDraftText(inv, draftType, docs, recipient){
     const prompt = buildPrompt(inv, draftType, docs, recipient);
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
+    const response = await fetch("/api/ai-draft", {
+      method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+      body: JSON.stringify({ prompt: prompt, maxTokens: 1000 })
     });
     const data = await response.json();
-    const text = (data.content || []).map(b => b.type === "text" ? b.text : "").filter(Boolean).join("\n").trim();
-    if(!text) throw new Error("No draft returned.");
-    return text;
+    if(!data || !data.ok || !data.text) throw new Error((data && data.error) || "No draft returned.");
+    return data.text;
+  }
+
+  // Deterministic fallback so the drawer always produces a usable draft,
+  // even in the demo or before AI drafting is configured on the server.
+  function templateDraftText(inv, draftType, recipient){
+    const money = '$' + inv.amount.toLocaleString(undefined,{minimumFractionDigits:2});
+    const who = recipient === 'adjuster' ? 'there' : ((String(inv.contact || '').trim().split(' ')[0]) || 'there');
+    const claimLine = inv.claimNumber ? `\nClaim number: ${inv.claimNumber}` : '';
+    const opening = draftType === 'noil'
+      ? 'This is a formal notice of our intent to file a lien for unpaid services if the balance below remains unresolved.'
+      : draftType === 'demand'
+        ? 'Despite prior follow-ups, the invoice below remains unpaid. Please treat this letter as a formal demand for payment.'
+        : (inv.followups > 0
+          ? "Following up again on the outstanding invoice below \u2014 we haven't yet received payment or a response."
+          : `I wanted to follow up on the invoice below for the work recently completed at ${inv.name}.`);
+    const tone = recipient === 'adjuster'
+      ? `This invoice is ${inv.days} day${inv.days===1?'':'s'} outstanding since first contact.${claimLine}\nWork performed per the estimate on file: ${inv.scopeOfWork || 'see the estimate on file'}.`
+      : "If payment has already been sent, please reply with the details and we'll reconcile right away. Otherwise, we're happy to help with anything you need to get this resolved.";
+    return `Hello ${who},\n\n${opening}\n\nInvoice: ${inv.name}\nBalance due: ${money}\n\n${tone}\n\nThank you,\nAccounts Receivable`;
   }
 
   function recordSend(inv, draftType, draftText, source, recipient, subject){
@@ -3632,7 +3656,8 @@ Do not invent facts beyond what's given.`;
       const text = await fetchDraftText(currentInvoice, currentDraftType, selectedDocs(), currentRecipient);
       draftBox.value = text;
     }catch(e){
-      errBox.textContent = "Couldn't generate a draft right now. You can write one manually below.";
+      draftBox.value = templateDraftText(currentInvoice, currentDraftType, currentRecipient);
+      errBox.textContent = "AI drafting isn't available right now, so a standard " + (currentDraftType === 'noil' ? 'NOIL' : currentDraftType === 'demand' ? 'demand letter' : 'follow-up') + " template was loaded \u2014 review and edit it before sending.";
       errBox.style.display = 'block';
     }finally{
       statusRow.style.display = 'none';
