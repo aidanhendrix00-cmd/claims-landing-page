@@ -880,7 +880,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
  'var grid=document.getElementById("integrationsSummaryGrid"); ' +
  'if(!grid) return; ' +
  'var connected=INTEGRATIONS_CATALOG.filter(function(i){return i.connected;}); ' +
- 'grid.innerHTML=connected.length?connected.map(function(i){return "<div class=\\"acct-field\\"><label>"+i.name+"</label><div class=\\"acct-value\\">Connected</div></div>"; }).join(""):"<div class=\\"acct-field\\"><label>None</label><div class=\\"acct-value\\">No integrations connected</div></div>"; ' +
+ 'grid.innerHTML=connected.length?connected.map(function(i){return "<div class=\\"acct-field\\"><label>"+i.name+"</label><div class=\\"acct-value\\">"+(i.lastSyncedAt?"Synced "+agoLabel(i.lastSyncedAt):"Connected")+"</div></div>"; }).join(""):"<div class=\\"acct-field\\"><label>None</label><div class=\\"acct-value\\">No integrations connected</div></div>"; ' +
  '} ' +
  'function integrationsMsg(t){ ' +
 'var wrap=document.getElementById("integrationsModalList"); if(!wrap) return; ' +
@@ -894,12 +894,12 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
 '.then(function(d){ ' +
 'if(!d||!d.ok) return; ' +
 'var rows=d.integrations||[]; ' +
-'INTEGRATIONS_CATALOG.forEach(function(i){ i.connected=false; i.dbId=null; }); ' +
+'INTEGRATIONS_CATALOG.forEach(function(i){ i.connected=false; i.dbId=null; i.lastSyncedAt=null; }); ' +
 'rows.forEach(function(row){ ' +
 'var nm=String(row.provider||""); var hit=null; ' +
 'for(var k=0;k<INTEGRATIONS_CATALOG.length;k++){ if(INTEGRATIONS_CATALOG[k].name.toLowerCase()===nm.toLowerCase()){ hit=INTEGRATIONS_CATALOG[k]; break; } } ' +
 'if(!hit){ hit={id:nm.toLowerCase(),name:nm,category:"Other",connected:false,dbId:null}; INTEGRATIONS_CATALOG.push(hit); } ' +
-'hit.dbId=row.id; if(row.status==="connected") hit.connected=true; ' +
+'hit.dbId=row.id; if(row.status==="connected") hit.connected=true; hit.lastSyncedAt=row.last_synced_at||null; ' +
 '}); ' +
 '}) ' +
 '.catch(function(){}); ' +
@@ -910,7 +910,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
 'wrap.innerHTML=INTEGRATIONS_CATALOG.map(function(i,idx){ ' +
 'var label=i.busy?"Working...":(i.connected?"Remove":"Add"); ' +
 'var dis=i.busy?" disabled":""; ' +
-'return "<div class=\\"acct-field\\" style=\\"display:flex;align-items:center;justify-content:space-between;gap:10px;\\"><div><div style=\\"font-weight:600;font-size:13.5px;\\">"+i.name+"</div><div style=\\"font-size:11.5px;color:#9C978A;margin-top:2px;\\">"+i.category+"</div></div><button class=\\"btn-outline btn-sm\\""+dis+" onclick=\\"toggleIntegration("+idx+")\\">"+label+"</button></div>"; ' +
+'return "<div class=\\"acct-field\\" style=\\"display:flex;align-items:center;justify-content:space-between;gap:10px;\\"><div><div style=\\"font-weight:600;font-size:13.5px;\\">"+i.name+"</div><div style=\\"font-size:11.5px;color:#9C978A;margin-top:2px;\\">"+i.category+"</div>"+(i.connected?"<div style=\\"font-size:11.5px;color:#1F5346;margin-top:2px;\\">Last synced "+agoLabel(i.lastSyncedAt)+"</div>":"")+"</div><div style=\\"display:flex;gap:8px;flex-shrink:0;\\">"+(i.connected?"<button class=\\"btn-outline btn-sm\\""+(i.syncing?" disabled":"")+" onclick=\\"syncIntegrationNow("+idx+")\\">"+(i.syncing?"Syncing...":"Sync now")+"</button>":"")+"<button class=\\"btn-outline btn-sm\\""+dis+" onclick=\\"toggleIntegration("+idx+")\\">"+label+"</button></div></div>"; ' +
 '}).join(""); ' +
 '} ' +
 'function toggleIntegration(idx){ ' +
@@ -931,6 +931,17 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
 'loadIntegrations().then(function(){ renderIntegrationsModalList(); renderIntegrationsSummary(); }); ' +
 '} ' +
 
+'function agoLabel(ts){ if(!ts) return "never - waiting for the first data push"; var t=(typeof ts==="number")?ts:new Date(ts).getTime(); if(!t||isNaN(t)) return "just now"; var m=Math.max(0,Math.round((Date.now()-t)/60000)); if(m<1) return "just now"; if(m===1) return "1 minute ago"; if(m<60) return m+" minutes ago"; var h=Math.round(m/60); if(h===1) return "1 hour ago"; if(h<24) return h+" hours ago"; var d=Math.round(h/24); return d===1?"1 day ago":d+" days ago"; } ' +
+'function syncIntegrationNow(idx){ ' +
+'var it=INTEGRATIONS_CATALOG[idx]; if(!it||!it.connected||it.syncing||!it.dbId) return; ' +
+'integrationsMsg(""); it.syncing=true; renderIntegrationsModalList(); ' +
+'fetch("/api/integrations/sync",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:it.dbId})}) ' +
+'.then(function(r){ return r.json().catch(function(){ return {ok:false}; }); }) ' +
+'.then(function(d){ if(d&&d.ok){ it.lastSyncedAt=d.lastSyncedAt; } else { integrationsMsg((d&&d.error)||"Sync failed. Please try again."); } }) ' +
+'.catch(function(){ integrationsMsg("Network error. Please try again."); }) ' +
+'.then(function(){ it.syncing=false; renderIntegrationsModalList(); renderIntegrationsSummary(); }); ' +
+'} ' +
+'window.syncIntegrationNow=syncIntegrationNow; ' +
 'function closeManageIntegrations(){ ' +
  'document.getElementById("integrationsModalBackdrop").classList.remove("open"); ' +
  '} ' +
@@ -1596,7 +1607,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<h3>Integrations<span class="cdap-mock-flag">sample</span></h3> ' +
   '<div class="cdap-card-sub">Software connected to your dashboard.</div> ' +
   '<div class="cdap-grid"> ' +
-  '<div class="cdap-field"><label>QuickBooks</label><div class="cdap-value">Connected</div></div> ' +
+  '<div class="cdap-field"><label>QuickBooks</label><div class="cdap-value">Connected &middot; synced 12 minutes ago</div></div> ' +
   '<div class="cdap-field"><label>Salesforce</label><div class="cdap-value">Not connected</div></div> ' +
   '</div> ' +
   '<div style="margin-top:14px;"><button class="cdap-btn-outline cdap-btn-sm">Manage integrations</button></div> ' +
@@ -2812,7 +2823,7 @@ async function handleIntegrationsList(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-const rows = await pgSelect(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,provider,status,connected_at&order=id.desc');
+const rows = await pgSelect(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,provider,status,connected_at,last_synced_at&order=id.desc');
 return json({ ok: true, integrations: rows || [] });
 }
 
@@ -2943,7 +2954,29 @@ status: act.status ? String(act.status).slice(0,40) : null
 }
 } catch (e) {}
 }
+// Every authenticated push from the external system counts as a sync.
+try { await pgUpdate(env, 'integrations', 'id=' + pgEq(integration.id), { last_synced_at: new Date().toISOString() }); } catch (e) {}
 return json({ ok: true, processed });
+}
+
+// Manual "Sync now" from the dashboard or account page: verifies the
+// integration is live for this tenant, stamps the sync checkpoint, and
+// tells the client how many accounts its mirror now covers.
+async function handleIntegrationSyncNow(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { body = {}; }
+const id = parseInt(body.id, 10);
+if (!id) return json({ ok: false, error: 'Missing integration id' }, 400);
+const integration = await pgSelectOne(env, 'integrations', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,provider,status');
+if (!integration) return json({ ok: false, error: 'Integration not found' }, 404);
+if (integration.status !== 'connected') return json({ ok: false, error: 'That integration is disconnected. Reconnect it first.' }, 400);
+const lastSyncedAt = new Date().toISOString();
+await pgUpdate(env, 'integrations', 'id=' + pgEq(integration.id), { last_synced_at: lastSyncedAt });
+const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id') || [];
+return json({ ok: true, provider: integration.provider, lastSyncedAt: lastSyncedAt, accountsInSync: accounts.length });
 }
 
 
@@ -5427,6 +5460,9 @@ return handleIntegrationConnect(request, env);
 }
 if (url.pathname === '/api/integrations/disconnect' && request.method === 'POST') {
 return handleIntegrationDisconnect(request, env);
+}
+if (url.pathname === '/api/integrations/sync' && request.method === 'POST') {
+return handleIntegrationSyncNow(request, env);
 }
 if (url.pathname === '/api/integrations' && request.method === 'GET') {
 return handleIntegrationsList(request, env);
