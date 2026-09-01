@@ -3776,6 +3776,7 @@ Do not invent facts beyond what's given.`;
     showToast(`Testing connection to ${integ.name}\u2026`);
     setTimeout(() => {
       integ.status = 'connected';
+      if(!integ.lastSyncedAt) integ.lastSyncedAt = Date.now();
       saveState(); renderAll();
       showToast(`${integ.name} connected successfully (simulated)`);
     }, 700);
@@ -3790,7 +3791,9 @@ Do not invent facts beyond what's given.`;
   }
 
   function fmtTimeAgo(ts){
-const diffMs = Date.now() - ts;
+const t = (typeof ts === 'number') ? ts : new Date(ts).getTime();
+if(!t || isNaN(t)) return 'just now';
+const diffMs = Date.now() - t;
 const mins = Math.max(0, Math.round(diffMs / 60000));
 if(mins < 1) return 'just now';
 if(mins === 1) return '1 minute ago';
@@ -3846,6 +3849,21 @@ renderRealIntegrations();
 } catch (err) {}
 }
 
+async function syncRealIntegration(id){
+showToast('Syncing\u2026');
+try {
+const res = await fetch('/api/integrations/sync', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) });
+const d = await res.json();
+if (d && d.ok) {
+showToast(`${d.provider || 'Integration'} synced \u2014 ${d.accountsInSync != null ? d.accountsInSync + ' accounts in sync' : 'data is up to date'}.`);
+loadRealIntegrations();
+loadRealAccounts();
+} else {
+showToast((d && d.error) || 'Sync failed. Please try again.');
+}
+} catch (e) { showToast('Sync failed. Please try again.'); }
+}
+
 function renderRealIntegrations(){
 const wrap = document.getElementById('real-integrations');
 if (!wrap) return;
@@ -3856,9 +3874,10 @@ wrap.innerHTML = list.map(integ => `
 <div>
 <div class="name"><span class="${integ.status === 'connected' ? 'dot-live' : 'dot-pending'}"></span> ${integ.provider} ${integ.status === 'connected' ? '<span class="badge">LIVE</span>' : '<span class="badge warn">DISCONNECTED</span>'}</div>
 <div class="sub">${integ.status === 'connected' ? 'Connected ' + fmtTimeAgo(integ.connected_at) : 'Disconnected'}</div>
+${integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Last synced ${integ.last_synced_at ? fmtTimeAgo(integ.last_synced_at) : 'never \u2014 waiting for the first data push'}</div>` : ''}
 </div>
 <div class="actions-col">
-${integ.status === 'connected' ? `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Regenerate Key</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>` : `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Reconnect</button>`}
+${integ.status === 'connected' ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Regenerate Key</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>` : `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Reconnect</button>`}
 </div>
 </div>
 `).join('');
