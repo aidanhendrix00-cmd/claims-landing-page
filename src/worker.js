@@ -2953,7 +2953,7 @@ const html = '<div style="font-family:sans-serif;max-width:540px;">' +
 (note ? '<p>Note: ' + escapeHtml(note) + '</p>' : '') +
 '<p style="font-size:12px;color:#666;">Set it up at ' + SITE_URL + '/admin/onboarding</p>' +
 '</div>';
-await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Integration request: ' + provider + (user.company_name ? (' - ' + user.company_name) : ''), html: html, kind: 'integration_request', tenantId: user.tenant_id, userId: user.id, replyTo: user.email });
+await sendEmail(env, { to: 'operations@claims-collection.net', subject: 'Integration request: ' + provider + (user.company_name ? (' - ' + user.company_name) : ''), html: html, kind: 'integration_request', tenantId: user.tenant_id, userId: user.id, replyTo: user.email });
 return json({ ok: true });
 }
 
