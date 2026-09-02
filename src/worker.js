@@ -3005,6 +3005,7 @@ follow_up_count: parseInt(raw.followUpCount,10) || 0,
 note: raw.note ? String(raw.note).slice(0,500) : null,
 updated_at: nowIso
 };
+if (raw.pa !== undefined) commonFields.pa = !!raw.pa;
 let acctId;
 if (existing) {
 let paidAt;
@@ -3252,6 +3253,7 @@ return json({ ok: true });
 const INVOICE_EDITABLE = {
 noilSent: 'noil_sent_at',
 lienFiled: 'lien_filed',
+pa: 'pa',
 waSent: 'wa_sent',
 cosSent: 'cos_sent',
 docsComplete: 'docs_complete',
@@ -3293,7 +3295,7 @@ if (column === 'noil_sent_at') { patch[column] = value ? (normalizeDateOnly(body
 if (column === 'wa_signed_at' || column === 'cos_signed_at' || column === 'projected_payment_date' || column === 'last_contact') { patch[column] = normalizeDateOnly(value); return; }
 if (column === 'follow_up_count') { patch[column] = parseInt(value, 10) || 0; return; }
 if (column === 'cadence_sent') { patch[column] = (value && typeof value === 'object') ? value : {}; return; }
-if (column === 'lien_filed' || column === 'wa_sent' || column === 'cos_sent' || column === 'docs_complete' || column === 'escalated') { patch[column] = !!value; return; }
+if (column === 'lien_filed' || column === 'wa_sent' || column === 'cos_sent' || column === 'docs_complete' || column === 'escalated' || column === 'pa') { patch[column] = !!value; return; }
 patch[column] = (value === '' ? null : value);
 });
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
@@ -4281,6 +4283,7 @@ try { days = Math.max(0, Math.floor((Date.now() - new Date(a.invoiced_at).getTim
 return {
 id: a.id,
 invoiceNumber: a.invoice_number || ('INV-' + (10000 + a.id)),
+pa: !!a.pa,
 externalId: a.external_id,
 name: a.customer_name,
 meta: a.meta,
