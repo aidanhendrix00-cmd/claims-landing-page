@@ -1512,8 +1512,8 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
 
   async function init(){
     state = await loadState();
-  await loadRealAccounts();
   await loadCurrentUser();
+  await loadRealAccounts();
 await loadRealIntegrations();
     var searchFieldEl=document.getElementById('search');if(searchFieldEl){searchFieldEl.value='';}
     renderAll();
@@ -1528,6 +1528,8 @@ await loadRealIntegrations();
     if (!res.ok) return;
     const data = await res.json();
     if (!data.ok) return;
+    window.__me = data;
+    applyTenantConfig(data);
     state.currentUser = { email: data.email, role: data.role, office: data.office || null };
     document.querySelectorAll('[data-admin-only]').forEach(function(el){
       el.style.display = (state.currentUser.role === 'admin') ? '' : 'none';
@@ -1551,7 +1553,7 @@ async function renderTeam() {
       wrap.innerHTML = '<p style="color:#5B6B73;font-size:13px;">No team members yet.</p>';
       return;
     }
-    const officeLabel = function(o){ return ({ arizona:'Arizona', dallas:'Dallas', houston:'Houston', hillcountry:'Hill Country' })[o] || o || String.fromCharCode(8212); };
+    const officeLabel = function(o){ var om = inviteOfficeMap(); return om[o] || ({ arizona:'Arizona', dallas:'Dallas', houston:'Houston', hillcountry:'Hill Country' })[o] || o || String.fromCharCode(8212); };
     wrap.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Name</th>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Email</th>' +
@@ -1583,7 +1585,7 @@ function openInviteTeamMember() {
   if (emailEl) emailEl.value = '';
   if (nameEl) nameEl.value = '';
   if (roleEl) roleEl.value = 'employee';
-  if (officeEl) officeEl.value = 'arizona';
+  if (officeEl) officeEl.value = Object.keys(inviteOfficeMap())[0] || 'arizona';
   const overlay = document.getElementById('overlay-invite');
   if (overlay) overlay.classList.add('open');
 }
@@ -1603,7 +1605,7 @@ async function submitInviteTeamMember() {
   }
   const fullName = (document.getElementById('invite-name') || {}).value || '';
   const role = (document.getElementById('invite-role') || {}).value || 'employee';
-  const office = (document.getElementById('invite-office') || {}).value || 'arizona';
+  const office = (document.getElementById('invite-office') || {}).value || Object.keys(inviteOfficeMap())[0] || 'arizona';
   try {
     const res = await fetch('/api/team/invite', {
       method: 'POST',
@@ -1669,6 +1671,67 @@ function postAccountNote(inv, text){
   }).then(function(r){ return r.json(); }).catch(function(){ return null; });
 }
 
+let TENANT_CONFIG_APPLIED = false;
+
+function inviteOfficeMap(){
+  return (window.__me && window.__me.ok && window.__me.offices) || { arizona: 'Arizona', dallas: 'Dallas', houston: 'Houston', hillcountry: 'Hill Country' };
+}
+
+function rebuildOfficeUI(){
+  var sel = document.getElementById('office-filter');
+  if (sel){
+    var cur = sel.value;
+    sel.innerHTML = '<option value="all">All Offices</option>' + OFFICE_LOCATIONS.map(function(k){ return '<option value="' + k + '">' + OFFICE_LABELS[k] + '</option>'; }).join('');
+    var ok = false;
+    for (var i = 0; i < sel.options.length; i++){ if (sel.options[i].value === cur){ ok = true; break; } }
+    sel.value = ok ? cur : 'all';
+  }
+  var chips = document.getElementById('sheet-office-chips');
+  if (chips){
+    chips.innerHTML = '<div class="chip" data-office="all">All Offices</div>' + OFFICE_LOCATIONS.map(function(k){ return '<div class="chip" data-office="' + k + '">' + OFFICE_LABELS[k] + '</div>'; }).join('');
+  }
+  var dsel = document.getElementById('dept-filter');
+  if (dsel){
+    for (var di = 0; di < dsel.options.length; di++){ var ov = dsel.options[di].value; if (DEPARTMENT_LABELS[ov]) dsel.options[di].textContent = DEPARTMENT_LABELS[ov]; }
+  }
+  var invSel = document.getElementById('invite-office');
+  if (invSel){
+    var im = inviteOfficeMap();
+    invSel.innerHTML = Object.keys(im).map(function(k){ return '<option value="' + k + '">' + im[k] + '</option>'; }).join('');
+  }
+}
+
+// Applies the company's own office locations and department names (from
+// /api/me) to every vocabulary the dashboard renders from. The demo and the
+// base workspace keep the built-in defaults.
+function applyTenantConfig(me){
+  try {
+    if (!me || !me.ok) return;
+    if (me.departments && typeof me.departments === 'object'){
+      Object.keys(me.departments).forEach(function(k){ if (DEPARTMENT_LABELS[k] && me.departments[k]) DEPARTMENT_LABELS[k] = String(me.departments[k]); });
+    }
+    if (me.offices && typeof me.offices === 'object'){
+      var keys = Object.keys(me.offices).filter(function(k){ return k && me.offices[k]; });
+      var isDefault = keys.length === 4 && ['arizona','dallas','houston','hillcountry'].every(function(k){ return keys.indexOf(k) !== -1; });
+      if (keys.length && !isDefault){
+        Object.keys(OFFICE_LABELS).forEach(function(k){ delete OFFICE_LABELS[k]; });
+        keys.forEach(function(k){ OFFICE_LABELS[k] = String(me.offices[k]); });
+        OFFICE_LOCATIONS.length = 0;
+        keys.forEach(function(k){ OFFICE_LOCATIONS.push(k); });
+        TENANT_CONFIG_APPLIED = true;
+        if (typeof state !== 'undefined' && state && state.officeFilter && state.officeFilter !== 'all' && !OFFICE_LABELS[state.officeFilter]) state.officeFilter = 'all';
+      }
+    }
+    rebuildOfficeUI();
+  } catch (e) { console.error('applyTenantConfig failed', e); }
+}
+
+window.__previewTenantConfig = function(cfg){
+  var mock = { ok: true, offices: (cfg && cfg.offices) || { headquarters: 'Headquarters', north_branch: 'North Branch', coastal: 'Coastal' }, departments: (cfg && cfg.departments) || { mitigation: 'Emergency Services' } };
+  applyTenantConfig(mock);
+  if (typeof renderAll === 'function') renderAll();
+};
+
 async function loadRealAccounts(){
     try {
       const res = await fetch('/api/accounts', { credentials: 'include' });
@@ -1685,8 +1748,8 @@ async function loadRealAccounts(){
         // entire queue when a label lookup misses.
         const normKey = function(v){ return String(v == null ? '' : v).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); };
         let officeKey = normKey(a.officeLocation);
-        if (officeKey === 'hillcountry') officeKey = 'hill_country';
-        if (!OFFICE_LABELS[officeKey]) officeKey = 'dallas';
+        if (!TENANT_CONFIG_APPLIED && officeKey === 'hillcountry') officeKey = 'hill_country';
+        if (!OFFICE_LABELS[officeKey]) officeKey = OFFICE_LOCATIONS[0] || 'dallas';
         let deptKey = normKey(a.department);
         if (!DEPARTMENT_LABELS[deptKey]) deptKey = 'mitigation';
         let catKey = normKey(a.category);
@@ -2406,7 +2469,7 @@ saveState(); renderAll();
     document.getElementById('mtd-kpis').innerHTML = `
       <div class="kpi"><div class="label">Invoiced &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${records.length} invoice${records.length===1?'':'s'} dated this month</div></div>
       <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">NetSuite + Salesforce</div><div class="sub">Synced automatically, no manual entry</div></div>
-      <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">Arizona, Dallas, Houston, Hill Country</div></div>
+      <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${OFFICE_LOCATIONS.map(o => OFFICE_LABELS[o]).join(', ')}</div></div>
     `;
     renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', records);
     document.getElementById('mtd-drill-title').textContent = 'Click a bar for a breakdown';
@@ -2423,7 +2486,7 @@ saveState(); renderAll();
     document.getElementById('collected-kpis').innerHTML = `
       <div class="kpi"><div class="label">Collected &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${payments.length} payment${payments.length===1?'':'s'} applied this month</div></div>
       <div class="kpi"><div class="label">Source</div><div class="value" style="font-size:15px;">NetSuite</div><div class="sub">Posts automatically when a payment is applied</div></div>
-      <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">Arizona, Dallas, Houston, Hill Country</div></div>
+      <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${OFFICE_LOCATIONS.map(o => OFFICE_LABELS[o]).join(', ')}</div></div>
     `;
     renderOfficeChart('collected-chart', 'collected-legend', 'collected-drilldown', 'collected-drill-title', records);
     document.getElementById('collected-drill-title').textContent = 'Click a bar for a breakdown';
@@ -3892,23 +3955,48 @@ showToast((d && d.error) || 'Sync failed. Please try again.');
 } catch (e) { showToast('Sync failed. Please try again.'); }
 }
 
+async function requestIntegration(){
+const el = document.getElementById('integ-request-input');
+const provider = el ? el.value.trim() : '';
+if (!provider){ showToast('Type the system you\u2019d like connected first.'); return; }
+try {
+const res = await fetch('/api/integrations/request', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: provider }) });
+const d = await res.json();
+if (d && d.ok) { if (el) el.value = ''; showToast('Request sent \u2014 we\u2019ll set up ' + provider + ' and let you know when it\u2019s live.'); }
+else { showToast((d && d.error) || 'Could not send that request. Please try again.'); }
+} catch (e) { showToast('Could not send that request. Please try again.'); }
+}
+
 function renderRealIntegrations(){
 const wrap = document.getElementById('real-integrations');
 if (!wrap) return;
+const concierge = !!(window.__me && window.__me.ok && window.__me.tenant && window.__me.tenant !== 'base');
 const list = state.realIntegrations || [];
-if (list.length === 0){ wrap.innerHTML = ''; return; }
+if (list.length === 0 && !concierge){ wrap.innerHTML = ''; return; }
+const requestCard = concierge ? `
+<div class="integration-card" style="border-style:dashed;">
+<div style="flex:1;">
+<div class="name">Need a system connected?</div>
+<div class="sub">The clAIms team sets up and maintains your integrations for you \u2014 tell us what your company uses and we\u2019ll wire it in.</div>
+<div style="display:flex;gap:8px;margin-top:10px;max-width:430px;">
+<input id="integ-request-input" placeholder="e.g. QuickBooks Online, NetSuite, Sage 100" style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;font-family:inherit;">
+<button class="btn-small" onclick="requestIntegration()">Request an Integration</button>
+</div>
+</div>
+</div>` : '';
 wrap.innerHTML = list.map(integ => `
 <div class="integration-card">
 <div>
 <div class="name"><span class="${integ.status === 'connected' ? 'dot-live' : 'dot-pending'}"></span> ${integ.provider} ${integ.status === 'connected' ? '<span class="badge">LIVE</span>' : '<span class="badge warn">DISCONNECTED</span>'}</div>
 <div class="sub">${integ.status === 'connected' ? 'Connected ' + fmtTimeAgo(integ.connected_at) : 'Disconnected'}</div>
 ${integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Last synced ${integ.last_synced_at ? fmtTimeAgo(integ.last_synced_at) : 'never \u2014 waiting for the first data push'}</div>` : ''}
+${concierge && integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Managed by the clAIms team \u2014 request changes below.</div>` : ''}
 </div>
 <div class="actions-col">
-${integ.status === 'connected' ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Regenerate Key</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>` : `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Reconnect</button>`}
+${integ.status === 'connected' ? (concierge ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button>` : `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Regenerate Key</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>`) : (concierge ? `<span class="sub">We\u2019ll reconnect this for you</span>` : `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Reconnect</button>`)}
 </div>
 </div>
-`).join('');
+`).join('') + requestCard;
 }
 
 async function connectRealIntegration(){
@@ -4099,6 +4187,71 @@ let toastTimer = null;
           bhRole = d.role || 'employee';
           if(d.billing.state === 'locked'){ window.showBillingHold(bhRole); }
           else if(d.billing.state === 'grace'){ showGraceBanner(d.billing, bhRole === 'admin'); }
+        })
+        .catch(function(){});
+    }
+    if(document.readyState !== 'loading'){ boot(); } else { document.addEventListener('DOMContentLoaded', boot); }
+  })();
+</script>
+
+
+<!-- ============================================================
+     WORKSPACE ONBOARDING STATUS - concierge setup progress card
+     Shown to real companies until the clAIms team marks them live.
+     ============================================================ -->
+<style>
+  #ob-card{display:none;margin:0 0 22px;background:#fff;border:1px solid var(--line,#DCE2E0);border-left:4px solid #C29B57;border-radius:12px;padding:18px 22px;font-family:var(--font-body,'IBM Plex Sans',Arial,sans-serif);}
+  #ob-card .ob-kicker{font-family:var(--font-mono,monospace);font-size:10.5px;font-weight:700;letter-spacing:.12em;color:#C29B57;margin-bottom:6px;}
+  #ob-card .ob-title{font-family:var(--font-display,'Space Grotesk',sans-serif);font-size:17px;font-weight:700;color:var(--ink,#16233A);margin:0 0 4px;}
+  #ob-card .ob-sub{font-size:12.5px;color:var(--slate,#5B6B73);line-height:1.55;margin:0 0 14px;}
+  #ob-card .ob-steps{display:flex;flex-wrap:wrap;gap:10px 26px;}
+  #ob-card .ob-step{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--slate,#5B6B73);}
+  #ob-card .ob-dot{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #D8DCDA;color:#B7BEBB;background:#fff;flex:none;}
+  #ob-card .ob-step.done .ob-dot{background:#C29B57;border-color:#C29B57;color:#16233A;}
+  #ob-card .ob-step.done{color:var(--ink,#16233A);font-weight:600;}
+  #ob-card .ob-step.now .ob-dot{border-color:#C29B57;color:#C29B57;}
+  #ob-card .ob-step.now{color:var(--ink,#16233A);}
+</style>
+<script>
+  (function(){
+    function renderObCard(d){
+      var steps = [
+        { label: 'Payment received', done: true },
+        { label: 'Offices & dashboard configured', done: !!d.officesConfigured },
+        { label: 'Accounting integration connected', done: !!d.integrationConnected },
+        { label: "You\u2019re live", done: d.integrationStatus === 'complete' }
+      ];
+      var firstOpen = -1;
+      for (var i = 0; i < steps.length; i++){ if (!steps[i].done){ firstOpen = i; break; } }
+      var card = document.getElementById('ob-card');
+      if (!card){
+        card = document.createElement('div');
+        card.id = 'ob-card';
+        var mainEl = document.querySelector('main');
+        if (mainEl) mainEl.insertBefore(card, mainEl.firstChild); else document.body.appendChild(card);
+      }
+      card.innerHTML =
+        '<div class="ob-kicker">WORKSPACE SETUP</div>' +
+        '<div class="ob-title">We\u2019re building your workspace</div>' +
+        '<div class="ob-sub">Nothing you need to do \u2014 the clAIms team is configuring your offices, dashboard and accounting integration for you. You\u2019ll get an email the moment everything is live. You can invite your team any time from the Team tab.</div>' +
+        '<div class="ob-steps">' + steps.map(function(s2, i2){
+          var cls = s2.done ? 'ob-step done' : (i2 === firstOpen ? 'ob-step now' : 'ob-step');
+          var mark = s2.done ? '\u2713' : String(i2 + 1);
+          return '<span class="' + cls + '"><span class="ob-dot">' + mark + '</span>' + s2.label + '</span>';
+        }).join('') + '</div>';
+      card.style.display = 'block';
+    }
+    window.__previewOnboarding = function(opts){
+      renderObCard(Object.assign({ officesConfigured: true, integrationConnected: false, integrationStatus: 'in_progress' }, opts || {}));
+    };
+    function boot(){
+      fetch('/api/me', { credentials: 'same-origin' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (!d || !d.ok || !d.tenant || d.tenant === 'base') return;
+          if (d.tenantStatus !== 'active') return;
+          if (!d.integrationStatus || d.integrationStatus === 'complete') return;
+          renderObCard(d);
         })
         .catch(function(){});
     }
