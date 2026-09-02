@@ -13,6 +13,54 @@ const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
 const OPERATIONS_FROM_EMAIL = 'clAIms Operations <operations@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
 const OFFICE_LABELS = { arizona: 'Arizona', dallas: 'Dallas', houston: 'Houston', hillcountry: 'Hill Country' };
+const DEFAULT_DEPARTMENT_LABELS = { mitigation: 'Mitigation', contents: 'Contents', reconstruction: 'Reconstruction' };
+const CONCIERGE_INTEGRATION_MSG = 'The clAIms team sets up and maintains integrations for you, so everything stays seamless. Use "Request an Integration" on the dashboard Integrations panel (or email support@claims-collection.net) and we will connect it promptly.';
+
+// Per-company workspace config. tenants.offices stores an ordered array of
+// [key, label] pairs (jsonb objects lose key order); tenants.departments
+// stores label renames for the three standard pipelines. Null means defaults.
+function normalizeConfigEntries(raw, maxEntries) {
+  if (!raw) return null;
+  let entries = [];
+  if (Array.isArray(raw)) {
+    for (const it of raw) {
+      if (Array.isArray(it) && it.length >= 2) entries.push([it[0], it[1]]);
+      else if (it && typeof it === 'object') entries.push([it.key, it.label]);
+    }
+  } else if (typeof raw === 'object') {
+    entries = Object.keys(raw).map(function (k) { return [k, raw[k]]; });
+  } else {
+    return null;
+  }
+  const out = {};
+  let n = 0;
+  for (const pair of entries) {
+    const key = String(pair[0] == null ? '' : pair[0]).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+    const label = String(pair[1] == null ? '' : pair[1]).trim().slice(0, 40);
+    if (!key || !label || out[key]) continue;
+    out[key] = label;
+    n++;
+    if (maxEntries && n >= maxEntries) break;
+  }
+  return n ? out : null;
+}
+function resolveOffices(raw) {
+  return normalizeConfigEntries(raw, 12) || OFFICE_LABELS;
+}
+function resolveDepartments(raw) {
+  const renames = normalizeConfigEntries(raw, 6) || {};
+  return {
+    mitigation: renames.mitigation || DEFAULT_DEPARTMENT_LABELS.mitigation,
+    contents: renames.contents || DEFAULT_DEPARTMENT_LABELS.contents,
+    reconstruction: renames.reconstruction || DEFAULT_DEPARTMENT_LABELS.reconstruction
+  };
+}
+async function tenantHasConnectedIntegration(env, tenantId) {
+  try {
+    const row = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(tenantId) + '&status=' + pgEq('connected') + '&select=id');
+    return !!row;
+  } catch (e) { return false; }
+}
 
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com','yahoo.com','outlook.com','hotmail.com','icloud.com','aol.com',
@@ -1983,7 +2031,7 @@ const token = cookies[SESSION_COOKIE];
 if (!token) return null;
 const row = await pgSelectOne(env, 'sessions',
 'token=' + pgEq(token) +
-'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id))'
+'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments))'
 );
 if (!row || !row.users) return null;
 if (new Date(row.expires_at) < new Date()) return null;
@@ -2003,6 +2051,8 @@ tenant_slug: t.slug,
 company_name: t.company_name,
 tenant_status: t.status,
 integration_status: t.integration_status,
+tenant_offices: t.offices,
+tenant_departments: t.departments,
 selected_plan: t.selected_plan,
 recommended_plan: t.recommended_plan,
 stripe_customer_id: t.stripe_customer_id,
@@ -2854,6 +2904,7 @@ async function handleIntegrationConnect(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+if (user.tenant_slug !== 'base') return json({ ok: false, code: 'concierge', error: CONCIERGE_INTEGRATION_MSG }, 403);
 let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const provider = (body.provider || 'accounting').toString().slice(0, 60);
@@ -2878,11 +2929,31 @@ async function handleIntegrationDisconnect(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+if (user.tenant_slug !== 'base') return json({ ok: false, code: 'concierge', error: CONCIERGE_INTEGRATION_MSG }, 403);
 let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
 if (!id) return json({ ok: false, error: 'Missing id' }, 400);
 await pgUpdate(env, 'integrations', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id), { status: 'disconnected' });
+return json({ ok: true });
+}
+
+async function handleIntegrationRequest(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { body = {}; }
+const provider = String((body && body.provider) || '').trim().slice(0, 80);
+const note = String((body && body.note) || '').trim().slice(0, 500);
+if (!provider) return json({ ok: false, error: 'Tell us which system you would like connected.' }, 400);
+const html = '<div style="font-family:sans-serif;max-width:540px;">' +
+'<h2>Integration request</h2>' +
+'<p><b>' + escapeHtml(user.company_name || user.tenant_slug || 'Unknown company') + '</b> asked for <b>' + escapeHtml(provider) + '</b> to be connected.</p>' +
+'<p>Requested by ' + escapeHtml(user.full_name || user.email) + ' (' + escapeHtml(user.email) + '), role ' + escapeHtml(user.role || '') + '.</p>' +
+(note ? '<p>Note: ' + escapeHtml(note) + '</p>' : '') +
+'<p style="font-size:12px;color:#666;">Set it up at ' + SITE_URL + '/admin/onboarding</p>' +
+'</div>';
+await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Integration request: ' + provider + (user.company_name ? (' - ' + user.company_name) : ''), html: html, kind: 'integration_request', tenantId: user.tenant_id, userId: user.id, replyTo: user.email });
 return json({ ok: true });
 }
 
@@ -2896,13 +2967,15 @@ if (!integration) return json({ ok: false, error: 'Invalid or inactive integrati
 let body;
 try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
 const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
-const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
+const syncTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(integration.tenant_id) + '&select=offices');
+const syncOffices = resolveOffices(syncTenant ? syncTenant.offices : null);
 let processed = 0;
 for (const raw of items) {
 if (!raw || !raw.externalId || !raw.customerName) continue;
 let status = (raw.status || 'in_ar').toString();
 if (status === 'paid_in_full') status = 'paid';
-const office = VALID_OFFICES.indexOf(raw.office) !== -1 ? raw.office : null;
+const officeSlug = String(raw.office == null ? '' : raw.office).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+const office = syncOffices[officeSlug] ? officeSlug : (syncOffices[officeSlug.replace(/_/g, '')] ? officeSlug.replace(/_/g, '') : null);
 const escalated = !!raw.escalated;
 const waSent = !!raw.waSent;
 try {
@@ -4276,10 +4349,10 @@ const email = (body.email || '').toString().trim().toLowerCase();
 const fullName = (body.fullName || '').toString().slice(0, 120);
 const role = (body.role || '').toString();
 const office = (body.office || '').toString();
-const VALID_OFFICES = ['arizona','dallas','houston','hillcountry'];
+const inviteOffices = resolveOffices(user.tenant_offices);
 if (!email || !email.includes('@')) return json({ ok: false, error: 'A valid email is required.' }, 400);
 if (role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'manager' or 'employee'." }, 400);
-if (VALID_OFFICES.indexOf(office) === -1) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
+if (!inviteOffices[office]) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
 const seatErr = await seatLimitError(env, user);
 if (seatErr) return json({ ok: false, error: seatErr, code: 'seat_limit' }, 403);
 const existing = await pgSelectOne(env, 'users', 'email=' + pgEq(email) + '&select=id');
@@ -4297,7 +4370,7 @@ const newUserId = insertedUser ? insertedUser.id : null;
 const setPasswordUrl = SITE_URL + '/reset-password?token=' + resetToken;
 const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
 '<h2 style="margin:0 0 12px;">You\'ve been added to clAIms</h2>' +
-'<p>' + (fullName || email) + ', you have been added as a ' + role + ' on the ' + OFFICE_LABELS[office] + ' team.</p>' +
+'<p>' + (fullName || email) + ', you have been added as a ' + role + ' on the ' + (inviteOffices[office] || office) + ' team.</p>' +
 '<p style="margin-top:20px;"><a href="' + setPasswordUrl + '" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Set Your Password</a></p>' +
 '<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days.</p>' +
 '</div>';
@@ -4898,6 +4971,287 @@ headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'no-stor
 });
 }
 
+const ADMIN_ONBOARDING_PAGE_HTML = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Onboarding - Internal</title>
+<style>
+body{margin:0;background:#F5F2EA;color:#171717;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px 80px;}
+h1{font-size:22px;margin:0 0 4px;}
+.sub{color:#615D53;font-size:13px;margin:0 0 22px;}
+.gate{max-width:340px;margin:80px auto;background:#fff;border:1px solid #E5E0D2;border-radius:10px;padding:22px;}
+.gate input{width:100%;padding:9px;border:1px solid #E5E0D2;border-radius:6px;font-size:14px;box-sizing:border-box;}
+.gate button{margin-top:10px;width:100%;padding:9px;border:none;border-radius:6px;background:#171717;color:#fff;font-size:14px;cursor:pointer;}
+.co{background:#fff;border:1px solid #E5E0D2;border-radius:12px;padding:18px 20px;margin-bottom:18px;}
+.co h2{font-size:16px;margin:0 0 6px;}
+.meta{font-size:12px;color:#8a8378;margin-bottom:6px;line-height:1.6;}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;margin-right:6px;}
+.ok{background:#DFEEE9;color:#1F5346;}.warn{background:#FBE9D8;color:#8A4B18;}.bad{background:#FADBD8;color:#8A1C13;}.mut{background:#EFEDE6;color:#615D53;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;}
+.box{border:1px solid #EFEDE3;border-radius:10px;padding:12px 14px;}
+.box h3{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#8a8378;margin:0 0 8px;}
+textarea{width:100%;min-height:92px;border:1px solid #E5E0D2;border-radius:6px;padding:8px;font-size:13px;font-family:inherit;box-sizing:border-box;}
+input[type=text]{width:100%;padding:8px;border:1px solid #E5E0D2;border-radius:6px;font-size:13px;box-sizing:border-box;margin-bottom:6px;}
+button.act{margin-top:8px;padding:8px 14px;border:none;border-radius:6px;background:#171717;color:#fff;font-size:12.5px;cursor:pointer;}
+button.ghost{background:#fff;color:#171717;border:1px solid #C9C2B2;}
+.note{font-size:11.5px;color:#8a8378;margin-top:6px;line-height:1.5;}
+.keyout{background:#F8F6EF;border:1px dashed #C9C2B2;border-radius:8px;padding:10px;margin-top:8px;font-size:12px;word-break:break-all;display:none;line-height:1.7;}
+.msg{font-size:12px;margin-top:6px;}
+.integ{font-size:12.5px;margin:2px 0;}
+@media (max-width:760px){.grid{grid-template-columns:1fr;}}
+</style></head><body>
+<div class="wrap">
+<div id="gate" class="gate"><div style="font-weight:600;margin-bottom:8px;">Internal onboarding</div>
+<input id="key" type="password" placeholder="Export key" autocomplete="off">
+<button id="go">View</button>
+<div id="err" style="color:#8A1C13;font-size:12px;margin-top:8px;"></div></div>
+<div id="view" style="display:none;">
+<h1>Company onboarding</h1>
+<p class="sub">Configure each paying company here, then mark it live - every admin at that company is emailed automatically. Same key as the billing page.</p>
+<div id="list"></div>
+</div></div>
+<script>
+(function(){
+var KEY = '';
+var DATA = [];
+function esc(v){ var t = String(v==null?'':v); t = t.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;'); return t.split(String.fromCharCode(34)).join('&quot;'); }
+function slugKey(sv){ return String(sv||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40); }
+function pill(t,c){ return '<span class="pill '+c+'">'+esc(t)+'</span>'; }
+function fmtDay(sv){ if(!sv) return ''; var d=new Date(sv); return isNaN(d.getTime())?'':d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }
+function statusCls(st){ return st==='complete'?'ok':(st==='in_progress'?'warn':'mut'); }
+function msgEl(id){ return document.getElementById(id); }
+function setMsg(id, text, good){ var m=msgEl(id); if(m){ m.textContent=text; m.style.color=good?'#1F5346':'#8A1C13'; } }
+function card(c,i){
+if(c.isBase){ return '<div class="co"><h2>'+esc(c.company||c.slug)+'</h2><div class="meta">Internal clAIms workspace - nothing to provision here.</div></div>'; }
+var pills = pill(c.status||'unknown',(c.status==='active')?'ok':((c.status==='past_due')?'bad':'warn')) + pill('setup: '+(c.integrationStatus||'not started'), statusCls(c.integrationStatus)) + (c.plan?pill(c.plan,'mut'):'');
+var meta = [];
+if(c.domain) meta.push(c.domain);
+if(c.size) meta.push(c.size+' people');
+if(c.place) meta.push(c.place);
+if(c.createdAt) meta.push('signed up '+fmtDay(c.createdAt));
+var admins = (c.admins||[]).map(function(a){ return a.name?(a.name+' ('+a.email+')'):a.email; }).join(', ');
+var integs = (c.integrations||[]).map(function(g){ return '<div class="integ">'+esc(g.provider)+' - '+esc(g.status)+(g.last_synced_at?(' - last synced '+fmtDay(g.last_synced_at)):'')+'</div>'; }).join('');
+if(!integs) integs = '<div class="integ" style="color:#8a8378;">None yet</div>';
+var offText = (c.officeLabels||[]).join(String.fromCharCode(10));
+var d = c.departments||{};
+return '<div class="co">' +
+'<h2>'+esc(c.company||c.slug)+'</h2>' +
+'<div class="meta">'+pills+'</div>' +
+'<div class="meta">'+esc(meta.join(' | '))+(c.uses?(' | uses: '+esc(c.uses)):'')+'</div>' +
+'<div class="meta">Admin: '+esc(admins||'none')+' | '+c.userCount+' user'+(c.userCount===1?'':'s')+'</div>' +
+'<div class="grid">' +
+'<div class="box"><h3>Office locations</h3>' +
+'<textarea id="off-'+i+'">'+esc(offText)+'</textarea>' +
+'<div class="note">One office per line, in display order. '+(c.officesCustom?'Custom config saved.':'Currently on defaults - set their real offices before go-live.')+' Renaming after invoice data exists re-keys offices, so finish this first.</div>' +
+'<button class="act" onclick="__saveOffices('+i+')">Save offices</button>' +
+'<div class="msg" id="offmsg-'+i+'"></div>' +
+'</div>' +
+'<div class="box"><h3>Department names</h3>' +
+'<input type="text" id="dm-'+i+'" value="'+esc(d.mitigation||'Mitigation')+'">' +
+'<input type="text" id="dc-'+i+'" value="'+esc(d.contents||'Contents')+'">' +
+'<input type="text" id="dr-'+i+'" value="'+esc(d.reconstruction||'Reconstruction')+'">' +
+'<div class="note">Renames the three standard pipelines (mitigation / contents / reconstruction) to whatever this company calls them.</div>' +
+'<button class="act" onclick="__saveDepts('+i+')">Save names</button>' +
+'<div class="msg" id="depmsg-'+i+'"></div>' +
+'</div>' +
+'<div class="box"><h3>Accounting integration</h3>' +
+integs +
+'<input type="text" id="prov-'+i+'" placeholder="Provider, e.g. QuickBooks Online" style="margin-top:8px;">' +
+'<button class="act" onclick="__createInteg('+i+')">Create integration key</button>' +
+'<div class="keyout" id="keyout-'+i+'"></div>' +
+'<div class="msg" id="integmsg-'+i+'"></div>' +
+'<div class="note">Creating a key marks setup as in progress. Plug the key and webhook URL into their accounting system or middleware - the key is shown once.</div>' +
+'</div>' +
+'<div class="box"><h3>Go live</h3>' +
+'<div class="note" style="margin:0 0 8px;">Marking live emails every admin at this company that their workspace is ready.</div>' +
+'<button class="act ghost" onclick="__setStatus('+i+',&quot;not_started&quot;)">Not started</button> ' +
+'<button class="act ghost" onclick="__setStatus('+i+',&quot;in_progress&quot;)">In progress</button> ' +
+'<button class="act" onclick="__setStatus('+i+',&quot;complete&quot;)">Mark live + email admin</button>' +
+'<div class="msg" id="stmsg-'+i+'"></div>' +
+'</div>' +
+'</div>' +
+'</div>';
+}
+function render(){ document.getElementById('list').innerHTML = DATA.map(card).join('') || '<div class="meta">No companies yet.</div>'; }
+function post(path, bodyObj, msgId, cb){
+fetch(path+'?key='+encodeURIComponent(KEY), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(bodyObj) })
+.then(function(r){ return r.json(); })
+.then(function(d){ if(!d||!d.ok){ setMsg(msgId,(d&&d.error)||'Failed.',false); return; } if(cb) cb(d); })
+.catch(function(){ setMsg(msgId,'Network error.',false); });
+}
+function reload(){ loadData(KEY, true); }
+window.__saveOffices = function(i){
+var c = DATA[i]; var ta = document.getElementById('off-'+i);
+var lines = ta.value.split(String.fromCharCode(10)).map(function(x){ return x.trim(); }).filter(Boolean);
+if(!lines.length){ setMsg('offmsg-'+i,'Enter at least one office, one per line.',false); return; }
+var pairs = []; var seen = {};
+for(var j=0;j<lines.length && pairs.length<12;j++){ var k = slugKey(lines[j]); if(!k||seen[k]) continue; seen[k]=1; pairs.push([k, lines[j].slice(0,40)]); }
+post('/api/admin/onboarding/config', { tenantId: c.tenantId, offices: pairs }, 'offmsg-'+i, function(){ setMsg('offmsg-'+i,'Saved - keys: '+pairs.map(function(p){ return p[0]; }).join(', '),true); reload(); });
+};
+window.__saveDepts = function(i){
+var c = DATA[i];
+var payload = { mitigation: document.getElementById('dm-'+i).value.trim()||'Mitigation', contents: document.getElementById('dc-'+i).value.trim()||'Contents', reconstruction: document.getElementById('dr-'+i).value.trim()||'Reconstruction' };
+post('/api/admin/onboarding/config', { tenantId: c.tenantId, departments: payload }, 'depmsg-'+i, function(){ setMsg('depmsg-'+i,'Saved.',true); reload(); });
+};
+window.__createInteg = function(i){
+var c = DATA[i]; var prov = document.getElementById('prov-'+i).value.trim();
+if(!prov){ setMsg('integmsg-'+i,'Enter the provider name first.',false); return; }
+post('/api/admin/onboarding/integration', { tenantId: c.tenantId, provider: prov }, 'integmsg-'+i, function(d){
+var out = document.getElementById('keyout-'+i);
+if(out){ out.style.display='block'; out.innerHTML = 'API key (shown once):<div style="user-select:all;font-weight:600;">'+esc(d.apiKey)+'</div>Webhook URL:<div style="user-select:all;">'+esc(d.syncUrl)+'</div>Header:<div style="user-select:all;">Authorization: Bearer '+esc(d.apiKey)+'</div>'; }
+setMsg('integmsg-'+i, d.provider+' key created.', true);
+});
+};
+window.__setStatus = function(i, st){
+var c = DATA[i];
+post('/api/admin/onboarding/status', { tenantId: c.tenantId, integrationStatus: st }, 'stmsg-'+i, function(d){
+setMsg('stmsg-'+i, st==='complete'?('Live - emailed '+(d.emailed||0)+' admin(s).'):'Saved.', true);
+reload();
+});
+};
+function loadData(k, quiet){
+KEY = k;
+fetch('/api/admin/onboarding?key='+encodeURIComponent(k))
+.then(function(r){ return r.json(); })
+.then(function(d){
+if(!d||!d.ok){ if(!quiet){ document.getElementById('err').textContent = (d&&d.error)||'Not authorized'; } return; }
+DATA = d.companies||[];
+document.getElementById('gate').style.display='none';
+document.getElementById('view').style.display='block';
+render();
+})
+.catch(function(){ if(!quiet){ document.getElementById('err').textContent='Network error'; } });
+}
+document.getElementById('go').addEventListener('click', function(){ loadData(document.getElementById('key').value.trim()); });
+document.getElementById('key').addEventListener('keydown', function(e){ if(e.key==='Enter'){ loadData(e.target.value.trim()); } });
+})();
+</script></body></html>`;
+
+function handleAdminOnboardingPage() {
+return new Response(ADMIN_ONBOARDING_PAGE_HTML, {
+headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' }
+});
+}
+
+function adminKeyOk(request, env) {
+const url = new URL(request.url);
+const key = url.searchParams.get('key') || '';
+return !!(env.ADMIN_EXPORT_KEY && key === env.ADMIN_EXPORT_KEY);
+}
+
+async function handleAdminOnboardingData(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+const tenants = await pgSelect(env, 'tenants', 'select=id,slug,company_name,domain,status,integration_status,selected_plan,recommended_plan,company_size,city,state,created_at,offices,departments,current_crm,current_accounting,current_software_other,users!users_tenant_id_fkey(id,email,full_name,role,status)&order=id.asc');
+let integrationRows = [];
+try { integrationRows = (await pgSelect(env, 'integrations', 'select=id,tenant_id,provider,status,connected_at,last_synced_at&order=id.asc')) || []; } catch (e) {}
+const byTenant = {};
+for (const g of integrationRows) {
+if (!byTenant[g.tenant_id]) byTenant[g.tenant_id] = [];
+byTenant[g.tenant_id].push({ id: g.id, provider: g.provider, status: g.status, connected_at: g.connected_at, last_synced_at: g.last_synced_at });
+}
+const companies = (tenants || []).map(function (t) {
+const users = t.users || [];
+const offices = resolveOffices(t.offices);
+const officeKeys = Object.keys(offices);
+return {
+tenantId: t.id,
+slug: t.slug,
+isBase: t.slug === 'base',
+company: t.company_name,
+domain: t.domain,
+status: t.status,
+integrationStatus: t.integration_status,
+plan: t.selected_plan || t.recommended_plan || null,
+size: t.company_size,
+place: [t.city, t.state].filter(Boolean).join(', '),
+createdAt: t.created_at,
+uses: [t.current_crm, t.current_accounting, t.current_software_other].filter(Boolean).join(' / '),
+admins: users.filter(function (u) { return u.role === 'admin'; }).map(function (u) { return { email: u.email, name: u.full_name }; }),
+userCount: users.length,
+officesCustom: !!t.offices,
+officeKeys: officeKeys,
+officeLabels: officeKeys.map(function (k) { return offices[k]; }),
+departments: resolveDepartments(t.departments),
+integrations: byTenant[t.id] || []
+};
+});
+return json({ ok: true, companies: companies });
+}
+
+async function handleAdminOnboardingConfig(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+if (!tenantId) return json({ ok: false, error: 'Missing tenantId' }, 400);
+const patch = {};
+if (body.offices !== undefined) {
+const map = normalizeConfigEntries(body.offices, 12);
+patch.offices = map ? Object.keys(map).map(function (k) { return [k, map[k]]; }) : null;
+}
+if (body.departments !== undefined) {
+const d = normalizeConfigEntries(body.departments, 6) || {};
+const kept = {};
+['mitigation', 'contents', 'reconstruction'].forEach(function (k) { if (d[k]) kept[k] = d[k]; });
+patch.departments = Object.keys(kept).length ? kept : null;
+}
+if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
+return json({ ok: true });
+}
+
+async function handleAdminOnboardingIntegration(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+const provider = String((body && body.provider) || '').trim().slice(0, 60);
+if (!tenantId || !provider) return json({ ok: false, error: 'tenantId and provider are required' }, 400);
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,integration_status');
+if (!tenant) return json({ ok: false, error: 'No such company' }, 404);
+const apiKey = randomToken();
+const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(tenantId) + '&provider=' + pgEq(provider) + '&select=id');
+if (existing) {
+await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), { status: 'connected', api_key: apiKey, connected_at: new Date().toISOString() });
+} else {
+await pgInsert(env, 'integrations', { tenant_id: tenantId, provider: provider, status: 'connected', api_key: apiKey, connected_at: new Date().toISOString() });
+}
+if (!tenant.integration_status || tenant.integration_status === 'not_started') {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { integration_status: 'in_progress' });
+}
+return json({ ok: true, provider: provider, apiKey: apiKey, syncUrl: SITE_URL + '/api/integrations/accounting/sync' });
+}
+
+async function handleAdminOnboardingStatus(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+const status = String(body.integrationStatus || '');
+if (!tenantId) return json({ ok: false, error: 'Missing tenantId' }, 400);
+if (['not_started', 'in_progress', 'complete'].indexOf(status) === -1) return json({ ok: false, error: 'Invalid status' }, 400);
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,slug,company_name,integration_status');
+if (!tenant) return json({ ok: false, error: 'No such company' }, 404);
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { integration_status: status });
+let emailed = 0;
+if (status === 'complete' && tenant.integration_status !== 'complete' && tenant.slug !== 'base') {
+const adminRows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&role=' + pgEq('admin') + '&status=' + pgEq('active') + '&select=id,email,full_name');
+for (const adminRow of (adminRows || [])) {
+const readyHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:540px;">' +
+'<h2 style="margin:0 0 12px;">Your clAIms workspace is ready</h2>' +
+'<p>' + escapeHtml(adminRow.full_name || adminRow.email) + ', the ' + escapeHtml(tenant.company_name || 'company') + ' workspace is fully set up - your offices, dashboard and accounting integration are configured and live.</p>' +
+'<p style="margin-top:20px;"><a href="' + SITE_URL + '/dashboard.html" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Open your dashboard</a></p>' +
+'<p style="margin-top:18px;">Invite your team any time from My Account &rarr; Team - each teammate gets their own sign-in the moment you add them.</p>' +
+'<p style="margin-top:18px;font-size:12px;color:#8a8a8a;">Questions or changes? Just reply to this email - we handle integration and dashboard changes for you.</p>' +
+'</div>';
+await sendEmail(env, { to: adminRow.email, subject: 'Your clAIms workspace is ready', html: readyHtml, kind: 'workspace_ready', tenantId: tenant.id, userId: adminRow.id, replyTo: SUPPORT_EMAIL });
+emailed++;
+}
+}
+return json({ ok: true, integrationStatus: status, emailed: emailed });
+}
+
 async function handleStripeWebhook(request, env) {
 const rawBody = await request.text();
 const sigHeader = request.headers.get('Stripe-Signature') || '';
@@ -4976,7 +5330,7 @@ return new Response('ok', { status: 200 });
 
 async function runWeeklyDigest(env) {
 try {
-const tenantList = await pgSelect(env, 'tenants', 'select=id,company_name');
+const tenantList = await pgSelect(env, 'tenants', 'select=id,company_name,offices');
 const weekAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
 for (const tenant of tenantList) {
 try {
@@ -5004,7 +5358,7 @@ const needsAttention = scoped
 
 const html = buildWeeklyDigestHtml({
 companyName: tenant.company_name,
-officeLabel: officeFilter ? (OFFICE_LABELS[officeFilter] || officeFilter) : 'All Offices',
+officeLabel: officeFilter ? (resolveOffices(tenant.offices)[officeFilter] || OFFICE_LABELS[officeFilter] || officeFilter) : 'All Offices',
 amountCollected,
 collectedCount: collectedAccounts.length,
 followUps,
@@ -5299,6 +5653,10 @@ async function handleMe(request, env) {
     selectedPlan: user.selected_plan,
     recommendedPlan: user.recommended_plan,
     hasBilling: !!user.stripe_customer_id,
+    offices: resolveOffices(user.tenant_offices),
+    departments: resolveDepartments(user.tenant_departments),
+    officesConfigured: !!user.tenant_offices,
+    integrationConnected: await tenantHasConnectedIntegration(env, user.tenant_id),
     billing: await meBillingInfo(env, user)
   });
 }
@@ -5407,6 +5765,24 @@ return handleAdminBillingPage();
 }
 if (url.pathname === '/api/admin/billing' && request.method === 'GET') {
 return handleAdminBillingData(request, env);
+}
+if (url.pathname === '/admin/onboarding' && request.method === 'GET') {
+return handleAdminOnboardingPage();
+}
+if (url.pathname === '/api/admin/onboarding' && request.method === 'GET') {
+return handleAdminOnboardingData(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/config' && request.method === 'POST') {
+return handleAdminOnboardingConfig(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/integration' && request.method === 'POST') {
+return handleAdminOnboardingIntegration(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/status' && request.method === 'POST') {
+return handleAdminOnboardingStatus(request, env);
+}
+if (url.pathname === '/api/integrations/request' && request.method === 'POST') {
+return handleIntegrationRequest(request, env);
 }
 if (url.pathname === '/api/invoices/update' && request.method === 'POST') {
 return handleInvoiceUpdate(request, env);
