@@ -1753,6 +1753,7 @@ async function loadRealAccounts(){
             id: a.id,
             invoiceId: a.id,
             invoiceName: a.name,
+            invoiceNumber: a.invoiceNumber,
             amount: a.paidAmount || a.amount || 0,
             remainingBalance: 0,
             paidDate: String(a.paidDate).slice(0, 10),
@@ -2083,7 +2084,7 @@ function todoRowHTML(item, num, priority){
       <div class="card">
         <div class="who">
           <div class="name">${inv.name}</div>
-          <div class="meta">${inv.meta} &middot; <span style="font-family:var(--font-mono);">${inv.jobNumber}</span></div>
+          <div class="meta">${inv.meta} &middot; <span style="font-family:var(--font-mono);">${inv.invoiceNumber || '\u2014'}</span> &middot; <span style="font-family:var(--font-mono);">${inv.jobNumber}</span></div>
           <div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>
           <div class="badge-row">
             <span class="badge office">${OFFICE_LABELS[inv.officeLocation].toUpperCase()}</span>
@@ -2434,9 +2435,10 @@ saveState(); renderAll();
     if(payments.length === 0){
       wrap.innerHTML = `<div class="empty">No payments recorded yet this month. Use Integrations &rarr; "Simulate a NetSuite Payment" to test this.</div>`;
     } else {
-      wrap.innerHTML = `<table class="log"><thead><tr><th>Customer</th><th>Office</th><th>Department</th><th>Amount</th><th>Remaining</th><th>Method</th><th>Date Applied</th><th>Source</th></tr></thead><tbody>
+      wrap.innerHTML = `<table class="log"><thead><tr><th>Customer</th><th>Invoice #</th><th>Office</th><th>Department</th><th>Amount</th><th>Remaining</th><th>Method</th><th>Date Applied</th><th>Source</th></tr></thead><tbody>
         ${payments.slice().reverse().map(p => `<tr>
           <td>${p.invoiceName}</td>
+          <td style="font-family:var(--font-mono);font-size:11.5px;">${p.invoiceNumber || (findInv(p.invoiceId) || {}).invoiceNumber || '\u2014'}</td>
           <td>${OFFICE_LABELS[p.officeLocation]}</td>
           <td>${DEPARTMENT_LABELS[p.department]} \u2014 ${CATEGORY_LABELS[p.category]}</td>
           <td class="amt">$${p.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
@@ -2546,6 +2548,7 @@ saveState(); renderAll();
       id: details.id !== undefined ? details.id : (Date.now() + Math.random()),
       invoiceId: inv.id, invoiceName: inv.name, amount,
       remainingBalance: remaining, paidDate: details.paidDate,
+      invoiceNumber: inv.invoiceNumber,
       officeLocation: inv.officeLocation, department: inv.department, category: inv.category,
       paymentMethod: details.method,
       checkNumber: details.checkNumber || null,
@@ -2857,7 +2860,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       <div class="card">
         <div class="who">
           <div class="name">${inv.name}</div>
-          <div class="meta">${inv.meta} &middot; <span style="font-family:var(--font-mono);">${inv.jobNumber}</span></div>
+          <div class="meta">${inv.meta} &middot; <span style="font-family:var(--font-mono);">${inv.invoiceNumber || '\u2014'}</span> &middot; <span style="font-family:var(--font-mono);">${inv.jobNumber}</span></div>
           <div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>
           <div class="badge-row">
             <span class="badge office">${OFFICE_LABELS[inv.officeLocation].toUpperCase()}</span>
@@ -3944,7 +3947,7 @@ wrap.innerHTML = `
 <div class="sub" style="margin-bottom:10px;">Save this API key now — it will not be shown again. Hand these two values to whoever configures ${provider} (or an automation tool like Zapier/Make) to POST invoice and payment updates here.</div>
 <div class="field-map" style="margin-bottom:6px;">Webhook URL<br><code style="user-select:all;">${syncUrl}</code> <button class="btn-small" onclick="copyRiValue('${syncUrl}')">Copy</button></div>
 <div class="field-map" style="margin-bottom:10px;">Authorization Header<br><code style="user-select:all;">Bearer ${apiKey}</code> <button class="btn-small" onclick="copyRiValue('Bearer ${apiKey}')">Copy</button></div>
-<div class="sub">POST JSON to that URL with header <code>Authorization: Bearer ${apiKey}</code>. Body is a single account object or <code>{ &quot;accounts&quot;: [ ... ] }</code>. Each item needs at least <code>externalId</code> and <code>customerName</code>; also send <code>amount</code>, <code>status</code> (<code>in_ar</code> while open, <code>paid</code> or <code>paid_in_full</code> once settled), <code>invoicedAt</code>, <code>paidAmount</code>, <code>paidAt</code>, <code>office</code>, <code>department</code>, <code>category</code>, <code>payer</code>, <code>contact</code>. Sending the same <code>externalId</code> again updates that account instead of duplicating it, and moving <code>status</code> to <code>paid</code> or <code>paid_in_full</code> automatically moves it to Collected and Collected This Month here.</div>
+<div class="sub">POST JSON to that URL with header <code>Authorization: Bearer ${apiKey}</code>. Body is a single account object or <code>{ &quot;accounts&quot;: [ ... ] }</code>. Each item needs at least <code>externalId</code> and <code>customerName</code>; also send <code>invoiceNumber</code> (your accounting system's invoice number, shown across the dashboard), <code>amount</code>, <code>status</code> (<code>in_ar</code> while open, <code>paid</code> or <code>paid_in_full</code> once settled), <code>invoicedAt</code>, <code>paidAmount</code>, <code>paidAt</code>, <code>office</code>, <code>department</code>, <code>category</code>, <code>payer</code>, <code>contact</code>. Sending the same <code>externalId</code> again updates that account instead of duplicating it, and moving <code>status</code> to <code>paid</code> or <code>paid_in_full</code> automatically moves it to Collected and Collected This Month here.</div>
 </div>`;
 }
 
