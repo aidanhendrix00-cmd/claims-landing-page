@@ -2919,6 +2919,7 @@ payer: raw.payer ? String(raw.payer).slice(0,40) : null,
 contact: raw.contact ? String(raw.contact).slice(0,120) : null,
 contact_email: raw.contactEmail ? String(raw.contactEmail).trim().slice(0,200) : null,
 claim_number: raw.claimNumber ? String(raw.claimNumber).slice(0,80) : null,
+invoice_number: raw.invoiceNumber ? String(raw.invoiceNumber).slice(0,60) : null,
 amount: Number(raw.amount) || 0,
 invoiced_at: raw.invoicedAt ? String(raw.invoicedAt) : null,
 status: status,
@@ -4206,7 +4207,7 @@ try { days = Math.max(0, Math.floor((Date.now() - new Date(a.invoiced_at).getTim
 }
 return {
 id: a.id,
-invoiceNumber: 'INV-' + (10000 + a.id),
+invoiceNumber: a.invoice_number || ('INV-' + (10000 + a.id)),
 externalId: a.external_id,
 name: a.customer_name,
 meta: a.meta,
