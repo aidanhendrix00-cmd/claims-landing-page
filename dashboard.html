@@ -553,7 +553,7 @@
           <thead>
             <tr>
               <th>Invoice #</th><th>Job #</th><th>Invoice Date</th><th>Account / Owner</th><th>Office</th><th>Department</th><th>Category</th><th>Amount</th>
-              <th>Job Status</th><th>Currently With</th><th>Claim #</th><th>NOIL</th><th>Lien</th><th>Last Contact</th><th>Responded?</th><th>Response Summary</th>
+              <th>Job Status</th><th>Currently With</th><th>Claim #</th><th title="Public Adjuster involved on this claim">PA</th><th>NOIL</th><th>Lien</th><th>Last Contact</th><th>Responded?</th><th>Response Summary</th>
               <th>Recent Salesforce Update</th>
               <th>WA Sent</th><th>Date of WA Signature</th><th>COS Sent</th><th>Date of COS Signature</th><th>Projected Payment Date</th><th>Payment Type</th>
             </tr>
@@ -1153,6 +1153,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
       invoiceNumber: 'INV-' + (10000 + base.id),
       jobNumber: 'JOB-' + (5000 + base.id),
       claimNumber: payer === 'insurance' ? ('CLM-' + (240000 + base.id * 331)) : null,
+      pa: payer === 'insurance' && base.id % 4 === 1,
       scopeOfWork: CATEGORY_SCOPE[category] || 'restoration services performed per the scope on file',
       currentlyWith: defaultCurrentlyWith,
       lastOnSiteDate: isoDate(onSiteDate),
@@ -1802,6 +1803,7 @@ async function loadRealAccounts(){
           lastUpdatedAtDay: ageDays,
           jobNumber: 'JOB-' + (5000 + a.id),
           claimNumber: payerKey === 'insurance' ? ('CLM-' + (240000 + a.id * 331)) : null,
+          pa: !!a.pa,
           scopeOfWork: CATEGORY_SCOPE[catKey] || '',
           currentlyWith: a.currentlyWith || currentlyWith,
           lastContact: dayOnly(a.lastContact),
@@ -2281,7 +2283,7 @@ saveState(); renderAll();
     if(pdSel) pdSel.value = state.paymentDateFilter || 'all';
 
     const rows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter).slice().sort((a,b)=>b.amount-a.amount);
-    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="23" style="text-align:center;padding:24px;color:var(--slate);">No open invoices match the current filters. Paid invoices have moved to the Collected tab.</td></tr>`; return; }
+    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="24" style="text-align:center;padding:24px;color:var(--slate);">No open invoices match the current filters. Paid invoices have moved to the Collected tab.</td></tr>`; return; }
     body.innerHTML = rows.map(inv => `
       <tr>
         <td>${inv.invoiceNumber}</td>
@@ -2295,6 +2297,7 @@ saveState(); renderAll();
         <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span></td>
         <td><span class="badge cw">${CURRENTLY_WITH_LABELS[inv.currentlyWith]}</span></td>
         <td style="font-family:var(--font-mono);font-size:11px;">${inv.claimNumber || '\u2014'}</td>
+        <td style="text-align:center;"><input type="checkbox" ${inv.pa?'checked':''} onchange="toggleFlagField(${inv.id}, 'pa', this.checked)"/></td>
         <td style="text-align:center;"><input type="checkbox" ${inv.noilSent?'checked':''} onchange="toggleFlagField(${inv.id}, 'noilSent', this.checked)"/></td>
         <td style="text-align:center;"><input type="checkbox" ${inv.lienFiled?'checked':''} onchange="toggleFlagField(${inv.id}, 'lienFiled', this.checked)"/></td>
         <td>${inv.lastContact ? fmtDate(inv.lastContact) : '\u2014'}</td>
@@ -2323,8 +2326,8 @@ saveState(); renderAll();
     if(!inv) return;
     inv[field] = val;
     persistInvoice(inv, [field]);
-    const labels = { waSent: 'Work Authorization', cosSent: 'Certificate of Satisfaction', noilSent: 'NOIL', lienFiled: 'Lien' };
-    const verb = field === 'lienFiled' ? (val ? 'filed' : 'not filed') : (val ? 'sent' : 'not sent');
+    const labels = { waSent: 'Work Authorization', cosSent: 'Certificate of Satisfaction', noilSent: 'NOIL', lienFiled: 'Lien', pa: 'PA (Public Adjuster)' };
+    const verb = field === 'pa' ? (val ? 'involved' : 'not involved') : (field === 'lienFiled' ? (val ? 'filed' : 'not filed') : (val ? 'sent' : 'not sent'));
     addActivity(inv, `${labels[field]} marked ${verb} (manual edit via A/R spreadsheet).`, 'manual');
     saveState(); renderAll();
   }
