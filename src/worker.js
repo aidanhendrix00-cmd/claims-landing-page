@@ -5022,6 +5022,9 @@ button.ghost{background:#fff;color:#171717;border:1px solid #C9C2B2;}
 <div id="view" style="display:none;">
 <h1>Company onboarding</h1>
 <p class="sub">Configure each paying company here, then mark it live - every admin at that company is emailed automatically. Same key as the billing page.</p>
+<div class="co"><h2>Users report</h2>
+<div class="meta">Emails info@claims-collection.net a dated table of every user account, grouped by company. Goes out automatically every Friday at 6:00 PM Central - or send one right now.</div>
+<button class="act" id="rep-send">Send report now</button> <span id="rep-msg" style="font-size:12px;"></span></div>
 <div id="list"></div>
 </div></div>
 <script>
@@ -5136,6 +5139,15 @@ render();
 })
 .catch(function(){ if(!quiet){ document.getElementById('err').textContent='Network error'; } });
 }
+var repBtn = document.getElementById('rep-send');
+if(repBtn){ repBtn.addEventListener('click', function(){
+repBtn.disabled = true;
+setMsg('rep-msg','Sending...',true);
+fetch('/api/admin/reports/users?key='+encodeURIComponent(KEY))
+.then(function(r){ return r.json(); })
+.then(function(d){ repBtn.disabled = false; setMsg('rep-msg', (d&&d.ok)?'Sent - check the info@ inbox.':(((d&&d.error)||'Failed')+' - reload this page and try again.'), !!(d&&d.ok)); })
+.catch(function(){ repBtn.disabled = false; setMsg('rep-msg','Network error - try again.',false); });
+}); }
 document.getElementById('go').addEventListener('click', function(){ loadData(document.getElementById('key').value.trim()); });
 document.getElementById('key').addEventListener('keydown', function(e){ if(e.key==='Enter'){ loadData(e.target.value.trim()); } });
 })();
