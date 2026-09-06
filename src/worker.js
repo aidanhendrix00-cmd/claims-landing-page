@@ -5397,6 +5397,58 @@ from: OPERATIONS_FROM_EMAIL
 } catch (e) {}
 }
 
+async function runWeeklyUsersReport(env) {
+try {
+const tenantRows = await pgSelect(env, 'tenants', 'select=id,slug,company_name,status,users!users_tenant_id_fkey(email,full_name,role,status,created_at)&order=company_name.asc');
+const now = new Date();
+const dateFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: 'short', day: 'numeric' });
+const fullDateFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+const monthLabelFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', month: 'long', year: 'numeric' });
+const monthKeyFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit' });
+const currentMonthKey = monthKeyFmt.format(now);
+const cell = 'padding:6px 10px;border-bottom:1px solid #E5E7EB;';
+const head = 'text-align:left;padding:6px 10px;border-bottom:2px solid #171717;';
+let totalUsers = 0;
+let newThisMonth = 0;
+let companiesShown = 0;
+let sections = '';
+for (const tenant of (tenantRows || [])) {
+const members = (tenant.users || []).slice().sort(function(a, b) { return new Date(a.created_at || 0) - new Date(b.created_at || 0); });
+if (!members.length) continue;
+companiesShown++;
+totalUsers += members.length;
+let rows = '';
+for (const u of members) {
+const joined = u.created_at ? new Date(u.created_at) : null;
+const joinedOk = joined && !isNaN(joined.getTime());
+const joinedLabel = joinedOk ? dateFmt.format(joined) : '&mdash;';
+const isNew = joinedOk && monthKeyFmt.format(joined) === currentMonthKey;
+if (isNew) newThisMonth++;
+rows += '<tr>' +
+'<td style="' + cell + '">' + escapeHtml(u.full_name || '&mdash;') + (isNew ? ' <span style="background:#1F5346;color:#FFFFFF;border-radius:10px;padding:1px 7px;font-size:11px;">NEW</span>' : '') + '</td>' +
+'<td style="' + cell + '">' + escapeHtml(u.email || '') + '</td>' +
+'<td style="' + cell + '">' + escapeHtml(u.role || '') + '</td>' +
+'<td style="' + cell + '">' + escapeHtml(u.status || '') + '</td>' +
+'<td style="' + cell + 'white-space:nowrap;">' + joinedLabel + '</td>' +
+'</tr>';
+}
+sections += '<h3 style="margin:22px 0 6px;">' + escapeHtml(tenant.company_name || tenant.slug || ('Company ' + tenant.id)) + ' <span style="color:#6B7280;font-weight:normal;font-size:13px;">(' + members.length + (members.length === 1 ? ' user' : ' users') + ')</span></h3>' +
+'<table style="border-collapse:collapse;width:100%;font-size:14px;">' +
+'<tr><th style="' + head + '">Name</th><th style="' + head + '">Email</th><th style="' + head + '">Role</th><th style="' + head + '">Status</th><th style="' + head + '">Date joined</th></tr>' +
+rows +
+'</table>';
+}
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:640px;">' +
+'<h2 style="margin:0 0 4px;">Users This Month &mdash; ' + monthLabelFmt.format(now) + '</h2>' +
+'<p style="margin:0 0 4px;color:#6B7280;font-size:13px;">Report date: ' + fullDateFmt.format(now) + ' (Central Time)</p>' +
+'<p style="margin:0 0 4px;color:#374151;">All user accounts across every company workspace, sorted by company.</p>' +
+'<p style="margin:0 0 10px;color:#374151;"><strong>' + totalUsers + '</strong> total users across <strong>' + companiesShown + '</strong> ' + (companiesShown === 1 ? 'company' : 'companies') + ' &middot; <strong>' + newThisMonth + '</strong> joined this month</p>' +
+(sections || '<p>No user accounts found.</p>') +
+'</div>';
+await sendEmail(env, { to: 'info@claims-collection.net', subject: 'USERS THIS MONTH - ' + dateFmt.format(now), html: html, kind: 'weekly_users_report', from: OPERATIONS_FROM_EMAIL });
+} catch (e) {}
+}
+
 function buildWeeklyDigestHtml(d) {
   const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const rows = (d.needsAttention || []).map(a => {
@@ -5794,6 +5846,11 @@ return handleAdminOnboardingIntegration(request, env);
 if (url.pathname === '/api/admin/onboarding/status' && request.method === 'POST') {
 return handleAdminOnboardingStatus(request, env);
 }
+if (url.pathname === '/api/admin/reports/users' && request.method === 'GET') {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+await runWeeklyUsersReport(env);
+return json({ ok: true, sent: true, to: 'info@claims-collection.net' });
+}
 if (url.pathname === '/api/integrations/request' && request.method === 'POST') {
 return handleIntegrationRequest(request, env);
 }
@@ -5971,6 +6028,9 @@ const weekday = (parts.find(p => p.type === 'weekday') || {}).value;
 const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10);
 if (weekday === 'Wed' && hour === 18) {
 ctx.waitUntil(runWeeklyDigest(env));
+}
+if (weekday === 'Fri' && hour === 18) {
+ctx.waitUntil(runWeeklyUsersReport(env));
 }
 // Follow-up cadence runs every hour; each tenant's own quiet hours and
 // weekly send cap decide whether anything actually goes out.
