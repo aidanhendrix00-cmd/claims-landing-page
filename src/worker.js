@@ -2439,7 +2439,7 @@ const insertedUser = await pgInsert(env, 'users', {
 tenant_id: tenant.id, email: email, password_hash: passwordHash, salt: salt,
 role: userRole, status: userStatus, email_verified: false,
 verification_token: verificationToken, verification_expires: verificationExpires,
-full_name: fullName, terms_accepted_at: acceptedAt, terms_accepted_ip: acceptedIp, terms_version: 'v1'
+full_name: fullName, terms_accepted_at: acceptedAt, terms_accepted_ip: acceptedIp, terms_version: 'v4'
 });
 const userId = insertedUser.id;
 
@@ -4266,6 +4266,16 @@ async function mailboxForUser(env, user) {
 return await pgSelectOne(env, 'user_mailboxes', 'user_id=' + pgEq(user.id) + '&status=' + pgEq('connected') + '&select=*') || null;
 }
 
+async function handleAccountsPing(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const latest = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=updated_at&order=updated_at.desc.nullslast&limit=1');
+const top = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id&order=id.desc&limit=1');
+const stamp = (latest && latest[0] && latest[0].updated_at) || '';
+const maxId = (top && top[0] && top[0].id) || 0;
+return json({ ok: true, v: stamp + ':' + maxId, maxId: maxId });
+}
+
 async function handleAccounts(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -5904,6 +5914,9 @@ return handleIntegrationSyncNow(request, env);
 }
 if (url.pathname === '/api/integrations' && request.method === 'GET') {
 return handleIntegrationsList(request, env);
+}
+if (url.pathname === '/api/accounts/ping' && request.method === 'GET') {
+return handleAccountsPing(request, env);
 }
 if (url.pathname === '/api/accounts' && request.method === 'GET') {
 return handleAccounts(request, env);
