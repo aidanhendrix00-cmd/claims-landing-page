@@ -1850,6 +1850,38 @@ async function loadRealAccounts(){
 
   setInterval(function(){ if (document.visibilityState === 'visible') loadRealAccounts(); }, 30000);
 
+  // Real-time sync: a lightweight change probe every 8 seconds. The moment the
+  // connected CRM/accounting system posts or updates an invoice (or a teammate
+  // edits an account), every open dashboard reloads its accounts within seconds.
+  let __pingV = null;
+  let __pingMaxId = null;
+  let __pingBusy = false;
+  async function pingRealtimeSync(){
+    if (document.visibilityState !== 'visible' || __pingBusy) return;
+    if (!(window.__me && window.__me.ok)) return;
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+    __pingBusy = true;
+    try {
+      const res = await fetch('/api/accounts/ping', { credentials: 'same-origin', cache: 'no-store' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d && d.ok) {
+          const changed = (__pingV !== null && d.v !== __pingV);
+          const newAccount = (__pingMaxId !== null && Number(d.maxId) > Number(__pingMaxId));
+          __pingV = d.v;
+          __pingMaxId = d.maxId;
+          if (changed) {
+            await loadRealAccounts();
+            if (newAccount && typeof showToast === 'function') showToast('New invoice synced from your connected system.');
+          }
+        }
+      }
+    } catch (e) {}
+    __pingBusy = false;
+  }
+  setInterval(pingRealtimeSync, 8000);
+
 document.addEventListener('visibilitychange', function(){
 if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegrations(); }
 });
@@ -4038,7 +4070,7 @@ wrap.innerHTML = `
 <div class="sub" style="margin-bottom:10px;">Save this API key now — it will not be shown again. Hand these two values to whoever configures ${provider} (or an automation tool like Zapier/Make) to POST invoice and payment updates here.</div>
 <div class="field-map" style="margin-bottom:6px;">Webhook URL<br><code style="user-select:all;">${syncUrl}</code> <button class="btn-small" onclick="copyRiValue('${syncUrl}')">Copy</button></div>
 <div class="field-map" style="margin-bottom:10px;">Authorization Header<br><code style="user-select:all;">Bearer ${apiKey}</code> <button class="btn-small" onclick="copyRiValue('Bearer ${apiKey}')">Copy</button></div>
-<div class="sub">POST JSON to that URL with header <code>Authorization: Bearer ${apiKey}</code>. Body is a single account object or <code>{ &quot;accounts&quot;: [ ... ] }</code>. Each item needs at least <code>externalId</code> and <code>customerName</code>; also send <code>invoiceNumber</code> (your accounting system's invoice number, shown across the dashboard), <code>amount</code>, <code>status</code> (<code>in_ar</code> while open, <code>paid</code> or <code>paid_in_full</code> once settled), <code>invoicedAt</code>, <code>paidAmount</code>, <code>paidAt</code>, <code>office</code>, <code>department</code>, <code>category</code>, <code>payer</code>, <code>contact</code>. Sending the same <code>externalId</code> again updates that account instead of duplicating it, and moving <code>status</code> to <code>paid</code> or <code>paid_in_full</code> automatically moves it to Collected and Collected This Month here.</div>
+<div class="sub">POST JSON to that URL with header <code>Authorization: Bearer ${apiKey}</code>. Body is a single account object or <code>{ &quot;accounts&quot;: [ ... ] }</code>. Each item needs at least <code>externalId</code> and <code>customerName</code>; also send <code>invoiceNumber</code> (your accounting system's invoice number, shown across the dashboard), <code>amount</code>, <code>status</code> (<code>in_ar</code> while open, <code>paid</code> or <code>paid_in_full</code> once settled), <code>invoicedAt</code>, <code>paidAmount</code>, <code>paidAt</code>, <code>office</code>, <code>department</code>, <code>category</code>, <code>payer</code>, <code>contact</code>. Sending the same <code>externalId</code> again updates that account instead of duplicating it, and moving <code>status</code> to <code>paid</code> or <code>paid_in_full</code> automatically moves it to Collected and Collected This Month here. New and updated invoices appear on every teammate's open dashboard within seconds \u2014 no refresh needed.</div>
 </div>`;
 }
 
