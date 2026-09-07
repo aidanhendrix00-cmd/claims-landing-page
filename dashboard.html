@@ -3537,7 +3537,20 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
      ============================================================ */
   function buildPrompt(inv, draftType, docs, recipient){
     recipient = recipient || recipientDefault(inv);
-    const docsList = (docs || []).map(d => d.name).join(', ') || 'none selected';
+    const DOC_KIND_NAMES = {
+      Estimate: 'Estimate (itemized scope and pricing)',
+      Photos: 'Photo report (documents the loss and the work performed)',
+      Invoice: 'Invoice (states the amount owed)',
+      Contract: 'Contract (signed service agreement)',
+      WorkAuth: 'Work Authorization (signed by the customer, authorizes the scope of work)',
+      COS: 'Certificate of Satisfaction (signed by the customer confirming the work was completed and accepted)',
+      MoistureLog: 'Moisture log (drying documentation)',
+      Other: 'Supporting document'
+    };
+    const docsList = (docs || []).map(d => {
+      const kindName = DOC_KIND_NAMES[d.kind] || (d.kind ? String(d.kind) : 'Supporting document');
+      return kindName + ' - file: ' + (d.label ? d.label + ' / ' : '') + d.name;
+    }).join('; ') || 'none selected';
     const cleanNote = (inv.note || '').replace(/&middot;/g,'-');
     const rolePhrase = recipientRolePhrase(inv, recipient);
     let instructions = '';
@@ -3572,6 +3585,7 @@ Details:
 - Prior follow-ups sent: ${inv.followups}
 - Context note: ${cleanNote}
 - Attached/referenced documents: ${docsList}
+- When citing documents, refer to them by type (for example "the signed Work Authorization", "the Certificate of Satisfaction", "the attached invoice") and to what they establish; never mention file names.
 
 ${recipientGuidance}
 
@@ -3585,7 +3599,7 @@ Do not invent facts beyond what's given.`;
     const response = await fetch("/api/ai-draft", {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: prompt, maxTokens: 1000 })
+      body: JSON.stringify({ prompt: prompt, maxTokens: 1000, draftType: draftType })
     });
     const data = await response.json();
     if(!data || !data.ok || !data.text) throw new Error((data && data.error) || "No draft returned.");
