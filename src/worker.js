@@ -3007,6 +3007,10 @@ note: raw.note ? String(raw.note).slice(0,500) : null,
 updated_at: nowIso
 };
 if (raw.pa !== undefined) commonFields.pa = !!raw.pa;
+// Last day crews were on the job - drives lien deadlines. Accept the common
+// field names CRMs use for it.
+const rawLastDay = raw.lastDayOnSite || raw.last_day_on_site || raw.lastOnSiteDate || raw.lastOnSite || raw.completionDate || raw.jobCompletedAt || raw.completedAt || null;
+if (rawLastDay) commonFields.last_day_on_site = normalizeDateOnly(String(rawLastDay));
 let acctId;
 if (existing) {
 let paidAt;
@@ -3271,7 +3275,8 @@ followups: 'follow_up_count',
 escalated: 'escalated',
 notifiedName: 'notified_name',
 notifiedAt: 'notified_at',
-cadenceSent: 'cadence_sent'
+cadenceSent: 'cadence_sent',
+lastDayOnSite: 'last_day_on_site'
 };
 
 function normalizeDateOnly(v) {
@@ -3293,7 +3298,7 @@ if (!Object.prototype.hasOwnProperty.call(body, key)) return;
 const column = INVOICE_EDITABLE[key];
 let value = body[key];
 if (column === 'noil_sent_at') { patch[column] = value ? (normalizeDateOnly(body.noilSentAt) || new Date().toISOString()) : null; return; }
-if (column === 'wa_signed_at' || column === 'cos_signed_at' || column === 'projected_payment_date' || column === 'last_contact') { patch[column] = normalizeDateOnly(value); return; }
+if (column === 'wa_signed_at' || column === 'cos_signed_at' || column === 'projected_payment_date' || column === 'last_contact' || column === 'last_day_on_site') { patch[column] = normalizeDateOnly(value); return; }
 if (column === 'follow_up_count') { patch[column] = parseInt(value, 10) || 0; return; }
 if (column === 'cadence_sent') { patch[column] = (value && typeof value === 'object') ? value : {}; return; }
 if (column === 'lien_filed' || column === 'wa_sent' || column === 'cos_sent' || column === 'docs_complete' || column === 'escalated' || column === 'pa') { patch[column] = !!value; return; }
@@ -4280,6 +4285,98 @@ const planKey = planKeyFor(user);
 return json({ ok: true, v: stamp + ':' + maxId, maxId: maxId, plan: planKey, planName: PLAN_LIMITS[planKey].name, tenantStatus: user.tenant_status || null });
 }
 
+// Everything that has ever happened on one account, in one call: the account
+// itself, every communication (cadence and manual), external activity pushed
+// by the CRM, payments, documents, notes, other invoices for the same
+// customer, and a merged timeline of all of it, newest first.
+async function handleAccountHistory(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+const accountId = url.searchParams.get('accountId');
+if (!accountId) return json({ ok: false, error: 'accountId is required' }, 400);
+const scoped = await accountForUser(env, user, accountId);
+if (!scoped) return json({ ok: false, error: 'Account not found' }, 404);
+const a = await pgSelectOne(env, 'accounts', 'id=' + pgEq(accountId) + '&select=*');
+if (!a) return json({ ok: false, error: 'Account not found' }, 404);
+const tid = pgEq(user.tenant_id);
+const aid = pgEq(a.id);
+const safe = async function (p) { try { return (await p) || []; } catch (e) { return []; } };
+const results = await Promise.all([
+safe(pgSelect(env, 'invoice_comms', 'account_id=' + aid + '&tenant_id=' + tid + '&select=*&order=sent_at.desc.nullslast&limit=200')),
+safe(pgSelect(env, 'account_notes', 'account_id=' + aid + '&tenant_id=' + tid + '&select=*&order=occurred_at.desc.nullslast&limit=200')),
+safe(pgSelect(env, 'invoice_payments', 'account_id=' + aid + '&tenant_id=' + tid + '&select=*&order=deposited_on.desc.nullslast&limit=200')),
+safe(pgSelect(env, 'documents', 'account_id=' + aid + '&tenant_id=' + tid + '&select=*&order=created_at.desc.nullslast&limit=200')),
+safe(pgSelect(env, 'account_activity', 'account_id=' + aid + '&tenant_id=' + tid + '&select=*&order=sent_at.desc.nullslast&limit=200'))
+]);
+const comms = results[0], notes = results[1], payments = results[2], docs = results[3], activity = results[4];
+let related = [];
+if (a.customer_name) {
+let relQ = 'tenant_id=' + tid + '&customer_name=' + pgEq(a.customer_name) + '&id=neq.' + encodeURIComponent(a.id) + '&select=id,invoice_number,amount,paid_amount,status,invoiced_at,paid_at,office,department,category,claim_number&order=invoiced_at.desc.nullslast&limit=50';
+if (user.role !== 'admin') relQ += '&office=' + pgEq(user.office || '__none__');
+related = await safe(pgSelect(env, 'accounts', relQ));
+}
+const kindLabel = function (kind) {
+const k = String(kind || '').toLowerCase();
+if (k.indexOf('noil') !== -1) return 'NOIL';
+if (k.indexOf('demand') !== -1) return 'Demand letter';
+if (k.indexOf('payment') !== -1) return 'Payment email';
+return 'Follow-up';
+};
+const timeline = [];
+const push = function (at, type, title, detail, source) { if (!at) return; timeline.push({ at: at, type: type, title: title, detail: detail || null, source: source || null }); };
+push(a.invoiced_at, 'invoice', 'Invoice ' + (a.invoice_number || ('INV-' + (10000 + a.id))) + ' created for $' + Number(a.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), null, 'system');
+push(a.last_day_on_site ? (a.last_day_on_site + 'T12:00:00Z') : null, 'site', 'Last day on site', null, 'crm');
+push(a.wa_signed_at, 'document', 'Work Authorization signed', null, 'system');
+push(a.cos_signed_at, 'document', 'Certificate of Satisfaction signed', null, 'system');
+push(a.demand_letter_sent_at, 'demand', 'Demand letter sent', null, 'system');
+push(a.noil_sent_at, 'noil', 'Notice of Intent to Lien sent', null, 'system');
+push(a.notified_at, 'escalation', 'Escalated' + (a.notified_name ? (' - ' + a.notified_name + ' notified') : ''), null, 'dashboard');
+push(a.paid_at, 'payment', 'Paid in full', null, 'system');
+comms.forEach(function (c) {
+const who = [c.recipient_role, c.recipient_email].filter(Boolean).join(' - ');
+const st = String(c.status || '');
+push(c.sent_at, kindLabel(c.kind) === 'NOIL' ? 'noil' : (kindLabel(c.kind) === 'Demand letter' ? 'demand' : 'followup'),
+kindLabel(c.kind) + (st === 'sent' ? ' sent' : (st ? (' - ' + st.replace(/_/g, ' ')) : '')) + (c.cadence_day ? (' (Day ' + c.cadence_day + ')') : ''),
+[who, c.subject].filter(Boolean).join(' | '), c.cadence_day ? 'automation' : 'dashboard');
+});
+activity.forEach(function (x) {
+push(x.sent_at, 'crm', String(x.type || 'activity').replace(/_/g, ' ') + (x.status ? (' - ' + x.status) : ''), [x.recipient, x.subject].filter(Boolean).join(' | '), x.source || 'crm');
+});
+payments.forEach(function (p) {
+push(p.deposited_on ? (p.deposited_on + 'T12:00:00Z') : p.created_at, 'payment', 'Payment received: $' + Number(p.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), [p.method, p.reference ? ('ref ' + p.reference) : null, p.payer_name, p.bank_name].filter(Boolean).join(' - '), 'dashboard');
+});
+docs.forEach(function (d) {
+push(d.created_at, 'document', 'Document added: ' + (d.doc_kind || 'File'), (d.doc_label ? (d.doc_label + ' - ') : '') + (d.file_name || ''), 'dashboard');
+});
+notes.forEach(function (n) {
+push(n.occurred_at, 'note', n.body || '', n.author_name ? ('by ' + n.author_name) : null, n.source || null);
+});
+timeline.sort(function (x, y) { return new Date(y.at).getTime() - new Date(x.at).getTime(); });
+const money = function (n) { return n == null ? null : Number(n); };
+return json({
+ok: true,
+account: {
+id: a.id, customerName: a.customer_name, invoiceNumber: a.invoice_number || ('INV-' + (10000 + a.id)), claimNumber: a.claim_number,
+amount: money(a.amount), paidAmount: money(a.paid_amount), paidAt: a.paid_at, status: a.status, invoicedAt: a.invoiced_at,
+payer: a.payer, contact: a.contact, contactEmail: a.contact_email, office: a.office, department: a.department, category: a.category,
+followUpCount: a.follow_up_count || 0, lastContact: a.last_contact, currentlyWith: a.currently_with, responded: a.responded, responseSummary: a.response_summary,
+waSent: !!a.wa_sent, waSignedAt: a.wa_signed_at, cosSent: !!a.cos_sent, cosSignedAt: a.cos_signed_at,
+demandLetterSentAt: a.demand_letter_sent_at, noilSentAt: a.noil_sent_at, lienFiled: !!a.lien_filed, pa: !!a.pa,
+escalated: !!a.escalated, notifiedName: a.notified_name, notifiedAt: a.notified_at,
+projectedPaymentDate: a.projected_payment_date, paymentType: a.payment_type, lastDayOnSite: a.last_day_on_site || null,
+note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at
+},
+comms: comms.map(function (c) { return { id: c.id, at: c.sent_at, kind: c.kind, label: kindLabel(c.kind), cadenceDay: c.cadence_day, recipientRole: c.recipient_role, recipientEmail: c.recipient_email, subject: c.subject, status: c.status, error: c.error }; }),
+activity: activity.map(function (x) { return { id: x.id, at: x.sent_at, type: x.type, recipient: x.recipient, subject: x.subject, status: x.status, source: x.source }; }),
+payments: payments.map(function (p) { return { id: p.id, at: p.deposited_on, amount: money(p.amount), method: p.method, payerName: p.payer_name, reference: p.reference, bankName: p.bank_name, memo: p.memo }; }),
+documents: docs.map(documentToJson),
+notes: notes.map(noteToJson),
+related: related.map(function (r) { return { id: r.id, invoiceNumber: r.invoice_number || ('INV-' + (10000 + r.id)), amount: money(r.amount), paidAmount: money(r.paid_amount), status: r.status, invoicedAt: r.invoiced_at, paidAt: r.paid_at, office: r.office, department: r.department, category: r.category, claimNumber: r.claim_number }; }),
+timeline: timeline
+});
+}
+
 async function handleAccounts(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -4298,6 +4395,7 @@ return {
 id: a.id,
 invoiceNumber: a.invoice_number || ('INV-' + (10000 + a.id)),
 pa: !!a.pa,
+lastDayOnSite: a.last_day_on_site || null,
 externalId: a.external_id,
 name: a.customer_name,
 meta: a.meta,
@@ -6246,6 +6344,9 @@ return handleIntegrationSyncNow(request, env);
 }
 if (url.pathname === '/api/integrations' && request.method === 'GET') {
 return handleIntegrationsList(request, env);
+}
+if (url.pathname === '/api/accounts/history' && request.method === 'GET') {
+return handleAccountHistory(request, env);
 }
 if (url.pathname === '/api/accounts/ping' && request.method === 'GET') {
 return handleAccountsPing(request, env);
