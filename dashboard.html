@@ -1550,12 +1550,27 @@ async function renderTeam() {
     const res = await fetch('/api/team', { credentials: 'include' });
     const data = await res.json();
     const team = (data && data.team) || [];
+    // Plan + seat usage line, straight from the server's plan limits.
+    var planLine = '';
+    try {
+      var b = window.__me && window.__me.billing;
+      if (b && b.planName) {
+        var used = (b.seats && b.seats.used != null) ? b.seats.used : team.length;
+        var limit = b.seats ? b.seats.limit : null;
+        var over = (limit && used > limit) ? (used - limit) : 0;
+        planLine = '<div id="team-plan-line" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;font-size:13px;color:#5B6B73;">' +
+          '<span style="background:#171717;color:#F3E9D8;border-radius:999px;padding:3px 10px;font-weight:600;font-size:12px;">' + b.planName + ' plan</span>' +
+          '<span>' + used + (limit ? (' of ' + limit) : '') + ' seat' + (used === 1 ? '' : 's') + ' in use' + (limit ? '' : ' (unlimited)') + '</span>' +
+          (over ? ('<span style="background:#FFF4E5;border:1px solid #F2C879;color:#7A4B00;border-radius:8px;padding:4px 10px;">Over your plan limit by ' + over + ' - remove ' + over + ' teammate' + (over === 1 ? '' : 's') + ' or upgrade. New invites are blocked until then.</span>') : '') +
+          '</div>';
+      }
+    } catch (e) {}
     if (!team.length) {
-      wrap.innerHTML = '<p style="color:#5B6B73;font-size:13px;">No team members yet.</p>';
+      wrap.innerHTML = planLine + '<p style="color:#5B6B73;font-size:13px;">No team members yet.</p>';
       return;
     }
     const officeLabel = function(o){ var om = inviteOfficeMap(); return om[o] || ({ arizona:'Arizona', dallas:'Dallas', houston:'Houston', hillcountry:'Hill Country' })[o] || o || String.fromCharCode(8212); };
-    wrap.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>' +
+    wrap.innerHTML = planLine + '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Name</th>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Email</th>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Role</th>' +
@@ -1874,6 +1889,17 @@ async function loadRealAccounts(){
           if (changed) {
             await loadRealAccounts();
             if (newAccount && typeof showToast === 'function') showToast('New invoice synced from your connected system.');
+          }
+          // Plan or billing-state change (upgrade, downgrade, hold): refresh
+          // the user/plan context so limits, banners and the Team page update
+          // without a reload.
+          const knownPlan = window.__me && window.__me.billing ? window.__me.billing.plan : null;
+          const knownStatus = window.__me && window.__me.billing ? window.__me.billing.tenantStatus : null;
+          if (d.plan && knownPlan && (d.plan !== knownPlan || (d.tenantStatus && knownStatus && d.tenantStatus !== knownStatus))) {
+            const planChanged = d.plan !== knownPlan;
+            await loadCurrentUser();
+            if (planChanged && typeof showToast === 'function') showToast('Your plan is now ' + (d.planName || d.plan) + '. New limits are in effect.');
+            if (!planChanged && d.tenantStatus && d.tenantStatus !== 'active') { try { location.reload(); } catch (e) {} }
           }
         }
       }
