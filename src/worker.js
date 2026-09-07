@@ -2958,6 +2958,89 @@ await sendEmail(env, { to: 'operations@claims-collection.net', subject: 'Integra
 return json({ ok: true });
 }
 
+// Turns what an accounting/CRM sync says about payments into invoice_payments
+// rows and keeps the account's paid_amount / status / paid_at in step with them.
+//
+// Accepts either or both of:
+//   raw.payments      - itemised list [{ id|externalId, amount, date|depositedOn|paidAt, method, reference, payerName, bankName, memo }]
+//   raw.paidAmount    - the running total applied to the invoice
+// Itemised rows are de-duplicated on external_id; a running total that is ahead
+// of everything itemised is recorded as one synced payment for the difference.
+// An account the CRM marks paid with no amounts at all is treated as paid in
+// full. A running total lower than before is accepted (refund/reversal) but no
+// negative row is written.
+function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
+async function applySyncedPayments(env, tenantId, accountId, raw, ctx) {
+const nowIso = ctx.nowIso || new Date().toISOString();
+const invoiceTotal = round2(ctx.invoiceTotal);
+let paid = round2(ctx.prevPaid);
+let recorded = 0;
+const list = Array.isArray(raw.payments) ? raw.payments.slice(0, 50) : [];
+for (const p of list) {
+if (!p) continue;
+const amt = round2(p.amount);
+if (!(amt > 0)) continue;
+const ext = p.id || p.externalId || p.paymentId || null;
+if (ext) {
+const dup = await pgSelectOne(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&external_id=' + pgEq(String(ext).slice(0, 120)) + '&select=id');
+if (dup) continue;
+}
+await pgInsert(env, 'invoice_payments', {
+tenant_id: tenantId, account_id: accountId, amount: amt,
+method: p.method ? String(p.method).slice(0, 40) : 'integration',
+deposited_on: normalizeDateOnly(p.date || p.depositedOn || p.paidAt || p.paidOn || nowIso),
+payer_name: p.payerName ? String(p.payerName).slice(0, 160) : (raw.customerName ? String(raw.customerName).slice(0, 160) : null),
+reference: p.reference ? String(p.reference).slice(0, 80) : null,
+bank_name: p.bankName ? String(p.bankName).slice(0, 120) : null,
+memo: p.memo ? String(p.memo).slice(0, 500) : 'Synced from accounting integration',
+source: 'integration',
+external_id: ext ? String(ext).slice(0, 120) : null
+});
+recorded = round2(recorded + amt);
+}
+paid = round2(paid + recorded);
+const crmTotal = ctx.rawPaidAmount;
+if (crmTotal !== null && crmTotal !== undefined) {
+if (crmTotal - paid > 0.005) {
+await pgInsert(env, 'invoice_payments', {
+tenant_id: tenantId, account_id: accountId, amount: round2(crmTotal - paid),
+method: raw.paymentMethod ? String(raw.paymentMethod).slice(0, 40) : (raw.lastPaymentMethod ? String(raw.lastPaymentMethod).slice(0, 40) : 'integration'),
+deposited_on: normalizeDateOnly(raw.paymentDate || raw.lastPaymentDate || ctx.rawPaidAt || nowIso),
+payer_name: raw.payerName ? String(raw.payerName).slice(0, 160) : (raw.customerName ? String(raw.customerName).slice(0, 160) : null),
+reference: raw.paymentReference ? String(raw.paymentReference).slice(0, 80) : null,
+bank_name: null,
+memo: 'Synced from accounting integration',
+source: 'integration',
+external_id: raw.paymentId ? String(raw.paymentId).slice(0, 120) : null
+});
+}
+paid = round2(crmTotal);
+}
+// The CRM says paid with no amounts: the whole invoice was collected.
+if (ctx.status === 'paid' && invoiceTotal > 0 && paid + 0.005 < invoiceTotal) {
+await pgInsert(env, 'invoice_payments', {
+tenant_id: tenantId, account_id: accountId, amount: round2(invoiceTotal - paid),
+method: raw.paymentMethod ? String(raw.paymentMethod).slice(0, 40) : 'integration',
+deposited_on: normalizeDateOnly(ctx.rawPaidAt || raw.paymentDate || nowIso),
+payer_name: raw.customerName ? String(raw.customerName).slice(0, 160) : null,
+reference: null, bank_name: null,
+memo: 'Marked paid in the accounting system',
+source: 'integration', external_id: null
+});
+paid = invoiceTotal;
+}
+const fullyPaid = invoiceTotal > 0 && paid + 0.005 >= invoiceTotal;
+const patch = {};
+if (Math.abs(paid - round2(ctx.prevPaid)) > 0.005 || (crmTotal !== null && crmTotal !== undefined)) patch.paid_amount = paid;
+if (fullyPaid && ctx.status !== 'paid') { patch.status = 'paid'; }
+if (fullyPaid && !ctx.existingPaidAt && !ctx.rawPaidAt) { patch.paid_at = nowIso; }
+if (Object.keys(patch).length) {
+patch.updated_at = nowIso;
+await pgUpdate(env, 'accounts', 'id=' + pgEq(accountId), patch);
+}
+return paid;
+}
+
 async function handleAccountingSync(request, env) {
 const authHeader = request.headers.get('Authorization') || '';
 const match = authHeader.match(/^Bearer\s+(.+)$/i);
@@ -2980,9 +3063,16 @@ const office = syncOffices[officeSlug] ? officeSlug : (syncOffices[officeSlug.re
 const escalated = !!raw.escalated;
 const waSent = !!raw.waSent;
 try {
-const existing = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&external_id=' + pgEq(String(raw.externalId)) + '&select=id,status,paid_at,noil_sent_at,demand_letter_sent_at,wa_signed_at');
+const existing = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&external_id=' + pgEq(String(raw.externalId)) + '&select=id,status,paid_at,paid_amount,amount,noil_sent_at,demand_letter_sent_at,wa_signed_at');
 const nowIso = new Date().toISOString();
 const rawPaidAt = raw.paidAt ? String(raw.paidAt) : null;
+// What the accounting system says has been applied so far. Only trusted when
+// it is actually sent - a sync that omits it must never wipe a balance we
+// already track from manual payments.
+const rawPaidAmount = (raw.paidAmount !== undefined && raw.paidAmount !== null && raw.paidAmount !== '' && isFinite(Number(raw.paidAmount))) ? Math.max(0, Number(raw.paidAmount)) : null;
+const invoiceTotalRaw = Number(raw.amount) || 0;
+// Paid in full by amount counts as paid even if the CRM has not flipped the status yet.
+if (rawPaidAmount !== null && invoiceTotalRaw > 0 && rawPaidAmount + 0.005 >= invoiceTotalRaw) status = 'paid';
 const rawNoilSentAt = raw.noilSentAt ? String(raw.noilSentAt) : null;
 const rawDemandLetterSentAt = raw.demandLetterSentAt ? String(raw.demandLetterSentAt) : null;
 const rawWaSignedAt = raw.waSignedAt ? String(raw.waSignedAt) : null;
@@ -2997,7 +3087,6 @@ invoice_number: raw.invoiceNumber ? String(raw.invoiceNumber).slice(0,60) : null
 amount: Number(raw.amount) || 0,
 invoiced_at: raw.invoicedAt ? String(raw.invoicedAt) : null,
 status: status,
-paid_amount: raw.paidAmount != null ? Number(raw.paidAmount) : null,
 department: raw.department ? String(raw.department).slice(0,40) : null,
 category: raw.category ? String(raw.category).slice(0,40) : null,
 escalated: escalated,
@@ -3037,6 +3126,23 @@ demand_letter_sent_at: rawDemandLetterSentAt,
 wa_signed_at: rawWaSignedAt
 }));
 acctId = inserted ? inserted.id : null;
+}
+// Payments the accounting system reports become real payment records, so the
+// amount received lands in Collected the same day while any balance stays
+// open in the queue.
+if (acctId) {
+try {
+await applySyncedPayments(env, integration.tenant_id, acctId, raw, {
+prevPaid: existing ? Number(existing.paid_amount || 0) : 0,
+invoiceTotal: invoiceTotalRaw,
+status: status,
+existingStatus: existing ? existing.status : null,
+existingPaidAt: existing ? existing.paid_at : null,
+rawPaidAmount: rawPaidAmount,
+rawPaidAt: rawPaidAt,
+nowIso: nowIso
+});
+} catch (e) {}
 }
 // Pull any CRM-side notes and files attached to this account.
 if (raw.notes) { await ingestCrmNotes(env, integration.tenant_id, acctId, raw.notes); }
@@ -3347,7 +3453,8 @@ payer_name: body.payerName ? String(body.payerName).slice(0, 160) : null,
 reference: body.reference ? String(body.reference).slice(0, 80) : null,
 bank_name: body.bankName ? String(body.bankName).slice(0, 120) : null,
 memo: body.memo ? String(body.memo).slice(0, 500) : null,
-recorded_by: user.id
+recorded_by: user.id,
+source: 'manual'
 });
 // A partial payment leaves the invoice open with the balance tracked; it only
 // moves to paid once the full amount has been received.
