@@ -3162,7 +3162,8 @@ let q = 'id=' + pgEq(accountId) + '&tenant_id=' + pgEq(user.tenant_id);
 // Mirror the visibility rules used by /api/accounts so a guessed id cannot
 // reach another company, or another office within the same company.
 if (user.role !== 'admin') q += '&office=' + pgEq(user.office || '__none__');
-return await pgSelectOne(env, 'accounts', q + '&select=id');
+// Enough columns to label an activity row without a second lookup.
+return await pgSelectOne(env, 'accounts', q + '&select=id,customer_name,invoice_number,external_id,office');
 }
 
 async function handleDocumentList(request, env) {
@@ -3220,6 +3221,7 @@ return json({ ok: false, error: 'Could not save that document.' }, 500);
 await enqueueOutbox(env, user.tenant_id, account.id, 'document', row && row.id, {
 name: cleanName, kind: kind, label: label || null, contentType: file.type || null, size: size
 });
+await logUserActivity(env, user, account, 'document', 'Uploaded ' + kind + (label ? ' (' + label + ')' : '') + ': ' + cleanName);
 return json({ ok: true, document: documentToJson(row) });
 }
 
@@ -3307,6 +3309,12 @@ patch[column] = (value === '' ? null : value);
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
 patch.updated_at = new Date().toISOString();
 await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
+// A response being logged is the one edit the dashboard does not also send
+// as a note, so it is recorded here against whoever logged it.
+if (Object.prototype.hasOwnProperty.call(patch, 'response_summary') && patch.response_summary) {
+await logUserActivity(env, user, account, 'response',
+'Logged a response' + (patch.responded ? ' (' + String(patch.responded) + ')' : '') + ': "' + String(patch.response_summary).slice(0, 400) + '"');
+}
 return json({ ok: true, updated: Object.keys(patch).length - 1 });
 }
 
@@ -3348,6 +3356,10 @@ const patch = { paid_amount: newPaid, updated_at: new Date().toISOString() };
 if (fullyPaid) { patch.status = 'paid'; patch.paid_at = new Date(depositedOn + 'T12:00:00Z').toISOString(); }
 if (body.paymentType) patch.payment_type = String(body.paymentType).slice(0, 40);
 await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
+await logUserActivity(env, user, account, 'payment',
+'Recorded a payment of $' + amount.toFixed(2) + (body.method ? ' via ' + String(body.method).slice(0, 40) : '') +
+(body.payerName ? ' from ' + String(body.payerName).slice(0, 160) : '') + (body.reference ? ' (ref ' + String(body.reference).slice(0, 80) + ')' : '') +
+(fullyPaid ? ' - invoice paid in full' : ' - $' + Math.max(0, Math.round((invoiceTotal - newPaid) * 100) / 100).toFixed(2) + ' still due'));
 return json({ ok: true, paidAmount: newPaid, remaining: Math.max(0, Math.round((invoiceTotal - newPaid) * 100) / 100), fullyPaid: fullyPaid });
 }
 
@@ -3555,6 +3567,10 @@ tenant_id: settings.tenant_id, account_id: account.id,
 body: 'Day ' + due.day + ' follow-up sent to ' + recipient.label + ' (' + to + ').',
 author_name: 'clAIms automation', source: 'automation'
 }).catch(function () {});
+await logAutomationActivity(env, settings.tenant_id, account,
+due.kind === 'noil' ? 'noil' : (due.kind === 'demand_letter' ? 'demand' : 'followup'),
+'Day ' + due.day + ' ' + (due.kind === 'noil' ? 'NOIL' : due.kind === 'demand_letter' ? 'demand letter' : 'follow-up') +
+' sent automatically to ' + recipient.label + ' (' + to + ') - "' + subject + '"');
 } else {
 summary.failed++;
 }
@@ -3729,6 +3745,13 @@ author: user.full_name || user.email,
 occurredAt: new Date().toISOString(),
 externalAccountId: account.external_id || null
 });
+// The dashboard tags each note with what kind of action it records
+// ('escalation', 'site', 'update', ...). Sends, payments and uploads are
+// logged by their own handlers, so the dashboard passes 'skip' for those.
+const kind = String(body.activity || 'note');
+if (body.source !== 'automation' && kind !== 'skip') {
+await logUserActivity(env, user, account, kind, text.slice(0, 600));
+}
 return json({ ok: true, note: noteToJson(row) });
 }
 
@@ -3918,6 +3941,10 @@ body: (draftType === 'noil' ? 'NOIL' : draftType === 'demand' ? 'Demand letter' 
 ' sent to ' + to + ' by ' + (user.full_name || user.email) + '.',
 author_name: user.full_name || user.email, source: 'dashboard'
 }).catch(function () {});
+await logUserActivity(env, user, full,
+draftType === 'noil' ? 'noil' : (draftType === 'demand' ? 'demand' : 'followup'),
+(draftType === 'noil' ? 'NOIL' : draftType === 'demand' ? 'Demand letter' : 'Follow-up') + ' sent to ' + to +
+(body.recipient ? ' (' + String(body.recipient) + ')' : '') + ' - "' + subject + '"' + (sentVia === 'mailbox' ? ' from their own mailbox' : ''));
 
 const usedMailbox = sentVia === 'mailbox';
 return json({ ok: true, via: sentVia,
@@ -4285,6 +4312,86 @@ const planKey = planKeyFor(user);
 return json({ ok: true, v: stamp + ':' + maxId, maxId: maxId, plan: planKey, planName: PLAN_LIMITS[planKey].name, tenantStatus: user.tenant_status || null });
 }
 
+/* ---------------------------------------------------------------------------
+   EMPLOYEE ACTIVITY LOG
+   One row per thing a person (or the cadence automation) did on a company's
+   account: follow-ups, demand letters, NOILs, responses logged, payments
+   recorded, documents uploaded, spreadsheet edits, escalations, team changes.
+   Feeds the admin-only "Employees Activity" tab. Logging is best-effort and
+   never fails the action it describes.
+   --------------------------------------------------------------------------- */
+const AUTOMATION_ACTOR = 'Automated Reach Outs';
+const ACTIVITY_TYPES = ['followup', 'demand', 'noil', 'response', 'payment', 'document', 'note', 'update', 'escalation', 'site', 'handoff', 'invoice', 'team', 'settings'];
+
+function activitySummaryFor(account) {
+return {
+account_id: account ? (account.id || null) : null,
+customer_name: account ? (account.customer_name || null) : null,
+invoice_number: account ? (account.invoice_number || (account.id ? ('INV-' + (10000 + account.id)) : null)) : null
+};
+}
+
+async function logUserActivity(env, user, account, type, summary) {
+if (!user || !user.tenant_id) return null;
+const t = ACTIVITY_TYPES.indexOf(String(type || '')) === -1 ? 'note' : String(type);
+try {
+return await pgInsert(env, 'user_activity', Object.assign({
+tenant_id: user.tenant_id,
+user_id: user.id || null,
+actor_name: user.full_name || user.email || 'Team member',
+actor_role: user.role || null,
+actor_office: user.office || null,
+type: t,
+summary: summary ? String(summary).slice(0, 600) : null
+}, activitySummaryFor(account)));
+} catch (e) { return null; }
+}
+
+async function logAutomationActivity(env, tenantId, account, type, summary) {
+if (!tenantId) return null;
+const t = ACTIVITY_TYPES.indexOf(String(type || '')) === -1 ? 'note' : String(type);
+try {
+return await pgInsert(env, 'user_activity', Object.assign({
+tenant_id: tenantId,
+user_id: null,
+actor_name: AUTOMATION_ACTOR,
+actor_role: 'automation',
+actor_office: null,
+type: t,
+summary: summary ? String(summary).slice(0, 600) : null
+}, activitySummaryFor(account)));
+} catch (e) { return null; }
+}
+
+// GET /api/team/activity?days=30 - company admins only. Returns every person
+// on the account (so the filter and the per-person tiles include people with
+// nothing logged yet) plus the activity rows in the window, newest first.
+async function handleTeamActivity(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+const url = new URL(request.url);
+let days = parseInt(url.searchParams.get('days') || '30', 10);
+if (!isFinite(days) || days < 0) days = 30;
+if (days > 3650) days = 3650;
+const since = days ? new Date(Date.now() - days * 86400000).toISOString() : null;
+const [people, rows] = await Promise.all([
+pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,status&order=id.asc'),
+pgSelect(env, 'user_activity', 'tenant_id=' + pgEq(user.tenant_id) + (since ? ('&created_at=gte.' + encodeURIComponent(since)) : '') + '&select=id,user_id,actor_name,actor_role,actor_office,account_id,customer_name,invoice_number,type,summary,created_at&order=created_at.desc&limit=1500')
+]);
+const peopleOut = (people || []).map(function (p) {
+return { id: p.id, name: p.full_name || p.email, email: p.email, role: p.role, office: p.office || null, status: p.status };
+});
+const activity = (rows || []).map(function (r) {
+return {
+id: r.id, at: r.created_at, userId: r.user_id, actor: r.actor_name || (r.user_id ? 'Team member' : AUTOMATION_ACTOR),
+role: r.actor_role, office: r.actor_office, accountId: r.account_id, customer: r.customer_name,
+invoiceNumber: r.invoice_number, type: r.type, summary: r.summary
+};
+});
+return json({ ok: true, days: days, automationActor: AUTOMATION_ACTOR, people: peopleOut, activity: activity });
+}
+
 // Everything that has ever happened on one account, in one call: the account
 // itself, every communication (cadence and manual), external activity pushed
 // by the CRM, payments, documents, notes, other invoices for the same
@@ -4490,6 +4597,7 @@ const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:5
 '<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days.</p>' +
 '</div>';
 await sendEmail(env, { to: email, subject: "You've been added to clAIms", html, kind: 'team_invite', tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL });
+await logUserActivity(env, user, null, 'team', 'Invited ' + (fullName || email) + ' (' + email + ') as ' + role + ' at ' + (inviteOffices[office] || office));
 return json({ ok: true, id: newUserId });
 }
 
@@ -4501,7 +4609,11 @@ let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
 if (!id) return json({ ok: false, error: 'Missing id' }, 400);
+const removed = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=email,full_name,role');
 await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&role=neq.admin', { status: 'disabled' });
+if (removed && removed.role !== 'admin') {
+await logUserActivity(env, user, null, 'team', 'Removed ' + (removed.full_name || removed.email) + ' (' + removed.email + ') from the team');
+}
 return json({ ok: true });
 }
 
@@ -4684,6 +4796,7 @@ const seatErr = await seatLimitError(env, admin);
 if (seatErr) return json({ ok: false, error: seatErr, code: 'seat_limit' }, 403);
 }
 await pgUpdate(env, 'users', 'id=' + pgEq(targetId), { status: 'active' });
+await logUserActivity(env, admin, null, 'team', 'Approved ' + (target.full_name || target.email) + ' (' + target.email + ') to join the team');
 return json({ ok: true });
 }
 
@@ -4696,6 +4809,7 @@ const targetId = body.userId;
 const target = await pgSelectOne(env, 'users', 'id=' + pgEq(targetId) + '&tenant_id=' + pgEq(admin.tenant_id) + '&select=*');
 if (!target) return json({ ok: false, error: 'User not found' }, 404);
 await pgUpdate(env, 'users', 'id=' + pgEq(targetId), { status: 'rejected' });
+await logUserActivity(env, admin, null, 'team', 'Declined ' + (target.full_name || target.email) + ' (' + target.email + ')\'s request to join');
 return json({ ok: true });
 }
 
@@ -6353,6 +6467,9 @@ return handleAccountsPing(request, env);
 }
 if (url.pathname === '/api/accounts' && request.method === 'GET') {
 return handleAccounts(request, env);
+}
+if (url.pathname === '/api/team/activity' && request.method === 'GET') {
+return handleTeamActivity(request, env);
 }
 if (url.pathname === '/api/team' && request.method === 'GET') {
 return handleTeamList(request, env);
