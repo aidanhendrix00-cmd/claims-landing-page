@@ -888,6 +888,7 @@
 
     <div class="drawer-actions">
       <button class="btn-small" id="detail-escalate-btn" onclick="escalateFromDetail()">Escalate</button>
+      <button class="btn-ghost" onclick="openAccountHistory(currentDetailId)">Account History</button>
       <button class="btn-ghost" onclick="openDrawer(currentDetailId, 'followup')">Draft Follow-Up</button>
       <button class="btn-amber" id="detail-demand-btn" style="display:none;" onclick="openDrawer(currentDetailId, 'demand')">Draft Demand Letter</button>
       <button class="btn-rust" id="detail-noil-btn" style="display:none;" onclick="openDrawer(currentDetailId, 'noil')">Draft NOIL</button>
@@ -897,6 +898,60 @@
 </div>
 
 <!-- ===================== RECORD PAYMENT DRAWER ===================== -->
+<div class="overlay" id="overlay-history">
+  <div class="drawer wide" style="max-width:860px;">
+    <div class="drawer-head"><h3 id="hist-title">Account History</h3><button class="close" onclick="closeAccountHistory()">Close ×</button></div>
+    <div class="drawer-sub" id="hist-sub"></div>
+    <div id="hist-summary" class="hist-grid"></div>
+    <div class="drawer-section">
+      <h4>Timeline <span id="hist-timeline-count" style="text-transform:none;font-weight:400;"></span></h4>
+      <div id="hist-timeline"></div>
+    </div>
+    <div class="drawer-section">
+      <h4>Follow-ups, demand letters &amp; NOILs</h4>
+      <div id="hist-comms"></div>
+    </div>
+    <div class="drawer-section">
+      <h4>Payments</h4>
+      <div id="hist-payments"></div>
+    </div>
+    <div class="drawer-section">
+      <h4>Documents</h4>
+      <div id="hist-docs"></div>
+    </div>
+    <div class="drawer-section">
+      <h4>Notes &amp; activity</h4>
+      <div id="hist-notes"></div>
+    </div>
+    <div class="drawer-section">
+      <h4>Other invoices for this customer</h4>
+      <div id="hist-related"></div>
+    </div>
+  </div>
+</div>
+<style>
+  .hist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px 16px;margin:14px 0 4px;}
+  .hist-kv{background:var(--panel-soft,#F7F5EF);border:1px solid var(--line);border-radius:10px;padding:9px 12px;}
+  .hist-kv .k{font-family:var(--font-mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--slate-soft);}
+  .hist-kv .v{font-size:13.5px;font-weight:600;color:var(--ink);margin-top:3px;word-break:break-word;}
+  .hist-kv .v.muted{color:var(--slate-soft);font-weight:400;}
+  .hist-kv input[type=date]{width:100%;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12.5px;margin-top:3px;background:#fff;}
+  .tl{border-left:2px solid var(--line);margin:4px 0 0 8px;padding-left:16px;}
+  .tl-item{position:relative;padding:7px 0 9px;font-size:12.5px;}
+  .tl-item:before{content:"";position:absolute;left:-23px;top:12px;width:10px;height:10px;border-radius:50%;background:var(--line);border:2px solid #fff;box-shadow:0 0 0 1px var(--line);}
+  .tl-item.followup:before{background:#2E6BD1;} .tl-item.demand:before{background:#D98A1E;} .tl-item.noil:before{background:#B23A2E;}
+  .tl-item.payment:before{background:#1F5346;} .tl-item.document:before{background:#7A5AF5;} .tl-item.site:before{background:#C29B57;}
+  .tl-item.escalation:before{background:#B23A2E;} .tl-item.invoice:before{background:#171717;} .tl-item.crm:before{background:#4A7C9E;}
+  .tl-item .tl-when{font-family:var(--font-mono);font-size:10.5px;color:var(--slate-soft);}
+  .tl-item .tl-title{font-weight:600;color:var(--ink);}
+  .tl-item .tl-detail{color:var(--slate);font-size:12px;margin-top:2px;}
+  .tl-badge{display:inline-block;font-family:var(--font-mono);font-size:9.5px;padding:1px 6px;border-radius:4px;margin-left:6px;background:#EEE9DC;color:#5B5343;vertical-align:middle;}
+  .hist-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .hist-table th{text-align:left;padding:6px 8px;border-bottom:2px solid var(--line);font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-soft);}
+  .hist-table td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .hist-empty{font-size:12.5px;color:var(--slate-soft);padding:8px 0;}
+  .hist-link{color:var(--ink);text-decoration:underline;cursor:pointer;}
+</style>
 <div class="overlay" id="overlay-payment">
   <div class="drawer">
     <div class="drawer-head"><h3>Record a Payment</h3><button class="close" onclick="closePaymentForm()">Close ×</button></div>
@@ -1825,7 +1880,9 @@ async function loadRealAccounts(){
           responded: a.responded || 'none',
           responseSummary: a.responseSummary || '',
           projectedPaymentDate: dayOnly(a.projectedPaymentDate) || projected,
-          lastOnSiteDate: dayOnly(a.invoicedDate)
+          lastDayOnSite: dayOnly(a.lastDayOnSite),
+          lastOnSiteDate: dayOnly(a.lastDayOnSite) || dayOnly(a.invoicedDate),
+          contactEmail: a.contactEmail || null
         };
         invoices.push(inv);
         if (isPaid) {
@@ -2230,6 +2287,7 @@ function todoRowHTML(item, num, priority){
           <div class="age-bar"><div class="age-fill" style="width:${Math.min(100, invoiceAgeDays(inv)/90*100)}%;"></div></div>
         </div>
         <div class="actions">
+          <button class="btn-small" onclick="openAccountHistory(${inv.id})" title="Every follow-up, letter, payment, document and note on this account">Account History</button>
           <button class="btn-small" onclick="openDetail(${inv.id})">Manage</button>
           <button class="btn-primary" onclick="openDrawer(${inv.id}, 'followup')">Draft Now</button>
         </div>
@@ -3075,6 +3133,196 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('overlay-detail').classList.add('open');
   }
   function closeDetail(){ document.getElementById('overlay-detail').classList.remove('open'); currentDetailId = null; renderAll(); }
+
+  /* ============================================================
+     ACCOUNT HISTORY - everything that ever happened on an account
+     ============================================================ */
+  let currentHistoryId = null;
+  function hEsc(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function hMoney(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+  // Demo activity stamps look like "Sep 7, 2:15 PM" (no year); the Date parser
+  // turns those into 2001, so anything before 2015 is treated as unparsable and
+  // shown verbatim instead.
+  function hParse(v){ if(!v) return null; const s = String(v); const d = (s.length > 10 || s.indexOf('T') !== -1) ? new Date(s) : new Date(s + 'T12:00:00'); if(isNaN(d.getTime()) || d.getFullYear() < 2015) return null; return d; }
+  function hDate(v){ const d = hParse(v); return d ? d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}) : (v ? String(v) : '—'); }
+  function hDateTime(v){ const d = hParse(v); if(!d) return v ? String(v) : ''; const s = String(v); return (s.length > 10 && s.indexOf('T') !== -1) ? d.toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : d.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }
+  function hDaysSince(v){ const d = hParse(v); return d ? Math.max(0, Math.floor((Date.now() - d.getTime())/86400000)) : null; }
+  function canEditLastDay(){ const r = state.currentUser && state.currentUser.role; return !r || r === 'admin' || r === 'manager'; }
+
+  async function openAccountHistory(id){
+    const inv = findInv(id);
+    if(!inv) return;
+    currentHistoryId = id;
+    document.getElementById('hist-title').textContent = 'Account History — ' + inv.name;
+    document.getElementById('hist-sub').textContent = [inv.invoiceNumber, OFFICE_LABELS[inv.officeLocation] || inv.officeLocation, DEPARTMENT_LABELS[inv.department], inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ');
+    document.getElementById('hist-summary').innerHTML = '';
+    document.getElementById('hist-timeline').innerHTML = '<div class="hist-empty">Loading…</div>';
+    ['hist-comms','hist-payments','hist-docs','hist-notes','hist-related'].forEach(function(k){ document.getElementById(k).innerHTML = ''; });
+    document.getElementById('overlay-detail').classList.remove('open');
+    document.getElementById('overlay-history').classList.add('open');
+    let data = null;
+    if(isRemoteInvoice(inv)){
+      try {
+        const r = await fetch('/api/accounts/history?accountId=' + encodeURIComponent(id), { credentials: 'same-origin', cache: 'no-store' });
+        const j = await r.json();
+        if(j && j.ok) data = j;
+      } catch(e){ data = null; }
+    }
+    if(!data) data = synthesizeHistory(inv);
+    if(currentHistoryId !== id) return;
+    renderAccountHistory(inv, data);
+  }
+  function closeAccountHistory(){ document.getElementById('overlay-history').classList.remove('open'); currentHistoryId = null; }
+
+  // Demo / offline: assemble the same shape the API returns from what the
+  // dashboard already knows about the invoice.
+  function synthesizeHistory(inv){
+    const comms = [];
+    ((state.commsLog) || []).filter(function(c){ return String(c.invoiceId) === String(inv.id); }).forEach(function(c){
+      comms.push({ at: c.sentAt, label: c.draftType || 'Follow-up', recipientRole: inv.contact || null, recipientEmail: null, subject: c.preview || null, status: c.status || 'sent', cadenceDay: null, source: c.source || 'manual' });
+    });
+    if(!comms.length && inv.followups > 0){
+      const start = hParse(inv.invoiceDate) || new Date(Date.now() - inv.days * 86400000);
+      const end = hParse(inv.lastContact) || new Date();
+      const span = Math.max(1, end.getTime() - start.getTime());
+      for(let i = 1; i <= inv.followups; i++){
+        const at = new Date(start.getTime() + span * (i / (inv.followups + 1)));
+        comms.push({ at: at.toISOString(), label: 'Follow-up', recipientRole: inv.contact || null, recipientEmail: null, subject: 'Follow-up on invoice ' + (inv.invoiceNumber || ''), status: 'sent', cadenceDay: null, source: 'automation' });
+      }
+    }
+    const payments = ((state.paymentsLog) || []).filter(function(p){ return String(p.invoiceId) === String(inv.id); }).map(function(p){
+      return { at: p.paidDate, amount: p.amount, method: p.paymentMethod, reference: p.referenceNumber || p.checkNumber || null, payerName: p.payerName, bankName: p.bankName, memo: p.memo };
+    });
+    const documents = (inv.documents || []).map(function(d){ return { id: d.id, name: d.name, kind: d.kind, label: d.label || null, createdAt: null, remote: !!d.remote }; });
+    const notes = (inv.activity || []).map(function(a){ return { text: a.text, ts: a.ts, author: a.source === 'automation' ? 'clAIms automation' : (a.source || null), source: a.source || null }; });
+    const related = ((state.invoices) || []).filter(function(x){ return String(x.id) !== String(inv.id) && x.name === inv.name; }).map(function(x){
+      return { id: x.id, invoiceNumber: x.invoiceNumber, amount: x.amount, paidAmount: x.amountPaid || 0, status: x.jobStatus, invoicedAt: x.invoiceDate, paidAt: null, office: x.officeLocation, department: x.department, category: x.category, claimNumber: x.claimNumber };
+    });
+    const account = {
+      id: inv.id, customerName: inv.name, invoiceNumber: inv.invoiceNumber, claimNumber: inv.claimNumber, amount: inv.amount, paidAmount: inv.amountPaid || 0,
+      paidAt: null, status: inv.jobStatus, invoicedAt: inv.invoiceDate, payer: inv.payer, contact: inv.contact, contactEmail: inv.contactEmail || null,
+      office: inv.officeLocation, department: inv.department, category: inv.category, followUpCount: inv.followups || 0, lastContact: inv.lastContact,
+      currentlyWith: inv.currentlyWith, responded: inv.responded, responseSummary: inv.responseSummary, waSent: !!inv.waSent, waSignedAt: inv.waSignedDate,
+      cosSent: !!inv.cosSent, cosSignedAt: inv.cosSignedDate, demandLetterSentAt: inv.demandLetterSentAt, noilSentAt: inv.noilSentAt, lienFiled: !!inv.lienFiled,
+      pa: !!inv.pa, escalated: !!inv.escalated, notifiedName: null, notifiedAt: null, projectedPaymentDate: inv.projectedPaymentDate, paymentType: inv.paymentType,
+      lastDayOnSite: inv.lastDayOnSite || inv.lastOnSiteDate || null, note: inv.note
+    };
+    const timeline = [];
+    const push = function(at, type, title, detail, source){ if(!at) return; timeline.push({ at: at, type: type, title: title, detail: detail || null, source: source || null }); };
+    push(account.invoicedAt, 'invoice', 'Invoice ' + (account.invoiceNumber || '') + ' created for ' + hMoney(account.amount), null, 'system');
+    push(account.lastDayOnSite, 'site', 'Last day on site', null, 'crm');
+    push(account.waSignedAt, 'document', 'Work Authorization signed', null, 'system');
+    push(account.cosSignedAt, 'document', 'Certificate of Satisfaction signed', null, 'system');
+    push(account.demandLetterSentAt, 'demand', 'Demand letter sent', null, 'system');
+    push(account.noilSentAt, 'noil', 'Notice of Intent to Lien sent', null, 'system');
+    comms.forEach(function(c){ const t = /noil/i.test(c.label) ? 'noil' : (/demand/i.test(c.label) ? 'demand' : 'followup'); push(c.at, t, c.label + (c.status === 'sent' ? ' sent' : (c.status ? (' - ' + c.status) : '')), [c.recipientRole, c.subject].filter(Boolean).join(' | '), c.source); });
+    payments.forEach(function(p){ push(p.at, 'payment', 'Payment received: ' + hMoney(p.amount), [p.method, p.reference ? ('ref ' + p.reference) : null, p.payerName].filter(Boolean).join(' - '), 'dashboard'); });
+    notes.forEach(function(n){ push(n.ts, 'note', n.text, n.author ? ('by ' + n.author) : null, n.source); });
+    // Unparsable demo stamps (no year) are the most recent things that happened, so they sort to the top.
+    timeline.sort(function(x, y){ const dx = hParse(x.at), dy = hParse(y.at); return (dy ? dy.getTime() : Date.now()) - (dx ? dx.getTime() : Date.now()); });
+    return { ok: true, account: account, comms: comms, activity: [], payments: payments, documents: documents, notes: notes, related: related, timeline: timeline };
+  }
+
+  function renderAccountHistory(inv, data){
+    const a = data.account || {};
+    const paid = Number(a.paidAmount || 0);
+    const balance = Math.max(0, Number(a.amount || 0) - paid);
+    const lastDay = a.lastDayOnSite || null;
+    const lastDayDays = hDaysSince(lastDay);
+    const tile = function(k, v, cls){ return '<div class="hist-kv"><div class="k">' + k + '</div><div class="v ' + (cls || '') + '">' + v + '</div></div>'; };
+    const dateTile = function(k, v){ return tile(k, v ? hDate(v) : 'Not yet', v ? '' : 'muted'); };
+    const editable = canEditLastDay();
+    const lastDayTile = '<div class="hist-kv"><div class="k">Last day on site</div>' +
+      (editable
+        ? ('<input type="date" value="' + hEsc(lastDay ? String(lastDay).slice(0,10) : '') + '" onchange="setLastDayOnSite(' + inv.id + ', this.value)">')
+        : ('<div class="v ' + (lastDay ? '' : 'muted') + '">' + (lastDay ? hDate(lastDay) : 'Not recorded') + '</div>')) +
+      (lastDayDays != null ? ('<div class="k" style="margin-top:4px;">' + lastDayDays + ' day' + (lastDayDays === 1 ? '' : 's') + ' ago</div>') : '') + '</div>';
+    document.getElementById('hist-summary').innerHTML =
+      tile('Invoice amount', hMoney(a.amount)) +
+      tile('Paid', hMoney(paid)) +
+      tile('Balance due', hMoney(balance), balance > 0 ? '' : 'muted') +
+      tile('Status', hEsc(STATUS_LABELS[a.status] || a.status || '—')) +
+      tile('Invoice date', hDate(a.invoicedAt) + (a.invoicedAt ? (' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.invoicedAt) + 'd)</span>') : '')) +
+      tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>') : 'None yet', a.lastContact ? '' : 'muted') +
+      tile('Follow-ups sent', String(a.followUpCount || 0)) +
+      lastDayTile +
+      dateTile('Work Authorization signed', a.waSignedAt) +
+      dateTile('COS signed', a.cosSignedAt) +
+      dateTile('Demand letter sent', a.demandLetterSentAt) +
+      dateTile('NOIL sent', a.noilSentAt) +
+      tile('Lien filed', a.lienFiled ? 'Yes' : 'No', a.lienFiled ? '' : 'muted') +
+      dateTile('Projected payment', a.projectedPaymentDate) +
+      tile('Currently with', hEsc(CURRENTLY_WITH_LABELS[a.currentlyWith] || a.currentlyWith || '—')) +
+      tile('Payer', hEsc(PAYER_LABELS[a.payer] || a.payer || '—') + (a.pa ? ' <span class="tl-badge">PA</span>' : '')) +
+      tile('Contact', hEsc(a.contact || '—') + (a.contactEmail ? ('<div style="font-weight:400;font-size:12px;">' + hEsc(a.contactEmail) + '</div>') : '')) +
+      tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted') +
+      (a.responded && a.responded !== 'none' ? tile('Last response', hEsc(a.responseSummary || a.responded)) : '');
+
+    const tl = data.timeline || [];
+    document.getElementById('hist-timeline-count').textContent = tl.length ? ('· ' + tl.length + ' event' + (tl.length === 1 ? '' : 's')) : '';
+    document.getElementById('hist-timeline').innerHTML = tl.length
+      ? ('<div class="tl">' + tl.map(function(t){
+          return '<div class="tl-item ' + hEsc(t.type || '') + '"><div class="tl-when">' + hEsc(hDateTime(t.at)) + '</div><div class="tl-title">' + hEsc(t.title) + (t.source ? ('<span class="tl-badge">' + hEsc(String(t.source).toUpperCase()) + '</span>') : '') + '</div>' + (t.detail ? ('<div class="tl-detail">' + hEsc(t.detail) + '</div>') : '') + '</div>';
+        }).join('') + '</div>')
+      : '<div class="hist-empty">Nothing recorded on this account yet.</div>';
+
+    const comms = data.comms || [];
+    document.getElementById('hist-comms').innerHTML = comms.length
+      ? ('<table class="hist-table"><thead><tr><th>When</th><th>Type</th><th>To</th><th>Subject</th><th>Status</th></tr></thead><tbody>' + comms.map(function(c){
+          return '<tr><td style="white-space:nowrap;">' + hEsc(hDateTime(c.at)) + '</td><td>' + hEsc(c.label || c.kind || '') + (c.cadenceDay ? (' <span class="tl-badge">DAY ' + hEsc(c.cadenceDay) + '</span>') : '') + '</td><td>' + hEsc([c.recipientRole, c.recipientEmail].filter(Boolean).join(' · ') || '—') + '</td><td>' + hEsc(c.subject || '—') + '</td><td>' + hEsc(String(c.status || '').replace(/_/g,' ')) + (c.error ? ('<div style="color:#B23A2E;font-size:11px;">' + hEsc(c.error) + '</div>') : '') + '</td></tr>';
+        }).join('') + '</tbody></table>')
+      : '<div class="hist-empty">No follow-ups, demand letters or NOILs have been sent on this account.</div>';
+
+    const pays = data.payments || [];
+    const payTotal = pays.reduce(function(s, p){ return s + Number(p.amount || 0); }, 0);
+    document.getElementById('hist-payments').innerHTML = pays.length
+      ? ('<table class="hist-table"><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Payer</th><th>Memo</th></tr></thead><tbody>' + pays.map(function(p){
+          return '<tr><td style="white-space:nowrap;">' + hEsc(hDate(p.at)) + '</td><td style="font-family:var(--font-mono);">' + hMoney(p.amount) + '</td><td>' + hEsc(p.method || '—') + '</td><td>' + hEsc(p.reference || '—') + '</td><td>' + hEsc(p.payerName || '—') + (p.bankName ? ('<div style="font-size:11px;color:var(--slate-soft);">' + hEsc(p.bankName) + '</div>') : '') + '</td><td>' + hEsc(p.memo || '') + '</td></tr>';
+        }).join('') + '<tr><td></td><td style="font-family:var(--font-mono);font-weight:600;">' + hMoney(payTotal) + '</td><td colspan="4" style="color:var(--slate-soft);">total received · balance ' + hMoney(balance) + '</td></tr></tbody></table>')
+      : '<div class="hist-empty">No payments recorded yet' + (balance > 0 ? (' · balance ' + hMoney(balance)) : '') + '.</div>';
+
+    const docs = data.documents || [];
+    document.getElementById('hist-docs').innerHTML = docs.length
+      ? ('<table class="hist-table"><thead><tr><th>Type</th><th>File</th><th>Added</th><th></th></tr></thead><tbody>' + docs.map(function(d){
+          const remote = d.remote === undefined ? !!d.createdAt : !!d.remote;
+          return '<tr><td>' + hEsc(d.kind || 'Document') + '</td><td>' + (d.label ? (hEsc(d.label) + ' · ') : '') + hEsc(d.name || '') + '</td><td style="white-space:nowrap;">' + hEsc(d.createdAt ? hDate(d.createdAt) : '—') + '</td><td>' + (remote ? ('<span class="hist-link" onclick="openHistoryDoc(\'' + hEsc(String(d.id)) + '\')">Open</span>') : '') + '</td></tr>';
+        }).join('') + '</tbody></table>')
+      : '<div class="hist-empty">No documents attached.</div>';
+
+    const notes = data.notes || [];
+    document.getElementById('hist-notes').innerHTML = notes.length
+      ? ('<div class="activity-feed">' + notes.map(function(n){
+          return '<div class="activity-item"><div class="txt">' + hEsc(n.text || '') + (n.author ? ('<div style="font-size:11px;color:var(--slate-soft);margin-top:2px;">' + hEsc(n.author) + '</div>') : '') + '</div><div class="ts">' + hEsc(hDateTime(n.ts)) + '</div></div>';
+        }).join('') + '</div>')
+      : '<div class="hist-empty">No notes yet.</div>';
+
+    const rel = data.related || [];
+    document.getElementById('hist-related').innerHTML = rel.length
+      ? ('<table class="hist-table"><thead><tr><th>Invoice</th><th>Date</th><th>Amount</th><th>Paid</th><th>Status</th><th></th></tr></thead><tbody>' + rel.map(function(r){
+          const known = !!findInv(r.id);
+          return '<tr><td style="font-family:var(--font-mono);">' + hEsc(r.invoiceNumber || '') + (r.claimNumber ? ('<div style="font-size:11px;color:var(--slate-soft);">Claim ' + hEsc(r.claimNumber) + '</div>') : '') + '</td><td style="white-space:nowrap;">' + hEsc(hDate(r.invoicedAt)) + '</td><td style="font-family:var(--font-mono);">' + hMoney(r.amount) + '</td><td style="font-family:var(--font-mono);">' + hMoney(r.paidAmount) + '</td><td>' + hEsc(STATUS_LABELS[r.status] || r.status || '') + '</td><td>' + (known ? ('<span class="hist-link" onclick="openAccountHistory(' + Number(r.id) + ')">View history</span>') : '') + '</td></tr>';
+        }).join('') + '</tbody></table>')
+      : '<div class="hist-empty">This is the only invoice on file for ' + hEsc(a.customerName || 'this customer') + '.</div>';
+  }
+
+  function openHistoryDoc(docId){
+    fetch('/api/documents/download?id=' + encodeURIComponent(docId), { credentials: 'same-origin' })
+      .then(function(r){ return r.json(); })
+      .then(function(res){ if(res && res.ok && res.url){ window.open(res.url, '_blank', 'noopener'); } else { showToast((res && res.error) || 'Could not open that document.'); } })
+      .catch(function(){ showToast('Could not open that document.'); });
+  }
+
+  function setLastDayOnSite(id, val){
+    if(!canEditLastDay()){ showToast('Only managers and admins can change the last day on site.'); return; }
+    const inv = findInv(id);
+    if(!inv) return;
+    inv.lastDayOnSite = val || null;
+    inv.lastOnSiteDate = val || inv.invoiceDate;
+    persistInvoice(inv, ['lastDayOnSite']);
+    addActivity(inv, val ? ('Last day on site recorded: ' + fmtDate(val) + '.') : 'Last day on site cleared.', 'manual');
+    saveState(); renderAll();
+    showToast(val ? ('Last day on site set to ' + fmtDate(val) + '.') : 'Last day on site cleared.');
+  }
 
   /* ============================================================
      MANUAL "RECORD A PAYMENT" FORM
