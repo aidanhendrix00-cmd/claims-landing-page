@@ -447,6 +447,7 @@
       <button class="nav-item" data-view="automations"><span class="left"><span class="ic">A</span> Automations</span></button>
       <button class="nav-item" data-view="integrations"><span class="left"><span class="ic">I</span> Integrations</span></button>
       <button class="nav-item" data-view="team" data-admin-only="1"><span class="left"><span class="ic">T</span> Team</span></button>
+      <button class="nav-item" data-view="activity" data-admin-only="1"><span class="left"><span class="ic">U</span> Employees Activity</span><span class="count" id="nav-count-activity"></span></button>
     </nav>
 
     <div class="dept-filter-box">
@@ -725,8 +726,68 @@
     </div>
     <div id="team-list-wrap"></div>
   </section>
+
+  <!-- ===================== EMPLOYEES ACTIVITY VIEW (admins) ===================== -->
+  <section class="view" id="view-activity">
+    <div class="topbar">
+      <div><h1>Employees Activity</h1><p>Every follow-up, demand letter, NOIL, response, payment, upload and change made by your team &#8212; plus the Automated Reach Outs clAIms sent on their behalf</p></div>
+      <div class="topbar-actions"><button class="btn-ghost" onclick="loadEmployeeActivity(true)">Refresh</button></div>
+    </div>
+    <div class="act-filters">
+      <label>Person <select id="act-person" onchange="renderActivityView()"><option value="all">Everyone</option></select></label>
+      <label>Activity <select id="act-type" onchange="renderActivityView()">
+        <option value="all">All activity</option>
+        <option value="reachouts">Follow-ups, demand letters &amp; NOILs</option>
+        <option value="followup">Follow-ups</option>
+        <option value="demand">Demand letters</option>
+        <option value="noil">NOILs</option>
+        <option value="response">Responses received</option>
+        <option value="payment">Payments recorded</option>
+        <option value="document">Documents uploaded</option>
+        <option value="escalation">Escalations</option>
+        <option value="changes">Account updates &amp; notes</option>
+        <option value="team">Team changes</option>
+      </select></label>
+      <label>Range <select id="act-range" onchange="loadEmployeeActivity(true)">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last 12 months</option>
+        <option value="0">All time</option>
+      </select></label>
+      <label class="act-check"><input type="checkbox" id="act-people-only" onchange="renderActivityView()"> People only (hide Automated Reach Outs)</label>
+    </div>
+    <div class="section-head"><h2>Who did what</h2></div>
+    <div id="act-summary" class="act-people"></div>
+    <div class="section-head" style="margin-top:22px;"><h2>Activity feed</h2><span id="act-feed-count" class="act-feed-count"></span></div>
+    <div id="act-feed"></div>
+  </section>
   </main>
 </div>
+<style>
+  .act-filters{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:18px;}
+  .act-filters label{display:flex;flex-direction:column;gap:4px;font-family:var(--font-mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--slate-soft);}
+  .act-filters select{min-width:170px;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12.5px;background:#fff;color:var(--ink);font-family:var(--font-body);text-transform:none;letter-spacing:0;}
+  .act-filters label.act-check{flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-family:var(--font-body);font-size:12.5px;color:var(--slate);padding-bottom:6px;}
+  .act-people{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;}
+  .act-person{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;transition:border-color .15s;}
+  .act-person:hover,.act-person.selected{border-color:var(--ink);}
+  .act-person .nm{font-weight:600;font-size:13.5px;color:var(--ink);}
+  .act-person .rl{font-family:var(--font-mono);font-size:10px;letter-spacing:0.05em;text-transform:uppercase;color:var(--slate-soft);margin-top:2px;}
+  .act-person .stats{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin-top:10px;font-size:12px;color:var(--slate);}
+  .act-person .stats b{color:var(--ink);font-family:var(--font-mono);font-weight:600;}
+  .act-person .last{font-size:11px;color:var(--slate-soft);margin-top:8px;}
+  .act-person.auto{background:#FBF7EE;}
+  .act-feed-count{font-family:var(--font-mono);font-size:11px;color:var(--slate-soft);margin-left:10px;}
+  .act-type{display:inline-block;font-family:var(--font-mono);font-size:10px;letter-spacing:0.04em;text-transform:uppercase;padding:2px 7px;border-radius:4px;background:#EEE9DC;color:#5B5343;white-space:nowrap;}
+  .act-type.followup{background:#E3ECFA;color:#1F4E9C;} .act-type.demand{background:#FBE9D8;color:#8A4B18;} .act-type.noil{background:#FADBD8;color:#8A1C13;}
+  .act-type.response{background:#E6F0EC;color:#1F5346;} .act-type.payment{background:#DFEEE9;color:#1F5346;} .act-type.document{background:#ECE6FB;color:#4B2FA8;}
+  .act-type.escalation{background:#FADBD8;color:#8A1C13;} .act-type.team{background:#E8EEF3;color:#2F4A5E;} .act-type.site{background:#F3EBD8;color:#7A5A1E;}
+  .act-who{font-weight:600;color:var(--ink);} .act-who .sub{display:block;font-weight:400;font-size:11px;color:var(--slate-soft);}
+  .act-who.auto{color:#8A4B18;}
+  table.log td.act-detail{color:var(--slate);max-width:420px;}
+  table.log td.act-acct .hist-link{font-size:11.5px;}
+</style>
 
 <!-- ===================== DRAFT DRAWER ===================== -->
 <div class="overlay" id="overlay">
@@ -1594,7 +1655,11 @@ await loadRealIntegrations();
     document.querySelectorAll('[data-manager-only]').forEach(function(el){
       el.style.display = elevated ? '' : 'none';
     });
-    if (state.currentUser.role === 'admin') renderTeam();
+    if (state.currentUser.role === 'admin') {
+      renderTeam();
+      // Prefetch so the Employees Activity badge is right before the tab is opened.
+      if (typeof loadEmployeeActivity === 'function') loadEmployeeActivity(true);
+    }
   } catch (err) { console.error('loadCurrentUser failed', err); }
 }
 
@@ -1732,13 +1797,13 @@ async function loadAccountNotes(invoices){
   }));
 }
 
-function postAccountNote(inv, text){
+function postAccountNote(inv, text, kind){
   if(!inv || !text) return Promise.resolve(null);
   if(!(inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/))) return Promise.resolve(null);
   return fetch('/api/accounts/notes', {
     method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId: inv.id, body: text })
+    body: JSON.stringify({ accountId: inv.id, body: text, activity: kind || 'note' })
   }).then(function(r){ return r.json(); }).catch(function(){ return null; });
 }
 
@@ -1974,7 +2039,8 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
       renderKpis, renderTodoList, renderQueue, renderSheet, renderReport, renderSent, renderResponses,
       renderEscalations, renderAutomationsFeed, renderNavCounts, renderSfSimOptions,
       renderCustomIntegrations, renderRespSimOptions, renderNotifications,
-      renderInvoicedMTD, renderCollectedMTD, renderCollectedAll, renderNetSuitePaymentOptions, renderMoneyPanel
+      renderInvoicedMTD, renderCollectedMTD, renderCollectedAll, renderNetSuitePaymentOptions, renderMoneyPanel,
+      renderActivityIfOpen
     ];
     steps.forEach(fn => {
       try{ fn(); }catch(e){ console.error('renderAll step failed:', fn.name, e); }
@@ -2003,6 +2069,7 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
     const view = btn.dataset.view;
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-' + view).classList.add('active');
+    if(view === 'activity' && typeof loadEmployeeActivity === 'function') loadEmployeeActivity(false);
   });
 
   function renderNavCounts(){
@@ -2016,12 +2083,15 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
      HELPERS
      ============================================================ */
   function findInv(id){ return state.invoices.find(i=>i.id===id); }
-  function addActivity(inv, text, source){
+  function addActivity(inv, text, source, kind){
     // Manual notes are persisted and queued for the CRM; automation notes are
     // already written server-side, so pushing them again would duplicate.
-    if((source || 'manual') === 'manual'){ postAccountNote(inv, text); }
+    // `kind` tells the server what the note records for the Employees Activity
+    // tab ('escalation', 'site', 'update', ...); 'skip' means the server already
+    // logged this action itself (sends, payments, uploads).
+    if((source || 'manual') === 'manual'){ postAccountNote(inv, text, kind); }
     inv.activity = inv.activity || [];
-    inv.activity.unshift({ ts: new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}), text, source: source || 'manual' });
+    inv.activity.unshift({ ts: new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}), text, source: source || 'manual', kind: kind || null, at: new Date().toISOString() });
     // Tracked on the simulated cadence clock (inv.days), not real wall-clock time,
     // so "hasn't been updated in 3 days" is meaningful even inside a fast-forwarded demo.
     inv.lastUpdatedAtDay = inv.days;
@@ -2322,7 +2392,7 @@ if(!inv) return;
 inv.escalated = true;
 inv.notifiedName = null;
 inv.notifiedAt = new Date().toISOString();
-addActivity(inv, 'Invoice escalated for manager attention; removed from autonomous cadence.', 'manual');
+addActivity(inv, 'Invoice escalated for manager attention; removed from autonomous cadence.', 'manual', 'escalation');
 saveState(); renderAll();
 showToast(`${inv.name} moved to Escalations`);
 // The recipient is resolved server-side from the company's own user list
@@ -2357,7 +2427,7 @@ saveState(); renderAll();
     const inv = findInv(id);
     if(!inv) return;
     inv.escalated = false;
-    addActivity(inv, 'Returned to active cadence.', 'manual');
+    addActivity(inv, 'Returned to active cadence.', 'manual', 'escalation');
     saveState(); renderAll();
     showToast(`${inv.name} returned to Queue`);
   }
@@ -2444,7 +2514,7 @@ saveState(); renderAll();
     persistInvoice(inv, [field]);
     const labels = { waSent: 'Work Authorization', cosSent: 'Certificate of Satisfaction', noilSent: 'NOIL', lienFiled: 'Lien', pa: 'PA (Public Adjuster)' };
     const verb = field === 'pa' ? (val ? 'involved' : 'not involved') : (field === 'lienFiled' ? (val ? 'filed' : 'not filed') : (val ? 'sent' : 'not sent'));
-    addActivity(inv, `${labels[field]} marked ${verb} (manual edit via A/R spreadsheet).`, 'manual');
+    addActivity(inv, `${labels[field]} marked ${verb} (manual edit via A/R spreadsheet).`, 'manual', 'update');
     saveState(); renderAll();
   }
   function setSignatureDate(id, field, val){
@@ -2453,7 +2523,7 @@ saveState(); renderAll();
     inv[field] = val || null;
     persistInvoice(inv, [field]);
     const label = field === 'waSignedDate' ? 'Work Authorization' : 'Certificate of Satisfaction';
-    addActivity(inv, val ? `${label} signature date recorded: ${fmtDate(val)}.` : `${label} signature date cleared.`, 'manual');
+    addActivity(inv, val ? `${label} signature date recorded: ${fmtDate(val)}.` : `${label} signature date cleared.`, 'manual', 'update');
     saveState(); renderAll();
   }
   function setProjectedDate(id, val){
@@ -2461,7 +2531,7 @@ saveState(); renderAll();
     if(!inv) return;
     inv.projectedPaymentDate = val;
     persistInvoice(inv, ['projectedPaymentDate']);
-    addActivity(inv, `Projected payment date updated to ${fmtDate(val)}.`, 'manual');
+    addActivity(inv, `Projected payment date updated to ${fmtDate(val)}.`, 'manual', 'update');
     saveState(); renderAll();
   }
   function setPaymentType(id, val){
@@ -2469,7 +2539,7 @@ saveState(); renderAll();
     if(!inv) return;
     inv.paymentType = val || null;
     persistInvoice(inv, ['paymentType']);
-    addActivity(inv, `Payment type set to ${val ? PAYMENT_TYPE_LABELS[val] : 'unspecified'}.`, 'manual');
+    addActivity(inv, `Payment type set to ${val ? PAYMENT_TYPE_LABELS[val] : 'unspecified'}.`, 'manual', 'update');
     saveState(); renderAll();
   }
 
@@ -2744,7 +2814,7 @@ saveState(); renderAll();
     st.paymentsLog.push(rec);
 
     const methodLabel = PAYMENT_METHOD_LABELS[details.method] || details.method;
-    addActivity(inv, `Payment of $${amount.toLocaleString(undefined,{minimumFractionDigits:2})} received via ${methodLabel}${remaining > 0 ? ` \u2014 $${remaining.toLocaleString(undefined,{minimumFractionDigits:2})} remaining` : ''}.${wasFullyPaid ? ' Invoice marked Paid.' : ''}`, details.source === 'automation' ? 'automation' : 'manual');
+    addActivity(inv, `Payment of $${amount.toLocaleString(undefined,{minimumFractionDigits:2})} received via ${methodLabel}${remaining > 0 ? ` \u2014 $${remaining.toLocaleString(undefined,{minimumFractionDigits:2})} remaining` : ''}.${wasFullyPaid ? ' Invoice marked Paid.' : ''}`, details.source === 'automation' ? 'automation' : 'manual', 'skip');
 
     st.financialLog.unshift({
       type: 'payment', invoiceId: inv.id, invoiceName: inv.name, amount,
@@ -3094,7 +3164,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
 
     const contactMap = { insurance: 'Adjuster', pm: 'Property Manager', private: 'Homeowner/Board Contact' };
     const newInv = makeInvoice({ id: state.nextId++, name, meta, payer, department, category, officeLocation, contact: contactMap[payer], amount, days, note, jobStatus:'pending_start' });
-    addActivity(newInv, 'Invoice added to queue.', 'manual');
+    addActivity(newInv, 'Invoice added to queue.', 'manual', 'invoice');
     logFinancialEvent('new_invoice', newInv, amount);
     state.invoices.push(newInv);
     saveState(); renderAll(); closeAddInvoice();
@@ -3319,9 +3389,232 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     inv.lastDayOnSite = val || null;
     inv.lastOnSiteDate = val || inv.invoiceDate;
     persistInvoice(inv, ['lastDayOnSite']);
-    addActivity(inv, val ? ('Last day on site recorded: ' + fmtDate(val) + '.') : 'Last day on site cleared.', 'manual');
+    addActivity(inv, val ? ('Last day on site recorded: ' + fmtDate(val) + '.') : 'Last day on site cleared.', 'manual', 'site');
     saveState(); renderAll();
     showToast(val ? ('Last day on site set to ' + fmtDate(val) + '.') : 'Last day on site cleared.');
+  }
+
+  /* ============================================================
+     EMPLOYEES ACTIVITY (admins) - who on the team did what, company-wide.
+     Real accounts read /api/team/activity; the demo assembles the same
+     shape from what the dashboard already knows.
+     ============================================================ */
+  const ACT_AUTOMATION = 'Automated Reach Outs';
+  const ACT_TYPE_LABELS = { followup: 'Follow-up sent', demand: 'Demand letter sent', noil: 'NOIL sent', response: 'Response received', payment: 'Payment recorded', document: 'Document uploaded', note: 'Note added', update: 'Account updated', escalation: 'Escalation', site: 'Last day on site', handoff: 'File handed off', invoice: 'Invoice added', team: 'Team change', settings: 'Settings changed' };
+  const ACT_ROLE_LABELS = { admin: 'Admin', manager: 'Manager', employee: 'Employee', user: 'Employee', automation: 'Automation' };
+  const DEMO_STAFF = [
+    { id: 'demo-1', name: 'Maria Lopez', role: 'admin', office: 'dallas', status: 'active' },
+    { id: 'demo-2', name: 'Chris Patel', role: 'manager', office: 'houston', status: 'active' },
+    { id: 'demo-3', name: 'Jordan Reyes', role: 'employee', office: 'dallas', status: 'active' },
+    { id: 'demo-4', name: 'Taylor Nguyen', role: 'employee', office: 'arizona', status: 'active' },
+    { id: 'demo-5', name: 'Sam Okafor', role: 'manager', office: 'hill_country', status: 'active' }
+  ];
+  let employeeActivity = { people: [], activity: [], loadedAt: 0, mode: 'demo' };
+  let actLoading = false;
+
+  function actIsRealAdmin(){ return !!(state.currentUser && state.currentUser.role === 'admin'); }
+  function actRangeDays(){ const sel = document.getElementById('act-range'); const n = sel ? parseInt(sel.value, 10) : 30; return isNaN(n) ? 30 : n; }
+  function actViewOpen(){ const v = document.getElementById('view-activity'); return !!(v && v.classList.contains('active')); }
+  // Date-only values stay date-only so the feed shows a day, not a made-up noon.
+  function actAt(v, fallbackMs){ if(v && /^\d{4}-\d{2}-\d{2}$/.test(String(v))) return String(v); const d = hParse(v); return d ? d.toISOString() : new Date(fallbackMs || Date.now()).toISOString(); }
+  function actStaffFor(inv){
+    const office = inv && inv.officeLocation;
+    const pool = DEMO_STAFF.filter(function(p){ return p.office === office; });
+    const list = pool.length ? pool : DEMO_STAFF;
+    const n = Math.abs(Number(inv && inv.id) || 0);
+    return list[n % list.length];
+  }
+  function actManagerFor(inv){
+    const office = inv && inv.officeLocation;
+    const pool = DEMO_STAFF.filter(function(p){ return p.role !== 'employee' && p.office === office; });
+    const list = pool.length ? pool : DEMO_STAFF.filter(function(p){ return p.role !== 'employee'; });
+    const n = Math.abs(Number(inv && inv.id) || 0);
+    return list[n % list.length];
+  }
+
+  async function loadEmployeeActivity(force){
+    if(!document.getElementById('view-activity')) return;
+    if(actIsRealAdmin()){
+      if(actLoading) return;
+      if(!force && employeeActivity.mode === 'real' && (Date.now() - employeeActivity.loadedAt) < 60000){ renderActivityView(); return; }
+      actLoading = true;
+      try {
+        const r = await fetch('/api/team/activity?days=' + actRangeDays(), { credentials: 'same-origin', cache: 'no-store' });
+        const j = await r.json();
+        if(j && j.ok){ employeeActivity = { people: j.people || [], activity: j.activity || [], loadedAt: Date.now(), mode: 'real' }; }
+      } catch(e) {}
+      actLoading = false;
+    } else {
+      employeeActivity = synthesizeEmployeeActivity();
+    }
+    renderActivityView();
+  }
+  function renderActivityIfOpen(){
+    if(!actViewOpen()) return;
+    if(actIsRealAdmin()){ renderActivityView(); } else { employeeActivity = synthesizeEmployeeActivity(); renderActivityView(); }
+  }
+  function actSelectPerson(key){
+    const sel = document.getElementById('act-person'); if(!sel) return;
+    sel.value = (sel.value === key) ? 'all' : key;
+    if(sel.value !== key && sel.value !== 'all') sel.value = 'all';
+    renderActivityView();
+  }
+
+  function synthesizeEmployeeActivity(){
+    const events = [];
+    const auto = { id: 'auto', name: ACT_AUTOMATION, role: 'automation', office: null };
+    const now = Date.now();
+    const push = function(person, at, inv, type, summary){
+      if(!person) return;
+      events.push({ id: 'd' + events.length, at: at, userId: person.id, actor: person.name, role: person.role, office: person.office,
+        accountId: inv ? inv.id : null, customer: inv ? inv.name : null, invoiceNumber: inv ? (inv.invoiceNumber || null) : null, type: type, summary: summary || '' });
+    };
+    const typeKey = function(label){ const t = String(label || '').toLowerCase(); return t.indexOf('noil') !== -1 ? 'noil' : (t.indexOf('demand') !== -1 ? 'demand' : 'followup'); };
+    const stub = function(id, name){ return { id: id, name: name, invoiceNumber: null, officeLocation: null, contact: null }; };
+
+    (state.commsLog || []).forEach(function(c, i){
+      const inv = findInv(c.invoiceId) || stub(c.invoiceId, c.invoiceName);
+      const person = c.source === 'automation' ? auto : actStaffFor(inv);
+      push(person, actAt(c.sentAt, now - i * 60000), inv, typeKey(c.draftType),
+        (c.draftType || 'Follow-Up') + ' sent to ' + (c.recipient || inv.contact || 'the customer') + (c.subject ? ' - "' + c.subject + '"' : '') + (c.status && c.status !== 'sent' ? ' (' + c.status + ')' : ''));
+    });
+    (state.responsesLog || []).forEach(function(r, i){
+      const inv = findInv(r.invoiceId) || stub(r.invoiceId, r.invoiceName);
+      push(actStaffFor(inv), actAt(r.receivedAt, now - i * 90000), inv, 'response', 'Logged a response to the ' + (r.inResponseTo || 'follow-up') + ': "' + (r.summary || '') + '"');
+    });
+    (state.paymentsLog || []).forEach(function(p, i){
+      const inv = findInv(p.invoiceId) || stub(p.invoiceId, p.invoiceName);
+      push(actManagerFor(inv), actAt(p.paidDate, now - i * 120000), inv, 'payment', 'Recorded a payment of ' + hMoney(p.amount) + (p.paymentMethod ? ' via ' + p.paymentMethod : '') + (p.payerName ? ' from ' + p.payerName : ''));
+    });
+
+    (state.invoices || []).forEach(function(inv, idx){
+      const staff = actStaffFor(inv);
+      (inv.activity || []).forEach(function(a, i){
+        if(a.source !== 'manual' || a.kind === 'skip') return;
+        const txt = String(a.text || '');
+        if(/^(Follow-Up|Demand Letter|NOIL) email|^Payment of|uploaded\.$/.test(txt)) return;
+        let t = a.kind || null;
+        if(!t){ t = /escalat|returned to active/i.test(txt) ? 'escalation' : (/last day on site/i.test(txt) ? 'site' : (/moved from/i.test(txt) ? 'handoff' : (/added to queue/i.test(txt) ? 'invoice' : 'update'))); }
+        push(staff, actAt(a.at || a.ts, now - i * 45000), inv, t, txt);
+      });
+      // Reach outs implied by the follow-up count: the cadence automation and the
+      // account's owner alternate, spread across the invoice's life.
+      const n = Number(inv.followups) || 0;
+      const already = (state.commsLog || []).filter(function(c){ return String(c.invoiceId) === String(inv.id); }).length;
+      if(n > already){
+        const start = hParse(inv.invoiceDate) || new Date(now - (Number(inv.days) || 30) * 86400000);
+        const end = hParse(inv.lastContact) || new Date(now - 86400000);
+        const span = Math.max(86400000, end.getTime() - start.getTime());
+        for(let i = 1; i <= n - already; i++){
+          const at = new Date(start.getTime() + span * (i / (n - already + 1)));
+          const isAuto = (i + idx) % 2 === 0;
+          const kind = (inv.noilSent && i === n - already) ? 'noil' : ((inv.demandLetterSentAt && i === n - already - 1) ? 'demand' : 'followup');
+          push(isAuto ? auto : staff, at.toISOString(), inv, kind,
+            ACT_TYPE_LABELS[kind].replace(' sent', '') + ' sent to ' + (inv.contact || 'the customer') + (isAuto ? ' at the Day ' + Math.max(1, Math.round((at.getTime() - start.getTime()) / 86400000)) + ' cadence checkpoint' : ' after reviewing the account'));
+        }
+      }
+      if(inv.escalated && !(inv.activity || []).some(function(a){ return /escalat/i.test(a.text || ''); })){
+        push(staff, actAt(inv.notifiedAt, now - (idx + 1) * 3600000), inv, 'escalation', 'Escalated for manager attention' + (inv.notifiedName ? ' - ' + inv.notifiedName + ' notified' : ''));
+      }
+      if(inv.waSignedDate) push(staff, actAt(inv.waSignedDate), inv, 'update', 'Work Authorization signature date recorded: ' + fmtDate(inv.waSignedDate) + '.');
+      if(inv.cosSignedDate) push(actManagerFor(inv), actAt(inv.cosSignedDate), inv, 'update', 'Certificate of Satisfaction signature date recorded: ' + fmtDate(inv.cosSignedDate) + '.');
+      if(inv.lastDayOnSite) push(actManagerFor(inv), actAt(inv.lastDayOnSite), inv, 'site', 'Last day on site recorded: ' + fmtDate(inv.lastDayOnSite) + '.');
+      const firstDoc = (inv.documents || [])[0];
+      if(firstDoc){
+        const d0 = hParse(inv.invoiceDate) || new Date(now - (Number(inv.days) || 30) * 86400000);
+        push(staff, isoDate(new Date(Math.min(now, d0.getTime() + 86400000))), inv, 'document', 'Uploaded ' + (firstDoc.kind || 'Document') + ': ' + (firstDoc.label || firstDoc.name || ''));
+      }
+    });
+
+    push(DEMO_STAFF[0], new Date(now - 12 * 86400000).toISOString(), null, 'team', 'Invited Sam Okafor (sam.okafor@example.com) as manager at Hill Country');
+    push(DEMO_STAFF[1], new Date(now - 20 * 86400000).toISOString(), null, 'team', 'Approved Taylor Nguyen (taylor.nguyen@example.com) to join the team');
+
+    events.sort(function(x, y){ const dx = hParse(x.at), dy = hParse(y.at); return (dy ? dy.getTime() : now) - (dx ? dx.getTime() : now); });
+    return { people: DEMO_STAFF.slice(), activity: events.slice(0, 800), loadedAt: now, mode: 'demo' };
+  }
+
+  function actMatchesType(e, sel){
+    if(sel === 'all') return true;
+    if(sel === 'reachouts') return e.type === 'followup' || e.type === 'demand' || e.type === 'noil';
+    if(sel === 'changes') return ['note', 'update', 'site', 'handoff', 'invoice', 'settings'].indexOf(e.type) !== -1;
+    return e.type === sel;
+  }
+  function actPersonKey(e){ return e.role === 'automation' ? 'auto' : (e.userId !== null && e.userId !== undefined ? String(e.userId) : ('n:' + (e.actor || ''))); }
+
+  function renderActivityView(){
+    const wrap = document.getElementById('act-feed');
+    const psel = document.getElementById('act-person');
+    if(!wrap || !psel) return;
+    const people = employeeActivity.people || [];
+    const all = employeeActivity.activity || [];
+    const days = actRangeDays();
+    const since = days ? Date.now() - days * 86400000 : 0;
+    const inRange = all.filter(function(e){ if(!since) return true; const d = hParse(e.at); return !d || d.getTime() >= since; });
+
+    const prev = psel.value || 'all';
+    const seen = {};
+    let opts = '<option value="all">Everyone</option>';
+    people.forEach(function(p){ seen[String(p.id)] = 1; opts += '<option value="' + hEsc(String(p.id)) + '">' + hEsc(p.name) + (p.role ? ' (' + (ACT_ROLE_LABELS[p.role] || p.role) + ')' : '') + '</option>'; });
+    inRange.forEach(function(e){ const k = actPersonKey(e); if(k !== 'auto' && !seen[k]){ seen[k] = 1; opts += '<option value="' + hEsc(k) + '">' + hEsc(e.actor || 'Former team member') + '</option>'; } });
+    opts += '<option value="auto">' + hEsc(ACT_AUTOMATION) + '</option>';
+    psel.innerHTML = opts;
+    psel.value = prev;
+    if(psel.value !== prev) psel.value = 'all';
+    const personSel = psel.value;
+    const typeSel = document.getElementById('act-type').value;
+    const peopleOnly = !!document.getElementById('act-people-only').checked;
+
+    const rows = inRange.filter(function(e){
+      if(peopleOnly && e.role === 'automation') return false;
+      if(personSel !== 'all' && actPersonKey(e) !== personSel) return false;
+      return actMatchesType(e, typeSel);
+    });
+
+    const stats = {};
+    inRange.forEach(function(e){
+      if(!actMatchesType(e, typeSel)) return;
+      const k = actPersonKey(e);
+      const s = stats[k] || (stats[k] = { reach: 0, resp: 0, pay: 0, other: 0, last: 0, total: 0 });
+      s.total++;
+      if(e.type === 'followup' || e.type === 'demand' || e.type === 'noil') s.reach++;
+      else if(e.type === 'response') s.resp++;
+      else if(e.type === 'payment') s.pay++;
+      else s.other++;
+      const d = hParse(e.at); const t = d ? d.getTime() : Date.now();
+      if(t > s.last) s.last = t;
+    });
+    const tiles = [];
+    people.forEach(function(p){ tiles.push({ key: String(p.id), name: p.name, role: p.role, office: p.office, status: p.status, auto: false }); });
+    inRange.forEach(function(e){ const k = actPersonKey(e); if(k !== 'auto' && !tiles.some(function(t){ return t.key === k; })) tiles.push({ key: k, name: e.actor || 'Former team member', role: e.role, office: e.office, status: 'removed', auto: false }); });
+    if(!peopleOnly) tiles.push({ key: 'auto', name: ACT_AUTOMATION, role: 'automation', office: null, status: 'active', auto: true });
+    document.getElementById('act-summary').innerHTML = tiles.map(function(t){
+      const s = stats[t.key] || { reach: 0, resp: 0, pay: 0, other: 0, last: 0, total: 0 };
+      const officeLabel = t.office ? (OFFICE_LABELS[t.office] || t.office) : '';
+      const sub = t.auto ? 'clAIms cadence - sends on the team’s behalf' : [(ACT_ROLE_LABELS[t.role] || t.role || ''), officeLabel, (t.status && t.status !== 'active') ? t.status.replace(/_/g, ' ') : ''].filter(Boolean).join(' · ');
+      return '<div class="act-person' + (t.auto ? ' auto' : '') + (personSel === t.key ? ' selected' : '') + '" data-key="' + hEsc(t.key) + '" onclick="actSelectPerson(this.getAttribute(\'data-key\'))">' +
+        '<div class="nm">' + hEsc(t.name) + '</div><div class="rl">' + hEsc(sub) + '</div>' +
+        '<div class="stats"><span><b>' + s.reach + '</b> reach outs</span><span><b>' + s.resp + '</b> responses</span><span><b>' + s.pay + '</b> payments</span><span><b>' + s.other + '</b> other</span></div>' +
+        '<div class="last">' + (s.last ? ('Last activity ' + hEsc(hDateTime(new Date(s.last).toISOString()))) : 'No activity in this range') + '</div></div>';
+    }).join('');
+
+    document.getElementById('act-feed-count').textContent = rows.length ? (rows.length + ' event' + (rows.length === 1 ? '' : 's') + (rows.length > 500 ? ' (showing 500)' : '')) : '';
+    const navc = document.getElementById('nav-count-activity');
+    if(navc) navc.textContent = inRange.length ? String(inRange.length) : '';
+    if(!rows.length){
+      wrap.innerHTML = '<div class="empty">No activity matches these filters yet. Follow-ups, letters, responses, payments, uploads and edits appear here the moment someone on the team makes them.</div>';
+      return;
+    }
+    wrap.innerHTML = '<table class="log"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Account</th><th>Details</th></tr></thead><tbody>' +
+      rows.slice(0, 500).map(function(e){
+        const idNum = (e.accountId !== null && e.accountId !== undefined && String(e.accountId).match(/^[0-9]+$/)) ? Number(e.accountId) : e.accountId;
+        const known = idNum !== null && idNum !== undefined && !!findInv(idNum);
+        const isAuto = e.role === 'automation';
+        const who = '<span class="act-who' + (isAuto ? ' auto' : '') + '">' + hEsc(e.actor || (isAuto ? ACT_AUTOMATION : 'Team member')) +
+          (isAuto ? '' : '<span class="sub">' + hEsc([(ACT_ROLE_LABELS[e.role] || e.role || ''), e.office ? (OFFICE_LABELS[e.office] || e.office) : ''].filter(Boolean).join(' · ')) + '</span>') + '</span>';
+        const acct = e.customer ? ('<div>' + hEsc(e.customer) + '</div><div style="font-family:var(--font-mono);font-size:11px;color:var(--slate-soft);">' + hEsc(e.invoiceNumber || '') + '</div>' +
+          (known ? '<span class="hist-link" onclick="openAccountHistory(' + Number(idNum) + ')">View history</span>' : '')) : '<span style="color:var(--slate-soft);">—</span>';
+        return '<tr><td style="white-space:nowrap;">' + hEsc(hDateTime(e.at)) + '</td><td>' + who + '</td><td><span class="act-type ' + hEsc(e.type || '') + '">' + hEsc(ACT_TYPE_LABELS[e.type] || e.type || 'Activity') + '</span></td><td class="act-acct">' + acct + '</td><td class="act-detail">' + hEsc(e.summary || '') + '</td></tr>';
+      }).join('') + '</tbody></table>';
   }
 
   /* ============================================================
@@ -3412,7 +3705,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     if(old === val) return;
     inv.currentlyWith = val;
     persistInvoice(inv, ['currentlyWith']);
-    addActivity(inv, `File manually moved from ${CURRENTLY_WITH_LABELS[old]} to ${CURRENTLY_WITH_LABELS[val]}.`, 'manual');
+    addActivity(inv, `File manually moved from ${CURRENTLY_WITH_LABELS[old]} to ${CURRENTLY_WITH_LABELS[val]}.`, 'manual', 'handoff');
     saveState();
     document.querySelectorAll('#currently-with-toggle .cw-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.val === val);
@@ -3637,7 +3930,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
           // A simulated upload in the Interactive Demo is not a stored file,
           // so it must not offer Open or Remove against real storage.
           inv.documents.push(Object.assign({ remote: !res.demo }, res.document));
-          addActivity(inv, (res.document.label || res.document.name) + ' uploaded.', 'manual');
+          addActivity(inv, (res.document.label || res.document.name) + ' uploaded.', 'manual', 'skip');
           saveState(); renderDetailDocs(inv); renderDetailActivity(inv);
           uploadNote('Uploaded ' + res.document.name + '.', 'good');
           if(nameEl) nameEl.value = '';
@@ -3916,7 +4209,7 @@ Do not invent facts beyond what's given.`;
     // The ball moves to whoever we just emailed, pending their response.
     inv.currentlyWith = recipient === 'adjuster' ? 'adjuster' : (inv.payer === 'pm' ? 'pm' : 'homeowner');
 
-    addActivity(inv, `${typeLabels[draftType]} email ${source==='automation' ? 'automatically ' : ''}sent to ${recipientLabel}${subject ? ` (subject: ${subject})` : ''}. File now with ${CURRENTLY_WITH_LABELS[inv.currentlyWith]}.`, source);
+    addActivity(inv, `${typeLabels[draftType]} email ${source==='automation' ? 'automatically ' : ''}sent to ${recipientLabel}${subject ? ` (subject: ${subject})` : ''}. File now with ${CURRENTLY_WITH_LABELS[inv.currentlyWith]}.`, source, 'skip');
 
     if(status === 'replied'){
       const bank = RESPONSE_BANK[inv.payer] || [];
