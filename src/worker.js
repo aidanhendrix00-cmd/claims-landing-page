@@ -5567,7 +5567,10 @@ headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Cont
 // Server-side proxy for AI drafting: the browser never holds an API key.
 // Uses ANTHROPIC_API_KEY from the worker environment; degrades cleanly when
 // it is not configured (clients fall back to their built-in templates).
-const AI_MODEL = 'claude-sonnet-4-6';
+// Cheapest current model ($1/M input, $5/M output) - plenty for drafting
+// follow-ups, demand letters and NOILs. Swap for claude-sonnet-5 if a
+// higher-quality tier is ever wanted.
+const AI_MODEL = 'claude-haiku-4-5-20251001';
 function anthropicKey(env) { return String(env.ANTHROPIC_API_KEY || '').trim(); }
 
 async function handleAiDraft(request, env) {
