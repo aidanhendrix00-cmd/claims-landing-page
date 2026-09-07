@@ -5025,6 +5025,9 @@ button.ghost{background:#fff;color:#171717;border:1px solid #C9C2B2;}
 <div class="co"><h2>Users report</h2>
 <div class="meta">Emails info@claims-collection.net a dated table of every user account, grouped by company. Goes out automatically every Friday at 6:00 PM Central - or send one right now.</div>
 <button class="act" id="rep-send">Send report now</button> <span id="rep-msg" style="font-size:12px;"></span></div>
+<div class="co"><h2>AI drafting</h2>
+<div class="meta">Checks that the ANTHROPIC_API_KEY stored in Cloudflare is accepted by Anthropic by sending a one-word test request. If it fails, the message tells you exactly what to fix.</div>
+<button class="act" id="ai-test">Test AI drafting</button> <span id="ai-msg" style="font-size:12px;"></span></div>
 <div id="list"></div>
 </div></div>
 <script>
@@ -5147,6 +5150,15 @@ fetch('/api/admin/reports/users?key='+encodeURIComponent(KEY))
 .then(function(r){ return r.json(); })
 .then(function(d){ repBtn.disabled = false; setMsg('rep-msg', (d&&d.ok)?'Sent - check the info@ inbox.':(((d&&d.error)||'Failed')+' - reload this page and try again.'), !!(d&&d.ok)); })
 .catch(function(){ repBtn.disabled = false; setMsg('rep-msg','Network error - try again.',false); });
+}); }
+var aiBtn = document.getElementById('ai-test');
+if(aiBtn){ aiBtn.addEventListener('click', function(){
+aiBtn.disabled = true;
+setMsg('ai-msg','Testing...',true);
+fetch('/api/admin/ai-status?key='+encodeURIComponent(KEY))
+.then(function(r){ return r.json(); })
+.then(function(d){ aiBtn.disabled = false; if(d&&d.ok){ setMsg('ai-msg','Working - '+(d.model||'the model')+' replied "'+(d.reply||'OK')+'". AI drafting is live for every user.',true); } else { setMsg('ai-msg','Not working - '+((d&&d.error)||'unknown error')+(d&&d.hint?(' >> '+d.hint):''),false); } })
+.catch(function(){ aiBtn.disabled = false; setMsg('ai-msg','Network error - try again.',false); });
 }); }
 document.getElementById('go').addEventListener('click', function(){ loadData(document.getElementById('key').value.trim()); });
 document.getElementById('key').addEventListener('keydown', function(e){ if(e.key==='Enter'){ loadData(e.target.value.trim()); } });
@@ -5555,10 +5567,14 @@ headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Cont
 // Server-side proxy for AI drafting: the browser never holds an API key.
 // Uses ANTHROPIC_API_KEY from the worker environment; degrades cleanly when
 // it is not configured (clients fall back to their built-in templates).
+const AI_MODEL = 'claude-sonnet-4-6';
+function anthropicKey(env) { return String(env.ANTHROPIC_API_KEY || '').trim(); }
+
 async function handleAiDraft(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false, error: 'Not signed in' }, 401);
-if (!env.ANTHROPIC_API_KEY) return json({ ok: false, error: 'AI drafting is not configured yet.', code: 'not_configured' }, 503);
+const apiKey = anthropicKey(env);
+if (!apiKey) return json({ ok: false, error: 'AI drafting is not configured yet.', code: 'not_configured' }, 503);
 let body;
 try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
 const prompt = String(body.prompt || '').slice(0, 8000);
@@ -5567,15 +5583,55 @@ const maxTokens = Math.min(Math.max(parseInt(body.maxTokens, 10) || 1000, 100), 
 try {
 const res = await fetch('https://api.anthropic.com/v1/messages', {
 method: 'POST',
-headers: { 'Content-Type': 'application/json', 'x-api-key': env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] })
+headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+body: JSON.stringify({ model: AI_MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] })
 });
 const data = await res.json();
-if (!res.ok) return json({ ok: false, error: (data && data.error && data.error.message) || 'AI request failed' }, 502);
+if (!res.ok) {
+const msg = (data && data.error && data.error.message) || 'AI request failed';
+console.error('ai-draft failed', res.status, msg);
+return json({ ok: false, error: msg }, 502);
+}
 const text = (data.content || []).map(function (b) { return b.type === 'text' ? b.text : ''; }).filter(Boolean).join('\n').trim();
 if (!text) return json({ ok: false, error: 'No draft returned' }, 502);
 return json({ ok: true, text: text });
-} catch (e) { return json({ ok: false, error: 'AI request failed' }, 502); }
+} catch (e) { console.error('ai-draft exception', String(e)); return json({ ok: false, error: 'AI request failed' }, 502); }
+}
+
+// Admin-only health check for AI drafting: reports whether the key is set,
+// whether it looks like an Anthropic key, and what Anthropic actually says
+// when we send it a one-word request. Never returns the key itself.
+async function handleAdminAiStatus(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+const raw = String(env.ANTHROPIC_API_KEY || '');
+const apiKey = raw.trim();
+const info = { configured: !!apiKey, keyLength: apiKey.length, looksLikeKey: /^sk-ant-/.test(apiKey), hadWhitespace: raw !== apiKey, model: AI_MODEL };
+if (!apiKey) return json(Object.assign({ ok: false, error: 'ANTHROPIC_API_KEY is not set in Cloudflare.', hint: 'Cloudflare > Workers & Pages > 123 > Settings > Variables and Secrets > Add variable (type Secret) named ANTHROPIC_API_KEY, paste the key, Deploy.' }, info));
+if (!info.looksLikeKey) return json(Object.assign({ ok: false, error: 'The stored value does not look like an Anthropic API key (they start with sk-ant-).', hint: 'Re-copy the key from console.anthropic.com > API Keys and paste it again into ANTHROPIC_API_KEY in Cloudflare, then Deploy.' }, info));
+try {
+const res = await fetch('https://api.anthropic.com/v1/messages', {
+method: 'POST',
+headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+body: JSON.stringify({ model: AI_MODEL, max_tokens: 16, messages: [{ role: 'user', content: 'Reply with the single word OK.' }] })
+});
+let data = {};
+try { data = await res.json(); } catch (e) {}
+if (!res.ok) {
+const type = (data && data.error && data.error.type) || '';
+const msg = (data && data.error && data.error.message) || ('HTTP ' + res.status);
+const lower = (type + ' ' + msg).toLowerCase();
+let hint = 'Unexpected response from Anthropic - share this message with Claude.';
+if (lower.indexOf('credit') !== -1 || lower.indexOf('billing') !== -1 || lower.indexOf('purchase') !== -1) hint = 'Your Anthropic account has no API credits. Add a payment method or buy credits at console.anthropic.com > Plans & Billing. API usage is billed separately from a Claude.ai subscription.';
+else if (res.status === 401 || lower.indexOf('authentication') !== -1 || lower.indexOf('x-api-key') !== -1) hint = 'Anthropic rejected the key. Re-copy it from console.anthropic.com > API Keys (create a new one if needed) and paste it again into ANTHROPIC_API_KEY in Cloudflare, then Deploy.';
+else if (res.status === 403 || lower.indexOf('permission') !== -1) hint = 'The key does not have permission to use this model or workspace - check the key settings in the Anthropic console.';
+else if (res.status === 404 || lower.indexOf('not_found') !== -1 || lower.indexOf('model') !== -1) hint = 'The model ID is not available on this account - ask Claude to switch AI_MODEL.';
+else if (res.status === 429) hint = 'Rate limited by Anthropic - wait a minute and test again.';
+else if (res.status >= 500) hint = 'Anthropic is having a problem right now - test again in a few minutes.';
+return json(Object.assign({ ok: false, status: res.status, error: (type ? (type + ': ') : '') + msg, hint: hint }, info));
+}
+const text = (data.content || []).map(function (b) { return b.type === 'text' ? b.text : ''; }).filter(Boolean).join(' ').trim();
+return json(Object.assign({ ok: true, status: res.status, reply: text.slice(0, 40) }, info));
+} catch (e) { return json(Object.assign({ ok: false, error: 'Could not reach Anthropic: ' + String(e).slice(0, 200), hint: 'Network problem between Cloudflare and Anthropic - test again in a minute.' }, info)); }
 }
 
 async function handleEscalateNotify(request, env) {
@@ -5862,6 +5918,9 @@ if (url.pathname === '/api/admin/reports/users' && request.method === 'GET') {
 if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
 await runWeeklyUsersReport(env);
 return json({ ok: true, sent: true, to: 'info@claims-collection.net' });
+}
+if (url.pathname === '/api/admin/ai-status' && request.method === 'GET') {
+return handleAdminAiStatus(request, env);
 }
 if (url.pathname === '/api/integrations/request' && request.method === 'POST') {
 return handleIntegrationRequest(request, env);
