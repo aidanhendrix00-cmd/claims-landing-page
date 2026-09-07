@@ -2835,7 +2835,8 @@ ready(function(){
 async function stripeRequest(env, method, path, params) {
   if (!env.STRIPE_SECRET_KEY) return { ok: false, error: 'Stripe is not configured for this environment.' };
   const opts = { method: method, headers: { 'Authorization': 'Bearer ' + env.STRIPE_SECRET_KEY } };
-  let url = 'https://api.stripe.com/v1' + path;
+  // Accept paths with or without a leading slash ('invoices' and '/invoices').
+  let url = 'https://api.stripe.com/v1' + (String(path).charAt(0) === '/' ? path : '/' + path);
   if (params) {
     const form = new URLSearchParams();
     Object.keys(params).forEach(function (k) { if (params[k] !== undefined && params[k] !== null) form.append(k, params[k]); });
@@ -4273,7 +4274,10 @@ const latest = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_i
 const top = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id&order=id.desc&limit=1');
 const stamp = (latest && latest[0] && latest[0].updated_at) || '';
 const maxId = (top && top[0] && top[0].id) || 0;
-return json({ ok: true, v: stamp + ':' + maxId, maxId: maxId });
+// Plan and billing state ride along so an open dashboard notices a plan
+// change (or a hold) within seconds, without a reload.
+const planKey = planKeyFor(user);
+return json({ ok: true, v: stamp + ':' + maxId, maxId: maxId, plan: planKey, planName: PLAN_LIMITS[planKey].name, tenantStatus: user.tenant_status || null });
 }
 
 async function handleAccounts(request, env) {
@@ -4810,6 +4814,12 @@ updated_at: new Date().toISOString()
 }, 'stripe_subscription_id');
 const patch = { status: subscriptionStatusToTenantStatus(sub.status) };
 if (plan) patch.selected_plan = plan;
+// Remember the plan before this event so a real plan change (upgrade or
+// downgrade made in Stripe) can be announced to the company's admins.
+let previousPlan = null;
+if (plan) {
+try { const prevRow = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=selected_plan,recommended_plan'); previousPlan = prevRow ? (prevRow.selected_plan || prevRow.recommended_plan || null) : null; } catch (e) {}
+}
 if (patch.status === 'canceled' || patch.status === 'past_due') {
 // Access continues through the end of the period already paid for, then
 // the company is frozen. paid_through comes from the last paid invoice; if
@@ -4834,7 +4844,102 @@ patch.access_until = null;
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
 // The lock is enforced per-request in fetch() and handleDashboard, so it applies
 // immediately without purging session rows here.
+if (plan && previousPlan && plan !== previousPlan && patch.status === 'active') {
+try { await notifyPlanChange(env, tenantId, previousPlan, plan, 'stripe'); } catch (e) {}
+}
 return tenantId;
+}
+
+// Announce a plan change (upgrade or downgrade) to the company's admins and to
+// the internal alerts inbox. The new limits are already live server-side the
+// moment tenants.selected_plan changes; this makes sure people know.
+async function notifyPlanChange(env, tenantId, fromPlan, toPlan, source) {
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,company_name,selected_plan,recommended_plan');
+if (!tenant) return;
+const fromLimits = PLAN_LIMITS[fromPlan] || null;
+const toLimits = PLAN_LIMITS[toPlan] || PLAN_LIMITS.starter;
+const fromName = fromLimits ? fromLimits.name : (fromPlan || 'previous plan');
+const toName = toLimits.name;
+const seatsUsed = await countSeatsUsed(env, tenantId);
+const overBy = (toLimits.seats && seatsUsed > toLimits.seats) ? (seatsUsed - toLimits.seats) : 0;
+const upgrade = !fromLimits || (toLimits.seats === null) || (fromLimits.seats !== null && toLimits.seats !== null && toLimits.seats > fromLimits.seats);
+const seatsLabel = toLimits.seats ? ('up to ' + toLimits.seats + ' user seats') : 'unlimited user seats';
+const integLabel = toLimits.integrations ? (toLimits.integrations + ' accounting/CRM integration') : 'unlimited integrations';
+const billingNote = source === 'stripe'
+? (upgrade ? 'The prorated difference for the rest of the current billing period is charged to your card on file; your regular price applies from the next renewal.' : 'A prorated credit for the rest of the current billing period is applied to your next invoice; your new price applies from the next renewal.')
+: 'Your billing has been adjusted by the clAIms team.';
+const admins = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&role=' + pgEq('admin') + '&status=' + pgEq('active') + '&select=id,email,full_name') || [];
+for (const admin of admins) {
+if (!admin.email) continue;
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;">' +
+'<h2 style="margin:0 0 12px;">Your clAIms plan is now ' + escapeHtml(toName) + '</h2>' +
+'<p>Hi ' + escapeHtml(admin.full_name || '') + ',</p>' +
+'<p>' + escapeHtml(tenant.company_name || 'Your company') + ' has moved from the <strong>' + escapeHtml(fromName) + '</strong> plan to the <strong>' + escapeHtml(toName) + '</strong> plan. The change is live now across your whole workspace: ' + escapeHtml(seatsLabel) + ' and ' + escapeHtml(integLabel) + '.</p>' +
+'<p>' + escapeHtml(billingNote) + '</p>' +
+(overBy ? ('<p style="background:#FFF4E5;border:1px solid #F2C879;border-radius:8px;padding:10px 12px;"><strong>Action needed:</strong> your team currently has ' + seatsUsed + ' users but the ' + escapeHtml(toName) + ' plan includes ' + toLimits.seats + ' seats. Please remove ' + overBy + ' teammate' + (overBy === 1 ? '' : 's') + ' from the Team page; new invites are blocked until you are within the limit.</p>') : '') +
+'<p><a href="' + SITE_URL + '/account" style="background:#171717;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">View your account</a></p>' +
+'</div>';
+await sendEmail(env, { to: admin.email, subject: 'Your clAIms plan is now ' + toName, html: html, kind: 'plan_changed', tenantId: tenantId, userId: admin.id, from: OPERATIONS_FROM_EMAIL });
+}
+const internal = '<div style="font-family:sans-serif;"><h2>Plan changed</h2><p><b>' + escapeHtml(tenant.company_name || 'A company') + '</b> moved from ' + escapeHtml(fromName) + ' to ' + escapeHtml(toName) + ' (' + escapeHtml(source) + '). Seats in use: ' + seatsUsed + (toLimits.seats ? (' of ' + toLimits.seats) : '') + (overBy ? (' - OVER LIMIT by ' + overBy) : '') + '. Admins notified: ' + admins.length + '.</p></div>';
+await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Plan changed: ' + (tenant.company_name || 'Unknown company') + ' -> ' + toName, html: internal, kind: 'plan_changed_internal', tenantId: tenantId });
+}
+
+// Admin action: move a company to a different plan. When the company has a live
+// Stripe subscription the change is made in Stripe (with proration) and the
+// webhook then updates our records and emails the admins; otherwise the plan is
+// set directly and the same notifications go out.
+async function handleAdminOnboardingPlan(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+const plan = String(body.plan || '').toLowerCase();
+if (!tenantId || !PLAN_LIMITS[plan]) return json({ ok: false, error: 'tenantId and a valid plan (starter, growth, enterprise) are required' }, 400);
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,slug,company_name,selected_plan,recommended_plan,stripe_customer_id');
+if (!tenant) return json({ ok: false, error: 'Company not found' }, 404);
+if (tenant.slug === 'base') return json({ ok: false, error: 'The internal workspace has no plan to change' }, 400);
+const previousPlan = tenant.selected_plan || tenant.recommended_plan || null;
+if (previousPlan === plan) return json({ ok: true, unchanged: true, plan: plan });
+// Try Stripe first.
+if (tenant.stripe_customer_id) {
+const subResult = await getActiveStripeSubscription(env, tenant.stripe_customer_id);
+if (subResult && subResult.ok && subResult.data && subResult.data.id) {
+const sub = subResult.data;
+const item = sub.items && sub.items.data && sub.items.data[0];
+const prices = await stripeRequest(env, 'GET', '/prices', { active: 'true', limit: '100', 'expand[]': 'data.product' });
+let target = null;
+if (prices && prices.ok && prices.data && prices.data.data) {
+for (const p of prices.data.data) {
+if (p.type !== 'recurring') continue;
+if (planFromStripePrice(p) === plan) { target = p; break; }
+}
+}
+if (!target) return json({ ok: false, error: 'No active recurring Stripe price is named for the ' + PLAN_LIMITS[plan].name + ' plan. Create one in Stripe (product or price name containing "' + plan + '") and try again, or contact support to set the plan without changing billing.' }, 400);
+if (item && item.price && item.price.id === target.id) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { selected_plan: plan });
+await notifyPlanChange(env, tenantId, previousPlan, plan, 'manual');
+return json({ ok: true, via: 'database', plan: plan, note: 'Stripe was already on this price; records updated.' });
+}
+const params = { 'items[0][id]': item ? item.id : '', 'items[0][price]': target.id, proration_behavior: 'create_prorations' };
+const upd = await stripeRequest(env, 'POST', '/subscriptions/' + sub.id, params);
+if (!upd || !upd.ok) return json({ ok: false, error: (upd && upd.error) || 'Stripe rejected the plan change' }, 502);
+// The customer.subscription.updated webhook normally lands within a second or
+// two and does the record update + admin emails. Give it a moment; if it has
+// not arrived, do the same work here so the change is never left half-done.
+await new Promise(function (resolve) { setTimeout(resolve, 2500); });
+const nowRow = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=selected_plan');
+if (!nowRow || nowRow.selected_plan !== plan) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { selected_plan: plan });
+await notifyPlanChange(env, tenantId, previousPlan, plan, 'stripe');
+}
+return json({ ok: true, via: 'stripe', plan: plan, priceId: target.id });
+}
+}
+// No live Stripe subscription (enterprise / manual billing): set the plan directly.
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { selected_plan: plan });
+await notifyPlanChange(env, tenantId, previousPlan, plan, 'manual');
+return json({ ok: true, via: 'database', plan: plan, note: 'No Stripe subscription on file - plan set directly; adjust their billing manually.' });
 }
 
 async function mirrorInvoice(env, invoice, statusOverride) {
@@ -5114,6 +5219,14 @@ integs +
 '<div class="msg" id="integmsg-'+i+'"></div>' +
 '<div class="note">Creating a key marks setup as in progress. Plug the key and webhook URL into their accounting system or middleware - the key is shown once.</div>' +
 '</div>' +
+'<div class="box"><h3>Plan</h3>' +
+'<div class="note" style="margin:0 0 8px;">Current: <b>'+esc(c.plan||'none')+'</b> - '+c.userCount+' user'+(c.userCount===1?'':'s')+'. Changing the plan updates their Stripe subscription with proration, applies the new seat and integration limits instantly, and emails their admins.</div>' +
+'<select id="plan-'+i+'" style="width:100%;padding:8px;border:1px solid #E5E0D2;border-radius:6px;font-size:13px;">' +
+['starter','growth','enterprise'].map(function(p){ return '<option value="'+p+'"'+(c.plan===p?' selected':'')+'>'+p.charAt(0).toUpperCase()+p.slice(1)+'</option>'; }).join('') +
+'</select>' +
+'<button class="act" onclick="__setPlan('+i+')">Apply plan</button>' +
+'<div class="msg" id="planmsg-'+i+'"></div>' +
+'</div>' +
 '<div class="box"><h3>Go live</h3>' +
 '<div class="note" style="margin:0 0 8px;">Marking live emails every admin at this company that their workspace is ready.</div>' +
 '<button class="act ghost" onclick="__setStatus('+i+',&quot;not_started&quot;)">Not started</button> ' +
@@ -5159,6 +5272,19 @@ var c = DATA[i];
 post('/api/admin/onboarding/status', { tenantId: c.tenantId, integrationStatus: st }, 'stmsg-'+i, function(d){
 setMsg('stmsg-'+i, st==='complete'?('Live - emailed '+(d.emailed||0)+' admin(s).'):'Saved.', true);
 reload();
+});
+};
+window.__setPlan = function(i){
+var c = DATA[i];
+var sel = document.getElementById('plan-'+i);
+var plan = sel ? sel.value : '';
+if(!plan){ setMsg('planmsg-'+i,'Pick a plan.',false); return; }
+if(plan === c.plan){ setMsg('planmsg-'+i,'Already on '+plan+'.',true); return; }
+setMsg('planmsg-'+i,'Applying...',true);
+post('/api/admin/onboarding/plan', { tenantId: c.tenantId, plan: plan }, 'planmsg-'+i, function(d){
+if(d.unchanged){ setMsg('planmsg-'+i,'Already on '+plan+'.',true); return; }
+setMsg('planmsg-'+i, (d.via==='stripe' ? 'Stripe subscription updated with proration - admins emailed.' : ('Plan set to '+plan+'. '+(d.note||''))), true);
+setTimeout(reload, 1500);
 });
 };
 function loadData(k, quiet){
@@ -5988,6 +6114,9 @@ return handleAdminOnboardingIntegration(request, env);
 }
 if (url.pathname === '/api/admin/onboarding/status' && request.method === 'POST') {
 return handleAdminOnboardingStatus(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/plan' && request.method === 'POST') {
+return handleAdminOnboardingPlan(request, env);
 }
 if (url.pathname === '/api/admin/reports/users' && request.method === 'GET') {
 if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
