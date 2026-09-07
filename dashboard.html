@@ -4205,9 +4205,13 @@ let toastTimer = null;
       var untilStr = (until && !isNaN(until.getTime()))
         ? until.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
         : 'soon';
-      document.getElementById('bgb-text').textContent =
-        'Your subscription is cancelled. Your team keeps access until ' + untilStr + ', then access goes on hold.';
-      document.getElementById('bgb-link').style.display = isAdmin ? 'inline' : 'none';
+      var pastDue = billing.tenantStatus === 'past_due';
+      document.getElementById('bgb-text').textContent = pastDue
+        ? 'A payment for your subscription was declined. Your team keeps access until ' + untilStr + ' (the end of the period already paid for), then access goes on hold until payment is received.'
+        : 'Your subscription is cancelled. Your team keeps access until ' + untilStr + ' (the end of the period already paid for), then access goes on hold.';
+      var bgbLink = document.getElementById('bgb-link');
+      bgbLink.textContent = pastDue ? 'Update payment method' : 'Reactivate subscription';
+      bgbLink.style.display = isAdmin ? 'inline' : 'none';
       b.style.display = 'flex';
     }
 
