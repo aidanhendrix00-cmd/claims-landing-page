@@ -4684,22 +4684,47 @@ return null;
 
 // Non-payment locks a company; it is never deleted. Every record stays in
 // place and access resumes the moment a payment succeeds.
+// Rule: a company keeps access through the end of the period it has already
+// paid for (tenants.paid_through, taken from the last paid invoice), and is
+// frozen after that - whether it cancelled or its payment was declined.
 // Lock states:
-//   past_due -> locked immediately (a payment was due and was not received)
-//   canceled -> access continues until tenants.access_until (30 days after
-//               the last successful payment), then locked
+//   past_due -> 'grace' until access_until (= paid_through), then 'locked'.
+//               A declined renewal has paid_through in the past, so it locks
+//               immediately; a declined mid-cycle charge keeps access until
+//               the paid period ends.
+//   canceled -> 'grace' until access_until (= paid_through, or 30 days after
+//               the last successful payment when paid_through is unknown),
+//               then 'locked'.
 // The platform's own base tenant is never locked.
 const CANCELED_GRACE_DAYS = 30;
 function tenantLockState(tenant, now) {
   if (!tenant) return 'ok';
   if (tenant.slug === 'base') return 'ok';
   const status = String(tenant.status || '');
-  if (status === 'past_due') return 'locked';
-  if (status === 'canceled') {
+  if (status === 'past_due' || status === 'canceled') {
     const until = tenant.access_until ? new Date(tenant.access_until).getTime() : 0;
     return (until && (now || Date.now()) < until) ? 'grace' : 'locked';
   }
   return 'ok';
+}
+// End of the service period a paid invoice covers: the latest line-item
+// period end (line periods are the service window; the invoice's own
+// period_start/end describe the usage window that preceded it).
+function invoicePaidThrough(invoice) {
+  let latest = 0;
+  const lines = (invoice && invoice.lines && invoice.lines.data) || [];
+  for (let i = 0; i < lines.length; i++) {
+    const p = lines[i] && lines[i].period;
+    if (p && p.end && p.end > latest) latest = p.end;
+  }
+  if (!latest && invoice && invoice.period_end) latest = invoice.period_end;
+  return latest ? new Date(latest * 1000).toISOString() : null;
+}
+// The date access should end for a tenant that cancelled or failed to pay:
+// the end of what it already paid for, if that is still in the future.
+function accessEndFromPaidThrough(tenant) {
+  const pt = tenant && tenant.paid_through ? new Date(tenant.paid_through).getTime() : 0;
+  return (pt && pt > Date.now()) ? new Date(pt).toISOString() : null;
 }
 function isTenantLocked(tenant) { return tenantLockState(tenant, Date.now()) === 'locked'; }
 // Paths a company still needs in order to pay its way back out of a lock:
@@ -4785,9 +4810,14 @@ updated_at: new Date().toISOString()
 }, 'stripe_subscription_id');
 const patch = { status: subscriptionStatusToTenantStatus(sub.status) };
 if (plan) patch.selected_plan = plan;
-if (patch.status === 'canceled') {
-// Cancellation grace: the company keeps access until 30 days after the
-// last successful payment, then locks until a payment goes through.
+if (patch.status === 'canceled' || patch.status === 'past_due') {
+// Access continues through the end of the period already paid for, then
+// the company is frozen. paid_through comes from the last paid invoice; if
+// it is unknown (older tenants) fall back to 30 days after the last payment.
+let tenantRow = null;
+try { tenantRow = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=paid_through'); } catch (e) {}
+let accessUntil = accessEndFromPaidThrough(tenantRow);
+if (!accessUntil && patch.status === 'canceled' && !(tenantRow && tenantRow.paid_through)) {
 let lastPaid = null;
 try {
 const paidRows = await pgSelect(env, 'payments', 'tenant_id=' + pgEq(tenantId) + '&status=' + pgEq('paid') + '&select=paid_at&order=paid_at.desc.nullslast&limit=1');
@@ -4795,7 +4825,9 @@ if (paidRows && paidRows[0] && paidRows[0].paid_at) lastPaid = new Date(paidRows
 } catch (e) {}
 if (!lastPaid && sub.current_period_start) lastPaid = sub.current_period_start * 1000;
 if (!lastPaid) lastPaid = Date.now();
-patch.access_until = new Date(lastPaid + CANCELED_GRACE_DAYS * 86400000).toISOString();
+accessUntil = new Date(lastPaid + CANCELED_GRACE_DAYS * 86400000).toISOString();
+}
+patch.access_until = accessUntil;
 } else if (patch.status === 'active') {
 patch.access_until = null;
 }
@@ -5332,14 +5364,18 @@ await mirrorSubscription(env, event.data.object, null);
 }
 
 if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
-const paidTenantId = await mirrorInvoice(env, event.data.object, 'paid');
+const paidInvoice = event.data.object;
+const paidTenantId = await mirrorInvoice(env, paidInvoice, 'paid');
 // A successful payment restores access immediately for a company locked
-// for non-payment or sitting in its cancellation grace window.
+// for non-payment or sitting in its cancellation grace window, and records
+// how far the company is now paid through (never moved backwards).
 if (paidTenantId) {
-const paidTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(paidTenantId) + '&select=status');
-if (paidTenant && (paidTenant.status === 'past_due' || paidTenant.status === 'canceled')) {
-await pgUpdate(env, 'tenants', 'id=' + pgEq(paidTenantId), { status: 'active', access_until: null });
-}
+const paidTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(paidTenantId) + '&select=status,paid_through');
+const paidPatch = {};
+const throughIso = invoicePaidThrough(paidInvoice);
+if (throughIso && (!paidTenant || !paidTenant.paid_through || new Date(throughIso).getTime() > new Date(paidTenant.paid_through).getTime())) paidPatch.paid_through = throughIso;
+if (paidTenant && (paidTenant.status === 'past_due' || paidTenant.status === 'canceled')) { paidPatch.status = 'active'; paidPatch.access_until = null; }
+if (Object.keys(paidPatch).length) await pgUpdate(env, 'tenants', 'id=' + pgEq(paidTenantId), paidPatch);
 }
 }
 
@@ -5347,17 +5383,40 @@ if (event.type === 'invoice.payment_failed') {
 const invoice = event.data.object;
 const failedTenantId = await mirrorInvoice(env, invoice, 'payment_failed');
 if (failedTenantId) {
-await pgUpdate(env, 'tenants', 'id=' + pgEq(failedTenantId), { status: 'past_due' });
+// Freeze at the end of what the company already paid for. A declined
+// renewal has no paid time left, so that is an immediate hold; a declined
+// mid-cycle charge (e.g. an upgrade proration) keeps access until the paid
+// period ends.
 const failedTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(failedTenantId) + '&select=*');
+const accessUntil = accessEndFromPaidThrough(failedTenant);
+await pgUpdate(env, 'tenants', 'id=' + pgEq(failedTenantId), { status: 'past_due', access_until: accessUntil });
 if (failedTenant) {
 const amountDue = invoice.amount_due != null ? (invoice.amount_due / 100).toFixed(2) : '0.00';
+const currency = escapeHtml(String(invoice.currency || 'usd').toUpperCase());
+const untilLabel = accessUntil ? new Date(accessUntil).toLocaleDateString('en-US', { timeZone: 'America/Chicago', year: 'numeric', month: 'long', day: 'numeric' }) : null;
 const failHtml = '<div style="font-family:sans-serif;">' +
 '<h2>Payment failed</h2>' +
-'<p><b>' + escapeHtml(failedTenant.company_name || 'A company') + '</b> could not be charged ' +
-escapeHtml(String(invoice.currency || 'usd').toUpperCase()) + ' ' + amountDue + '.</p>' +
-'<p>The account has been marked past due. Stripe will retry automatically.</p>' +
+'<p><b>' + escapeHtml(failedTenant.company_name || 'A company') + '</b> could not be charged ' + currency + ' ' + amountDue + '.</p>' +
+'<p>' + (untilLabel ? ('The account keeps access until ' + escapeHtml(untilLabel) + ' (end of the paid period), then goes on hold.') : 'The account is on hold now (no paid period remaining).') + ' Stripe will retry automatically; access is restored the moment a payment succeeds.</p>' +
 '</div>';
 await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Payment failed: ' + (failedTenant.company_name || 'Unknown company'), html: failHtml, kind: 'payment_failed', tenantId: failedTenant.id });
+// Tell the company's admins so they can fix the card before (or as) access stops.
+try {
+const admins = await pgSelect(env, 'users', 'tenant_id=' + pgEq(failedTenantId) + '&role=' + pgEq('admin') + '&status=' + pgEq('active') + '&select=id,email,full_name') || [];
+const payLink = invoice.hosted_invoice_url ? escapeHtml(invoice.hosted_invoice_url) : (SITE_URL + '/account/subscription');
+for (const admin of admins) {
+if (!admin.email) continue;
+const custHtml = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;">' +
+'<h2 style="margin:0 0 12px;">Payment failed for ' + escapeHtml(failedTenant.company_name || 'your company') + '</h2>' +
+'<p>Hi ' + escapeHtml(admin.full_name || '') + ',</p>' +
+'<p>We were unable to charge ' + currency + ' ' + amountDue + ' for your clAIms subscription.</p>' +
+'<p>' + (untilLabel ? ('Your team keeps access until <strong>' + escapeHtml(untilLabel) + '</strong>, the end of the period you have already paid for. After that, access is placed on hold until payment is received.') : 'Your paid period has ended, so access is <strong>on hold</strong> until payment is received.') + ' Every record stays exactly as you left it; nothing is deleted.</p>' +
+'<p><a href="' + payLink + '" style="background:#171717;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;">Update payment method</a></p>' +
+'<p style="font-size:12px;color:#666;">We will retry the charge automatically. Access is restored the moment a payment succeeds.</p>' +
+'</div>';
+await sendEmail(env, { to: admin.email, subject: 'Action needed: payment failed for your clAIms subscription', html: custHtml, kind: 'payment_failed_customer', tenantId: failedTenant.id, userId: admin.id, from: OPERATIONS_FROM_EMAIL });
+}
+} catch (e) {}
 }
 }
 }
