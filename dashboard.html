@@ -1017,7 +1017,44 @@
     </div>
   </div>
 </div>
+
+<!-- ===================== MESSAGES SENT DRAWER =====================
+     Opened from the Comms Log's "See messages sent" button: the most recent
+     follow-up, demand letter or NOIL sent on that account, exactly as it went
+     out, with every earlier message on the same account listed beneath. -->
+<div class="overlay" id="overlay-messages">
+  <div class="drawer wide" style="max-width:760px;">
+    <div class="drawer-head"><h3 id="msg-title">Messages sent</h3><button class="close" onclick="closeMessagesSent()">Close ×</button></div>
+    <div class="drawer-sub" id="msg-sub"></div>
+    <div id="msg-current"></div>
+    <div class="drawer-section" id="msg-earlier-wrap">
+      <h4>Earlier messages on this account <span id="msg-earlier-count" style="text-transform:none;font-weight:400;"></span></h4>
+      <div id="msg-earlier"></div>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn-small" id="msg-history-btn" onclick="openAccountHistory(currentMessagesId)">Full account history</button>
+      <button class="btn-small" onclick="closeMessagesSent()">Close</button>
+    </div>
+  </div>
+</div>
 <style>
+  .msg-card{border:1px solid var(--line);border-radius:12px;background:var(--panel-soft,#F7F5EF);padding:14px 16px;margin-top:14px;}
+  .msg-card .msg-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+  .msg-card .msg-type{font-family:var(--font-display);font-size:13.5px;font-weight:700;}
+  .msg-card .msg-when{font-size:11.5px;color:var(--slate);white-space:nowrap;}
+  .msg-meta{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:11.5px;color:var(--slate);margin-bottom:10px;}
+  .msg-meta b{color:var(--ink);font-weight:600;}
+  .msg-subject{font-family:var(--font-mono);font-size:11.5px;color:var(--ink);}
+  .msg-body{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto;}
+  .msg-body.empty{color:var(--slate-soft);font-style:italic;white-space:normal;}
+  .msg-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line);cursor:pointer;flex-wrap:wrap;}
+  .msg-row:last-child{border-bottom:none;}
+  .msg-row:hover{background:var(--panel-soft,#F7F5EF);}
+  .msg-row.active{background:var(--panel-soft,#F7F5EF);}
+  .msg-row .l{min-width:0;}
+  .msg-row .l .t{font-size:12.5px;font-weight:600;}
+  .msg-row .l .p{font-size:11.5px;color:var(--slate);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px;}
+  .msg-row .r{font-size:11.5px;color:var(--slate);white-space:nowrap;text-align:right;}
   .hist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px 16px;margin:14px 0 4px;}
   .hist-kv{background:var(--panel-soft,#F7F5EF);border:1px solid var(--line);border-radius:10px;padding:9px 12px;}
   .hist-kv .k{font-family:var(--font-mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--slate-soft);}
@@ -3059,7 +3096,7 @@ saveState(); renderAll();
     if(rows.length === 0){ wrap.innerHTML = `<div class="empty">Nothing sent yet${state.deptFilter!=='all' ? ' for this department' : ''}. Cadence follow-ups will appear here automatically as invoices reach each checkpoint.</div>`; return; }
     wrap.innerHTML = `
       <table class="log">
-        <thead><tr><th>Customer</th><th>Office</th><th>Department</th><th>Amount</th><th>Sent</th><th>Type</th><th>Sent To</th><th>Subject</th><th>Source</th><th>Status</th></tr></thead>
+        <thead><tr><th>Customer</th><th>Office</th><th>Department</th><th>Amount</th><th>Sent</th><th>Type</th><th>Sent To</th><th>Subject</th><th>Source</th><th>Status</th><th>Message</th></tr></thead>
         <tbody>
           ${rows.map(s => `
             <tr>
@@ -3073,6 +3110,7 @@ saveState(); renderAll();
               <td style="font-family:var(--font-mono);font-size:11px;">${s.subject || '\u2014'}</td>
               <td>${s.source === 'automation' ? '<span class="status-pill auto-tag">AUTONOMOUS</span>' : 'Manual'}</td>
               <td><span class="status-pill ${s.status}">${s.status}</span></td>
+              <td style="white-space:nowrap;"><button class="btn-small" onclick="openMessagesSent(${JSON.stringify(s.invoiceId)})" title="Read the most recent follow-up, demand letter or NOIL sent on this account">See messages sent</button></td>
             </tr>
           `).join('')}
         </tbody>
@@ -3444,6 +3482,189 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     renderAccountHistory(inv, data);
   }
   function closeAccountHistory(){ document.getElementById('overlay-history').classList.remove('open'); currentHistoryId = null; }
+
+  /* ============================================================
+     MESSAGES SENT — "See messages sent" on the Comms Log
+     Shows the most recent follow-up / demand letter / NOIL sent on an
+     account exactly as it went out, plus every earlier message on the same
+     account. Real tenants read from /api/invoices/messages (bodies are
+     stored on every send); the demo rebuilds the same shape locally.
+     ============================================================ */
+  let currentMessagesId = null;
+  let currentMessages = [];
+  let currentMessageIdx = 0;
+
+  const MSG_STATUS_LABELS = { sent:'Sent', delivered:'Delivered', opened:'Opened', replied:'Replied', bounced:'Bounced', failed:'Failed', held_for_review:'Held for review', no_recipient:'No recipient on file' };
+  function msgStatusLabel(s){ const k = String(s || '').toLowerCase(); return MSG_STATUS_LABELS[k] || (s ? String(s) : 'Sent'); }
+  // recipient_role as the API stores it, in the words the dashboard uses.
+  const MSG_RECIPIENT_LABELS = { adjuster:'Adjuster', homeowner:'Homeowner', pm:'Commercial or Property Management', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
+
+  async function openMessagesSent(id){
+    const inv = findInv(id);
+    currentMessagesId = id;
+    currentMessages = [];
+    currentMessageIdx = 0;
+    const name = (inv && inv.name) || 'this account';
+    document.getElementById('msg-title').textContent = 'Messages sent — ' + name;
+    document.getElementById('msg-sub').textContent = inv
+      ? [inv.invoiceNumber, OFFICE_LABELS[inv.officeLocation] || inv.officeLocation, DEPARTMENT_LABELS[inv.department], inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ')
+      : '';
+    document.getElementById('msg-current').innerHTML = '<div class="msg-card"><div class="msg-body empty">Loading…</div></div>';
+    document.getElementById('msg-earlier').innerHTML = '';
+    document.getElementById('msg-earlier-count').textContent = '';
+    document.getElementById('msg-earlier-wrap').style.display = 'none';
+    document.getElementById('msg-history-btn').style.display = inv ? '' : 'none';
+    document.getElementById('overlay-messages').classList.add('open');
+
+    let list = null;
+    let loadFailed = false;
+    if(inv && isRemoteInvoice(inv)){
+      try {
+        const r = await fetch('/api/invoices/messages?accountId=' + encodeURIComponent(id), { credentials: 'same-origin', cache: 'no-store' });
+        const j = await r.json();
+        if(j && j.ok && Array.isArray(j.messages)) list = j.messages;
+        else loadFailed = true;
+      } catch(e){ loadFailed = true; }
+    }
+    if(currentMessagesId !== id) return;   // drawer was reopened on another account
+    if(loadFailed){
+      // Never claim nothing was sent when we simply could not read the log.
+      currentMessages = [];
+      document.getElementById('msg-current').innerHTML =
+        '<div class="msg-card"><div class="msg-body empty">Couldn\'t load this account\'s messages just now. ' +
+        '<span class="hist-link" onclick="openMessagesSent(' + JSON.stringify(id) + ')">Try again</span></div></div>';
+      document.getElementById('msg-earlier-wrap').style.display = 'none';
+      return;
+    }
+    if(!list) list = synthesizeMessages(inv, id);
+    currentMessages = list;
+    renderMessagesSent();
+  }
+  function closeMessagesSent(){
+    document.getElementById('overlay-messages').classList.remove('open');
+    currentMessagesId = null; currentMessages = []; currentMessageIdx = 0;
+  }
+  function selectMessage(i){
+    if(!currentMessages[i]) return;
+    currentMessageIdx = i;
+    renderMessagesSent();
+  }
+
+  function renderMessagesSent(){
+    const cur = document.getElementById('msg-current');
+    if(!currentMessages.length){
+      cur.innerHTML = '<div class="msg-card"><div class="msg-body empty">No follow-ups, demand letters or NOILs have been sent on this account yet.</div></div>';
+      document.getElementById('msg-earlier-wrap').style.display = 'none';
+      return;
+    }
+    const m = currentMessages[currentMessageIdx] || currentMessages[0];
+    const isNewest = (currentMessageIdx === 0);
+    const to = [m.recipientRole ? (MSG_RECIPIENT_LABELS[m.recipientRole] || m.recipientRole) : null, m.recipientEmail].filter(Boolean).join(' · ');
+    const rows = [];
+    if(to) rows.push('<b>To</b><span>' + hEsc(to) + '</span>');
+    if(m.subject) rows.push('<b>Subject</b><span class="msg-subject">' + hEsc(m.subject) + '</span>');
+    rows.push('<b>Status</b><span>' + hEsc(msgStatusLabel(m.status)) + (m.error ? (' — ' + hEsc(m.error)) : '') + '</span>');
+    rows.push('<b>Sent by</b><span>' + (m.source === 'automation' ? 'Automated Reach Outs' + (m.cadenceDay ? (' · Day ' + m.cadenceDay + ' checkpoint') : '') : (m.source === 'crm' ? 'Your CRM' : 'A team member')) + '</span>');
+    cur.innerHTML =
+      '<div class="msg-card">' +
+        '<div class="msg-head">' +
+          '<span class="msg-type">' + hEsc(m.label || 'Follow-up') + (isNewest ? ' <span class="status-pill auto-tag" style="margin-left:6px;">MOST RECENT</span>' : '') + '</span>' +
+          '<span class="msg-when">' + hEsc(hDateTime(m.at) || '—') + '</span>' +
+        '</div>' +
+        '<div class="msg-meta">' + rows.join('') + '</div>' +
+        (m.body
+          ? '<div class="msg-body">' + hEsc(m.body) + '</div>'
+          : '<div class="msg-body empty">' + (m.source === 'crm'
+              ? 'This send was recorded by your CRM, so clAIms has the record but not the message body.'
+              : 'This message was sent before clAIms began keeping message bodies, so only the record of the send is available.') + '</div>') +
+      '</div>';
+
+    const earlier = currentMessages.length - 1;
+    const wrap = document.getElementById('msg-earlier-wrap');
+    wrap.style.display = earlier > 0 ? '' : 'none';
+    document.getElementById('msg-earlier-count').textContent = earlier > 0 ? ('(' + earlier + ')') : '';
+    document.getElementById('msg-earlier').innerHTML = currentMessages.map(function(x, i){
+      if(i === 0 && currentMessageIdx === 0) return '';
+      const preview = (x.preview || x.body || '').replace(/\s+/g, ' ').slice(0, 120);
+      return '<div class="msg-row' + (i === currentMessageIdx ? ' active' : '') + '" onclick="selectMessage(' + i + ')">' +
+        '<span class="l"><span class="t">' + hEsc(x.label || 'Follow-up') + (i === 0 ? ' — most recent' : '') + '</span>' +
+        '<div class="p">' + hEsc(preview || x.subject || 'No preview available') + '</div></span>' +
+        '<span class="r">' + hEsc(hDateTime(x.at) || '') + '<br>' + hEsc(msgStatusLabel(x.status)) + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  // Demo / offline: build the same shape the API returns out of the comms log,
+  // filling in the message body the draft would have carried.
+  function synthesizeMessages(inv, id){
+    const out = [];
+    ((state.commsLog) || []).forEach(function(c){
+      if(String(c.invoiceId) !== String(id)) return;
+      out.push({
+        id: 'demo-' + out.length,
+        at: c.sentTs || c.sentAt,
+        kind: c.draftType,
+        label: c.draftType || 'Follow-up',
+        cadenceDay: null,
+        recipientRole: null,
+        recipientEmail: c.recipient || null,
+        subject: c.subject || null,
+        status: c.status || 'sent',
+        error: null,
+        body: c.body || demoMessageBody(inv, c),
+        preview: c.preview || '',
+        hasBody: true,
+        source: c.source || 'manual'
+      });
+    });
+    // commsLog is newest-first for live sends but the seeded rows are not
+    // ordered, so sort by date and fall back to insertion order.
+    out.sort(function(a, b){
+      const da = hParse(a.at), db = hParse(b.at);
+      if(da && db) return db.getTime() - da.getTime();
+      return 0;
+    });
+    return out;
+  }
+
+  // The body a demo message would have carried, written from what the log row
+  // records: type, recipient and the invoice it belongs to.
+  function demoMessageBody(inv, c){
+    if(c && c.preview && c.preview.length > 60 && !inv) return c.preview;
+    if(!inv) return c && c.preview ? c.preview : '';
+    const type = String((c && c.draftType) || '').toLowerCase();
+    const draftType = type.indexOf('noil') !== -1 ? 'noil'
+      : (type.indexOf('demand') !== -1 ? 'demand' : 'followup');
+    const who = (c && c.recipient) ? String(c.recipient).split(' ')[0] : ((String(inv.contact || '').trim().split(' ')[0]) || 'there');
+    const money = '$' + Number(balanceDue(inv) || inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2});
+    const claimLine = inv.claimNumber ? ('\nClaim number: ' + inv.claimNumber) : '';
+    const paidLine = (typeof isPartiallyPaid === 'function' && isPartiallyPaid(inv))
+      ? ('\nPayments received to date: ' + money2(paidAmt(inv)) + ' of ' + money2(inv.amount)) : '';
+    let opening;
+    if(draftType === 'noil'){
+      opening = 'This is a formal notice of our intent to file a lien for unpaid services if the balance below remains unresolved.';
+    } else if(draftType === 'demand'){
+      opening = 'Despite prior follow-ups, the invoice below remains unpaid. Please treat this letter as a formal demand for payment.';
+    } else if(type.indexOf('payment confirmation') !== -1){
+      opening = 'Thank you — we have received and applied your payment on the account below. This note confirms the amount applied and any balance still open.';
+    } else if(type.indexOf('status update') !== -1){
+      opening = 'A quick status update on the job below so your file stays current on your end.';
+    } else if(type.indexOf('second notice') !== -1){
+      opening = 'This is a second notice on the invoice below — we have not yet received payment or a response to our earlier message.';
+    } else if(type.indexOf('reminder') !== -1){
+      opening = 'A friendly reminder that the invoice below is still showing an open balance on our end.';
+    } else {
+      opening = (inv.followups > 0)
+        ? "Following up again on the outstanding invoice below — we haven't yet received payment or a response."
+        : ('I wanted to follow up on the invoice below for the work recently completed at ' + inv.name + '.');
+    }
+    const closing = (c && c.recipient === 'Adjuster')
+      ? ('This invoice is ' + inv.days + ' day' + (inv.days === 1 ? '' : 's') + ' outstanding since first contact.' + claimLine + '\nWork performed per the estimate on file: ' + (inv.scopeOfWork || 'see the estimate on file') + '.')
+      : "If payment has already been sent, please reply with the details and we'll reconcile right away. Otherwise, we're happy to help with anything you need to get this resolved.";
+    return 'Hello ' + who + ',\n\n' + opening + '\n\nInvoice: ' + inv.name +
+      (inv.invoiceNumber ? ('\nInvoice number: ' + inv.invoiceNumber) : '') +
+      '\nBalance due: ' + money + paidLine + '\n\n' + closing + '\n\nThank you,\nAccounts Receivable';
+  }
 
   // Demo / offline: assemble the same shape the API returns from what the
   // dashboard already knows about the invoice.
@@ -4429,7 +4650,13 @@ Do not invent facts beyond what's given.`;
       invoiceId: inv.id, invoiceName: inv.name, amount: inv.amount,
       sentAt: fmtDate(now), draftType: typeLabels[draftType], status, source, recipient: recipientLabel,
       subject: subject || null,
-      preview: (draftText || '').slice(0,100)
+      preview: (draftText || '').slice(0,100),
+      // Kept in full so "See messages sent" on the Comms Log shows exactly what
+      // went out, not a truncated preview.
+      body: draftText || '',
+      // The log column shows the day; the message drawer shows the time too, so
+      // two sends on the same day are told apart and ordered correctly.
+      sentTs: now.toISOString()
     });
   }
 
