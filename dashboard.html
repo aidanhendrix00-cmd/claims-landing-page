@@ -182,6 +182,31 @@
 
   .amount{font-family:var(--font-mono);font-weight:600;font-size:16px;}
   .amount .days{display:block;font-family:var(--font-body);font-weight:400;font-size:11px;color:var(--slate);margin-top:2px;}
+  .amount .paid-line{display:block;font-family:var(--font-body);font-weight:500;font-size:11px;color:#8A4B18;margin-top:3px;}
+  .amount .owed-label{display:block;font-family:var(--font-mono);font-weight:400;font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--slate-soft);margin-bottom:2px;}
+  .badge.partial{background:#FBE9D8;color:#8A4B18;border:1px solid #F1D3B4;}
+  .paid-sub{display:block;font-family:var(--font-body);font-weight:400;font-size:10.5px;color:#8A4B18;margin-top:2px;white-space:nowrap;}
+  .aging-office{margin-top:22px;}
+  .aging-office-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:10px 14px;background:#171717;color:#EDEFF1;border-radius:10px 10px 0 0;}
+  .aging-office-head h3{margin:0;font-size:14px;font-weight:700;letter-spacing:0.02em;}
+  .aging-office-head .tot{font-family:var(--font-mono);font-size:13px;}
+  .aging-office-head .cnt{font-size:11px;color:#B7BCD4;margin-left:8px;}
+  .aging-dept{border:1px solid var(--line);border-top:none;background:var(--panel);}
+  .aging-dept:last-child{border-radius:0 0 10px 10px;overflow:hidden;}
+  .aging-dept-head{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:#FAF8F2;border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--ink);}
+  .aging-dept-head .tot{font-family:var(--font-mono);font-weight:600;}
+  .aging-dept-head .cnt{font-weight:400;color:var(--slate-soft);margin-left:8px;}
+  table.aging{width:100%;border-collapse:collapse;font-size:12.5px;}
+  table.aging th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-soft);font-weight:600;padding:7px 14px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  table.aging td{padding:8px 14px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  table.aging tr:last-child td{border-bottom:none;}
+  table.aging td.amt{font-family:var(--font-mono);font-weight:600;text-align:right;white-space:nowrap;}
+  table.aging th.amt{text-align:right;}
+  .age-pill{display:inline-block;font-family:var(--font-mono);font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;}
+  .age-pill.b1{background:var(--teal-soft);color:var(--teal);} .age-pill.b2{background:var(--amber-soft);color:#946218;} .age-pill.b3{background:var(--rust-soft);color:var(--rust);}
+  .aging-summary{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-top:24px;font-size:13px;color:var(--slate);}
+  .aging-summary b{font-family:var(--font-mono);color:var(--ink);}
+  .aging-summary select{border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;background:#fff;color:var(--ink);}
 
   .gauge-wrap{display:flex;flex-direction:column;gap:5px;}
   .gauge-label{font-size:10px;font-family:var(--font-mono);color:var(--slate-soft);letter-spacing:0.04em;text-transform:uppercase;}
@@ -518,7 +543,7 @@
           <div class="chips" id="chips">
             <div class="chip active" data-payer="all">All</div>
             <div class="chip" data-payer="insurance">Insurance</div>
-            <div class="chip" data-payer="pm">Property Mgmt.</div>
+            <div class="chip" data-payer="pm">Commercial or Property Management</div>
             <div class="chip" data-payer="private">Private Pay</div>
           </div>
         </div>
@@ -566,11 +591,13 @@
 
     <!-- ===================== REPORT VIEW ===================== -->
     <section class="view" id="view-report">
-      <div class="topbar"><div><h1>Aging Report</h1><p>Outstanding receivables by age bucket and payer type</p></div></div>
+      <div class="topbar"><div><h1>Aging Report</h1><p>Outstanding receivables by age bucket and payer type &#8212; and every account that still carries a balance, by office and department</p></div></div>
       <div class="report-grid">
         <div class="report-card"><h3>By Age Bucket</h3><div id="report-age"></div></div>
         <div class="report-card"><h3>By Payer Type</h3><div id="report-payer"></div></div>
       </div>
+      <div class="aging-summary" id="aging-summary"></div>
+      <div id="report-accounts"></div>
     </section>
 
     <!-- ===================== INVOICED MONTH TO DATE VIEW ===================== -->
@@ -855,7 +882,7 @@
     <div class="form-row"><label>Customer / Property Name</label><input id="f-name" placeholder="e.g. Cedar Ridge Apartments"></div>
     <div class="form-grid-2">
       <div class="form-row"><label>Job Type / Unit</label><input id="f-meta" placeholder="e.g. Water mitigation, Unit 4"></div>
-      <div class="form-row"><label>Payer Type</label><select id="f-payer"><option value="insurance">Insurance</option><option value="pm">Property Mgmt.</option><option value="private">Private Pay</option></select></div>
+      <div class="form-row"><label>Payer Type</label><select id="f-payer"><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="private">Private Pay</option></select></div>
     </div>
     <div class="form-grid-2">
       <div class="form-row"><label>Department</label><select id="f-department"><option value="mitigation">Mitigation</option><option value="contents">Contents</option><option value="reconstruction">Reconstruction</option></select></div>
@@ -911,7 +938,7 @@
       <div class="currently-with-toggle" id="currently-with-toggle">
         <button class="cw-btn" data-val="adjuster" onclick="setCurrentlyWith('adjuster')">Adjuster</button>
         <button class="cw-btn" data-val="homeowner" onclick="setCurrentlyWith('homeowner')">Homeowner</button>
-        <button class="cw-btn" data-val="pm" onclick="setCurrentlyWith('pm')">Property Mgmt.</button>
+        <button class="cw-btn" data-val="pm" onclick="setCurrentlyWith('pm')">Commercial or Property Management</button>
       </div>
       <div class="hint">Updates automatically whenever a follow-up is sent to a party; adjust manually if the file has moved hands another way.</div>
     </div>
@@ -1159,7 +1186,7 @@
      ============================================================ */
   const STORAGE_KEY = 'dryline-app-state-v11';
   let memoryFallback = null;
-  const PAYER_LABELS = { insurance: "Insurance", pm: "Property Mgmt.", private: "Private Pay" };
+  const PAYER_LABELS = { insurance: "Insurance", pm: "Commercial or Property Management", private: "Private Pay" };
   const STATUS_LABELS = { pending_start: "Pending Start", in_progress: "In Progress", work_completed: "Work Completed", in_ar: "In A/R", paid: "Paid" };
   const DEPARTMENT_LABELS = { mitigation: "Mitigation", contents: "Contents", reconstruction: "Reconstruction" };
   const CATEGORY_LABELS = {
@@ -1182,7 +1209,7 @@
     pack_back: "contents pack-back and reinstallation following completed repairs",
     storage: "climate-controlled storage of contents during the restoration period"
   };
-  const CURRENTLY_WITH_LABELS = { adjuster: "Adjuster", homeowner: "Homeowner", pm: "Property Management" };
+  const CURRENTLY_WITH_LABELS = { adjuster: "Adjuster", homeowner: "Homeowner", pm: "Commercial or Property Management" };
   const PAYMENT_METHOD_LABELS = { check: "Check", ach: "ACH", credit_card: "Credit Card", echeck: "E-Check", wire: "Wire/Direct Deposit" };
   const PAYMENT_TYPE_LABELS = { payment_link: "Payment Link", check: "Check", wire: "Wire/Direct Deposit" };
   const OFFICE_LOCATIONS = ['arizona','dallas','houston','hill_country'];
@@ -1546,20 +1573,25 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
       { id: 18, method: 'ach',         offsetDays: 5  },
       { id: 21, method: 'wire',        offsetDays: 13 },
       { id: 24, method: 'check',       offsetDays: 6  },
-      { id: 26, method: 'credit_card', offsetDays: 8  }
+      { id: 26, method: 'credit_card', offsetDays: 8  },
+      // Partial payments: the account keeps its balance in the queue and the
+      // spreadsheet while the amount received shows up under Collected.
+      { id: 47, method: 'ach',   daysAgo: 2, fraction: 0.5,  memo: 'First installment per agreed payment plan' },
+      { id: 33, method: 'check', daysAgo: 6, fraction: 0.35, memo: 'Carrier paid undisputed portion; balance pending supplement review' }
     ];
     const simToday = new Date();
     simulatedPayments.forEach((sp, idx) => {
       const inv = s.invoices.find(i => i.id === sp.id);
       if(!inv) return;
-      let paidDateObj = addDays(new Date(inv.invoiceDate + 'T00:00:00'), sp.offsetDays);
+      let paidDateObj = sp.daysAgo != null ? addDays(simToday, -sp.daysAgo) : addDays(new Date(inv.invoiceDate + 'T00:00:00'), sp.offsetDays);
       if(paidDateObj > simToday) paidDateObj = simToday;
       const paidDateStr = isoDate(paidDateObj);
       const isInsurance = inv.payer === 'insurance';
       const payerName = isInsurance ? CARRIERS[idx % CARRIERS.length] : inv.name;
       const details = {
-        method: sp.method, amount: inv.amount, paidDate: paidDateStr,
+        method: sp.method, amount: sp.fraction ? +(inv.amount * sp.fraction).toFixed(2) : inv.amount, paidDate: paidDateStr,
         payerName, bankName: BANKS[idx % BANKS.length], source: 'automation',
+        memo: sp.memo || null,
         tsDisplay: fmtDate(paidDateStr)
       };
       if(sp.method === 'check') details.checkNumber = 'CHK-' + (10230 + idx * 17);
@@ -1877,8 +1909,17 @@ async function loadRealAccounts(){
       if (!list.length && !data.ok) return;
       const invoices = [];
       const paymentsLog = [];
+      const rawById = {};
       list.forEach(a => {
-        const isPaid = !!a.paidDate;
+        rawById[a.id] = a;
+        // Paid in full when the accounting system says so, or when what has
+        // been applied covers the invoice. A payment date on its own only
+        // counts when the paid amount is not explicitly short of the total.
+        const amtTotal = Number(a.amount || 0);
+        const amtPaid = a.paidAmount == null ? null : Number(a.paidAmount || 0);
+        const isPaid = String(a.jobStatus || '') === 'paid'
+          || (amtTotal > 0 && amtPaid != null && amtPaid + 0.005 >= amtTotal)
+          || (!!a.paidDate && (amtPaid == null || amtPaid + 0.005 >= amtTotal));
         // Normalize whatever the integration wrote into the vocabularies the UI
         // renders from, so a hyphenated or unknown value can no longer blank the
         // entire queue when a label lookup misses.
@@ -1949,30 +1990,84 @@ async function loadRealAccounts(){
           lastOnSiteDate: dayOnly(a.lastDayOnSite) || dayOnly(a.invoicedDate),
           contactEmail: a.contactEmail || null
         };
+        if (isPaid && inv.amountPaid + 0.005 < inv.amount) inv.amountPaid = inv.amount;
         invoices.push(inv);
-        if (isPaid) {
+      });
+
+      // Collected / Collected MTD are built from the real payment records -
+      // every manual "Record a Payment" and every payment the accounting
+      // integration reported - so a partial payment shows up the day it is
+      // applied while the invoice keeps its balance in the queue.
+      let payRows = [];
+      try {
+        const pr = await fetch('/api/invoices/payments', { credentials: 'include', cache: 'no-store' });
+        const pj = await pr.json();
+        if (pj && pj.ok && Array.isArray(pj.payments)) payRows = pj.payments;
+      } catch (e) {}
+      const rowsByAccount = {};
+      payRows.forEach(function(r){ (rowsByAccount[r.account_id] = rowsByAccount[r.account_id] || []).push(r); });
+      const dayOf = function(v){ return v ? String(v).slice(0, 10) : null; };
+      invoices.forEach(function(inv){
+        const a = rawById[inv.id] || {};
+        const rows = (rowsByAccount[inv.id] || []).slice().sort(function(x, y){
+          const dx = String(x.deposited_on || x.created_at || ''), dy = String(y.deposited_on || y.created_at || '');
+          return dx < dy ? -1 : (dx > dy ? 1 : (Number(x.id) - Number(y.id)));
+        });
+        let running = 0;
+        rows.forEach(function(r){
+          const amt = Number(r.amount || 0);
+          if (!(amt > 0)) return;
+          running = +(running + amt).toFixed(2);
           paymentsLog.push({
-            id: a.id,
-            invoiceId: a.id,
-            invoiceName: a.name,
-            invoiceNumber: a.invoiceNumber,
-            amount: a.paidAmount || a.amount || 0,
-            remainingBalance: 0,
-            paidDate: String(a.paidDate).slice(0, 10),
-            officeLocation: a.officeLocation,
-            department: a.department || 'mitigation',
-            category: a.category || 'water-mitigation',
+            id: 'p' + r.id,
+            invoiceId: inv.id,
+            invoiceName: inv.name,
+            invoiceNumber: inv.invoiceNumber,
+            amount: amt,
+            remainingBalance: Math.max(0, +(inv.amount - running).toFixed(2)),
+            paidDate: dayOf(r.deposited_on || r.created_at) || isoDate(new Date()),
+            officeLocation: inv.officeLocation,
+            department: inv.department,
+            category: inv.category,
+            paymentMethod: r.method || (r.source === 'integration' ? 'integration' : null),
+            checkNumber: null,
+            referenceNumber: r.reference || null,
+            payerName: r.payer_name || inv.name,
+            bankName: r.bank_name || null,
+            memo: r.memo || null,
+            invoiceDateSnapshot: inv.invoiceDate,
+            source: r.source || (r.recorded_by ? 'manual' : 'integration')
+          });
+        });
+        // Anything the accounting system counts as paid that is not itemised
+        // above (older records, or a balance the CRM reported in bulk) still
+        // belongs in Collected, dated to the payment date it gave us.
+        if (inv.amountPaid + 0.005 < running) inv.amountPaid = running;
+        const unitemised = +(inv.amountPaid - running).toFixed(2);
+        if (unitemised > 0.005) {
+          paymentsLog.push({
+            id: 'acct' + inv.id,
+            invoiceId: inv.id,
+            invoiceName: inv.name,
+            invoiceNumber: inv.invoiceNumber,
+            amount: unitemised,
+            remainingBalance: Math.max(0, +(inv.amount - inv.amountPaid).toFixed(2)),
+            paidDate: dayOf(a.paidDate) || isoDate(new Date()),
+            officeLocation: inv.officeLocation,
+            department: inv.department,
+            category: inv.category,
             paymentMethod: 'integration',
             checkNumber: null,
             referenceNumber: a.externalId || null,
-            payerName: a.payer || a.name,
+            payerName: a.payer || inv.name,
             bankName: null,
             memo: 'Synced automatically from accounting integration',
-            invoiceDateSnapshot: a.invoicedDate,
+            invoiceDateSnapshot: inv.invoiceDate,
             source: 'integration'
           });
         }
       });
+      paymentsLog.sort(function(x, y){ return String(x.paidDate) < String(y.paidDate) ? -1 : (String(x.paidDate) > String(y.paidDate) ? 1 : 0); });
       state.invoices = invoices;
       await loadAccountNotes(invoices);
       state.paymentsLog = paymentsLog;
@@ -2142,6 +2237,17 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
   }
   function activeInvoices(){ return visibleInvoices().filter(i => i.jobStatus !== 'paid'); }
 
+  /* ------------------------------------------------------------
+     BALANCES - an account stays in the queue, spreadsheet and aging
+     report until it is paid in full. What is still owed is the
+     invoice amount less every payment applied so far.
+     ------------------------------------------------------------ */
+  function paidAmt(inv){ return Math.max(0, Number((inv && inv.amountPaid) || 0)); }
+  function balanceDue(inv){ return Math.max(0, +(Number((inv && inv.amount) || 0) - paidAmt(inv)).toFixed(2)); }
+  function isPartiallyPaid(inv){ return paidAmt(inv) > 0.005 && balanceDue(inv) > 0.005 && inv.jobStatus !== 'paid'; }
+  function money2(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function partialBadgeHTML(inv){ return isPartiallyPaid(inv) ? '<span class="badge partial" title="A payment has been applied; the balance shown is what is still owed">PARTIAL PAYMENT</span>' : ''; }
+
   /* ============================================================
      KPIs
      ============================================================ */
@@ -2279,12 +2385,13 @@ function todoRowHTML(item, num, priority){
 
   function renderKpis(){
     const active = activeInvoices();
-    const totalAR = active.reduce((s,i) => s + i.amount, 0);
+    const totalAR = active.reduce((s,i) => s + balanceDue(i), 0);
+    const partialCount = active.filter(isPartiallyPaid).length;
     const avgDays = active.length ? Math.round(active.reduce((s,i) => s + i.days, 0) / active.length) : 0;
     const needsAttn = state.invoices.filter(i=>i.needsAttention).length;
     const el = document.getElementById('kpis');
     el.innerHTML = `
-      <div class="kpi"><div class="label">Total AR Outstanding</div><div class="value">$${totalAR.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">across ${active.length} open invoices</div></div>
+      <div class="kpi"><div class="label">Total AR Outstanding</div><div class="value">$${totalAR.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">across ${active.length} open invoices${partialCount ? ' &middot; ' + partialCount + ' partially paid' : ''}</div></div>
       <div class="kpi"><div class="label">Avg. Days Outstanding</div><div class="value">${avgDays}</div><div class="sub">across all open invoices</div></div>
       <div class="kpi"><div class="label">In Active Cadence</div><div class="value">${active.filter(i=>!i.escalated).length}</div><div class="sub ${state.invoices.filter(i=>i.escalated).length?'up':''}">${state.invoices.filter(i=>i.escalated).length} escalated</div></div>
       <div class="kpi"><div class="label">Autonomous Sends</div><div class="value">${state.automationLog.length + state.commsLog.filter(c=>c.source==='automation').length}</div><div class="sub ${needsAttn ? 'up' : ''}">${needsAttn ? needsAttn + ' need attention' : 'all running cleanly'}</div></div>
@@ -2343,10 +2450,11 @@ function todoRowHTML(item, num, priority){
             <span class="badge cat">${CATEGORY_LABELS[inv.category].toUpperCase()}</span>
             <span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus].toUpperCase()}</span>
             <span class="badge cw">WITH: ${CURRENTLY_WITH_LABELS[inv.currentlyWith].toUpperCase()}</span>
-            ${escBadge}${warnBadge}${staleBadge}
+            ${partialBadgeHTML(inv)}${escBadge}${warnBadge}${staleBadge}
           </div>
         </div>
-        <div class="amount">$${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}
+        <div class="amount">${isPartiallyPaid(inv) ? '<span class="owed-label">Balance owed</span>' : ''}${money2(balanceDue(inv))}
+          ${isPartiallyPaid(inv) ? `<span class="paid-line" title="Invoice total ${money2(inv.amount)}">Amount paid: ${money2(paidAmt(inv))} of ${money2(inv.amount)}</span>` : ''}
           <span class="days">${inv.followups} follow-up${inv.followups===1?'':'s'} sent</span>
         </div>
         <div class="gauge-wrap">
@@ -2377,7 +2485,7 @@ function todoRowHTML(item, num, priority){
     });
     items = items.slice().sort((a,b) => {
       if(sortVal === 'days-desc') return b.days - a.days;
-      if(sortVal === 'amount-desc') return b.amount - a.amount;
+      if(sortVal === 'amount-desc') return balanceDue(b) - balanceDue(a);
       if(sortVal === 'name-asc') return a.name.localeCompare(b.name);
       return 0;
     });
@@ -2468,7 +2576,7 @@ saveState(); renderAll();
     const pdSel = document.getElementById('payment-date-filter');
     if(pdSel) pdSel.value = state.paymentDateFilter || 'all';
 
-    const rows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter).slice().sort((a,b)=>b.amount-a.amount);
+    const rows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter).slice().sort((a,b)=>balanceDue(b)-balanceDue(a));
     if(rows.length === 0){ body.innerHTML = `<tr><td colspan="24" style="text-align:center;padding:24px;color:var(--slate);">No open invoices match the current filters. Paid invoices have moved to the Collected tab.</td></tr>`; return; }
     body.innerHTML = rows.map(inv => `
       <tr>
@@ -2479,8 +2587,8 @@ saveState(); renderAll();
         <td><span class="badge office">${OFFICE_LABELS[inv.officeLocation]}</span></td>
         <td><span class="badge dept">${DEPARTMENT_LABELS[inv.department]}</span></td>
         <td><span class="badge cat">${CATEGORY_LABELS[inv.category]}</span></td>
-        <td class="amt">$${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-        <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span></td>
+        <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}</td>
+        <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>${isPartiallyPaid(inv) ? ' <span class="badge partial">PARTIAL PAYMENT</span>' : ''}</td>
         <td><span class="badge cw">${CURRENTLY_WITH_LABELS[inv.currentlyWith]}</span></td>
         <td style="font-family:var(--font-mono);font-size:11px;">${inv.claimNumber || '\u2014'}</td>
         <td style="text-align:center;"><input type="checkbox" ${inv.pa?'checked':''} onchange="toggleFlagField(${inv.id}, 'pa', this.checked)"/></td>
@@ -2546,24 +2654,100 @@ saveState(); renderAll();
   /* ============================================================
      REPORT VIEW
      ============================================================ */
+  // Age used everywhere on the Aging Report: days since the invoice was issued.
+  // On live accounts the server computes `days` from the invoice date, so the
+  // two agree; in the interactive demo the time simulator advances `days`
+  // without moving the invoice date, so the larger of the two keeps the demo
+  // clock driving the buckets.
+  function agingDays(inv){ return Math.max(Number(inv.days) || 0, inv.invoiceDate ? invoiceAgeDays(inv) : 0); }
+  function agingBucketClass(days){ return days <= 30 ? 'b1' : (days <= 60 ? 'b2' : 'b3'); }
+  let agingSort = 'age';
+  function setAgingSort(v){ agingSort = v || 'age'; renderReport(); }
+
   function renderReport(){
-    const all = activeInvoices();
+    // Every account that still carries a balance, whatever its status - the
+    // sidebar office/department filters apply here like everywhere else.
+    const all = activeInvoices().filter(i => balanceDue(i) > 0.005);
     const buckets = [
       { label: '0-30 days', min: 0, max: 30, color: 'var(--teal)' },
       { label: '31-60 days', min: 31, max: 60, color: 'var(--amber)' },
       { label: '61-90+ days', min: 61, max: 9999, color: 'var(--rust)' }
     ];
-    const totalAmt = all.reduce((s,i) => s + i.amount, 0) || 1;
+    const totalOwed = all.reduce((s,i) => s + balanceDue(i), 0);
+    const totalAmt = totalOwed || 1;
     document.getElementById('report-age').innerHTML = buckets.map(b => {
-      const amt = all.filter(i => i.days >= b.min && i.days <= b.max).reduce((s,i) => s + i.amount, 0);
+      const amt = all.filter(i => agingDays(i) >= b.min && agingDays(i) <= b.max).reduce((s,i) => s + balanceDue(i), 0);
       const pct = (amt/totalAmt*100).toFixed(0);
       return `<div class="bar-row"><div class="bl">${b.label}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${b.color};"></div></div><div class="bar-val">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>`;
     }).join('');
     const payerColors = { insurance: '#2E4D8C', pm: 'var(--teal)', private: '#6B3FA0' };
     document.getElementById('report-payer').innerHTML = Object.keys(PAYER_LABELS).map(p => {
-      const amt = all.filter(i => i.payer === p).reduce((s,i) => s + i.amount, 0);
+      const amt = all.filter(i => i.payer === p).reduce((s,i) => s + balanceDue(i), 0);
       const pct = (amt/totalAmt*100).toFixed(0);
       return `<div class="bar-row"><div class="bl">${PAYER_LABELS[p]}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${payerColors[p]};"></div></div><div class="bar-val">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>`;
+    }).join('');
+
+    // ---- Every open-balance account, grouped by office then department ----
+    const summaryEl = document.getElementById('aging-summary');
+    const listEl = document.getElementById('report-accounts');
+    if(!summaryEl || !listEl) return;
+    const partialCount = all.filter(isPartiallyPaid).length;
+    const avgAge = all.length ? Math.round(all.reduce((s,i) => s + agingDays(i), 0) / all.length) : 0;
+    summaryEl.innerHTML = `<span><b>${all.length}</b> account${all.length===1?'':'s'} with a balance</span>` +
+      `<span>Total owed <b>${money2(totalOwed)}</b></span>` +
+      `<span>Average age <b>${avgAge}</b> days</span>` +
+      (partialCount ? `<span><b>${partialCount}</b> partially paid</span>` : '') +
+      `<span style="margin-left:auto;">Sort accounts by <select onchange="setAgingSort(this.value)">` +
+        `<option value="age" ${agingSort==='age'?'selected':''}>Oldest first</option>` +
+        `<option value="balance" ${agingSort==='balance'?'selected':''}>Largest balance</option>` +
+        `<option value="name" ${agingSort==='name'?'selected':''}>Customer name</option>` +
+      `</select></span>`;
+    if(!all.length){
+      listEl.innerHTML = `<div class="empty" style="margin-top:14px;">No open balances match the current filters.</div>`;
+      return;
+    }
+    const sorter = (a,b) => {
+      if(agingSort === 'balance') return balanceDue(b) - balanceDue(a);
+      if(agingSort === 'name') return String(a.name).localeCompare(String(b.name));
+      return agingDays(b) - agingDays(a);
+    };
+    const deptOrder = Object.keys(DEPARTMENT_LABELS);
+    const officeOrder = OFFICE_LOCATIONS.slice();
+    all.forEach(i => { if(officeOrder.indexOf(i.officeLocation) === -1) officeOrder.push(i.officeLocation); });
+    listEl.innerHTML = officeOrder.map(office => {
+      const inOffice = all.filter(i => i.officeLocation === office);
+      if(!inOffice.length) return '';
+      const officeTotal = inOffice.reduce((s,i) => s + balanceDue(i), 0);
+      const depts = deptOrder.slice();
+      inOffice.forEach(i => { if(depts.indexOf(i.department) === -1) depts.push(i.department); });
+      const deptBlocks = depts.map(dept => {
+        const rows = inOffice.filter(i => i.department === dept).sort(sorter);
+        if(!rows.length) return '';
+        const deptTotal = rows.reduce((s,i) => s + balanceDue(i), 0);
+        return `<div class="aging-dept">
+          <div class="aging-dept-head"><span>${DEPARTMENT_LABELS[dept] || dept}<span class="cnt">${rows.length} account${rows.length===1?'':'s'}</span></span><span class="tot">${money2(deptTotal)}</span></div>
+          <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Category</th><th>Payer</th><th>Status</th><th>Age</th><th>Since contact</th><th class="amt">Balance owed</th><th></th></tr></thead><tbody>
+          ${rows.map(inv => {
+            const age = agingDays(inv);
+            return `<tr>
+              <td><div style="font-weight:600;color:var(--ink);">${hEsc(inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${inv.meta || ''}</div></td>
+              <td style="font-family:var(--font-mono);font-size:11.5px;white-space:nowrap;">${hEsc(inv.invoiceNumber || '—')}${inv.invoiceDate ? `<div style="font-size:10.5px;color:var(--slate-soft);">${fmtDate(inv.invoiceDate)}</div>` : ''}</td>
+              <td><span class="badge cat">${CATEGORY_LABELS[inv.category] || inv.category || '—'}</span></td>
+              <td><span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer] || inv.payer || '—'}</span></td>
+              <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '—'}</span>${inv.escalated ? ' <span class="badge escalated">ESCALATED</span>' : ''}</td>
+              <td><span class="age-pill ${agingBucketClass(age)}">${age} day${age===1?'':'s'}</span></td>
+              <td style="white-space:nowrap;">${inv.lastContact ? fmtDate(inv.lastContact) + ((hDaysSince(inv.lastContact) !== null) ? ` <span style="color:var(--slate-soft);font-size:11px;">(${hDaysSince(inv.lastContact)}d ago)</span>` : '') : '<span style="color:var(--slate-soft);">No contact yet</span>'}</td>
+              <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span><span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}</td>
+              <td style="white-space:nowrap;"><span class="hist-link" onclick="openAccountHistory(${inv.id})">History</span> &middot; <span class="hist-link" onclick="openDetail(${inv.id})">Manage</span></td>
+            </tr>`;
+          }).join('')}
+          </tbody></table></div>
+        </div>`;
+      }).join('');
+      return `<div class="aging-office">
+        <div class="aging-office-head"><h3>${OFFICE_LABELS[office] || office}<span class="cnt">${inOffice.length} account${inOffice.length===1?'':'s'} with a balance</span></h3><span class="tot">${money2(officeTotal)}</span></div>
+        ${deptBlocks}
+      </div>`;
     }).join('');
   }
 
@@ -2689,13 +2873,13 @@ saveState(); renderAll();
     } else {
       wrap.innerHTML = `<table class="log"><thead><tr><th>Customer</th><th>Invoice #</th><th>Office</th><th>Department</th><th>Amount</th><th>Remaining</th><th>Method</th><th>Date Applied</th><th>Source</th></tr></thead><tbody>
         ${payments.slice().reverse().map(p => `<tr>
-          <td>${p.invoiceName}</td>
+          <td>${p.invoiceName}${paymentIsPartial(p) ? ' <span class="badge partial">PARTIAL PAYMENT</span>' : ''}</td>
           <td style="font-family:var(--font-mono);font-size:11.5px;">${p.invoiceNumber || (findInv(p.invoiceId) || {}).invoiceNumber || '\u2014'}</td>
-          <td>${OFFICE_LABELS[p.officeLocation]}</td>
-          <td>${DEPARTMENT_LABELS[p.department]} \u2014 ${CATEGORY_LABELS[p.category]}</td>
+          <td>${OFFICE_LABELS[p.officeLocation] || p.officeLocation || '\u2014'}</td>
+          <td>${DEPARTMENT_LABELS[p.department] || p.department || '\u2014'} \u2014 ${CATEGORY_LABELS[p.category] || p.category || '\u2014'}</td>
           <td class="amt">$${p.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-          <td class="amt">$${(p.remainingBalance||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-          <td>${PAYMENT_METHOD_LABELS[p.paymentMethod] || '\u2014'}</td>
+          <td class="amt">${paymentRemainingHTML(p)}</td>
+          <td>${paymentMethodLabel(p.paymentMethod)}</td>
           <td>${fmtDate(p.paidDate)}</td>
           <td><span class="status-pill ${(p.source==='automation'||p.source==='integration')?'auto-tag':''}">${p.source==='automation' ? 'NETSUITE' : (p.source==='integration' ? 'INTEGRATION' : 'MANUAL')}</span></td>
         </tr>`).join('')}
@@ -2706,6 +2890,23 @@ saveState(); renderAll();
   function paymentPassesFilters(p){
     return (state.officeFilter === 'all' || p.officeLocation === state.officeFilter)
         && (state.deptFilter === 'all' || p.department === state.deptFilter);
+  }
+  // A payment is "partial" when it left a balance on the invoice at the time it
+  // was applied. If the invoice has since been paid in full, the remaining
+  // column shows the live balance (zero) so the history stays honest.
+  function paymentIsPartial(p){ return Number(p.remainingBalance || 0) > 0.005; }
+  function paymentRemainingHTML(p){
+    const rem = Number(p.remainingBalance || 0);
+    const inv = findInv(p.invoiceId);
+    const liveBal = inv ? balanceDue(inv) : rem;
+    if(rem <= 0.005) return money2(0) + '<span class="paid-sub" style="color:var(--teal);">Paid in full</span>';
+    return money2(rem) + (inv && liveBal <= 0.005 ? '<span class="paid-sub" style="color:var(--teal);">Since paid in full</span>' : '<span class="paid-sub">still owed</span>');
+  }
+  function paymentMethodLabel(m){
+    if(!m) return '—';
+    if(PAYMENT_METHOD_LABELS[m]) return PAYMENT_METHOD_LABELS[m];
+    if(m === 'integration') return 'Accounting sync';
+    return String(m).replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
   }
 
   function renderCollectedAll(){
@@ -2759,12 +2960,12 @@ saveState(); renderAll();
                 <thead><tr><th>Account</th><th>Amount Paid</th><th>Remaining Balance</th><th>Date Deposited</th><th>Department</th><th>Sub-Division</th></tr></thead>
                 <tbody>
                   ${rows.map(p => `<tr>
-                    <td>${p.invoiceName}</td>
+                    <td>${p.invoiceName}${paymentIsPartial(p) ? ' <span class="badge partial">PARTIAL PAYMENT</span>' : ''}<div style="font-family:var(--font-mono);font-size:10.5px;color:var(--slate-soft);">${p.invoiceNumber || (findInv(p.invoiceId) || {}).invoiceNumber || ''}</div></td>
                     <td class="amt">$${p.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
-                    <td class="amt">$${(p.remainingBalance||0).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+                    <td class="amt">${paymentRemainingHTML(p)}</td>
                     <td>${fmtDate(p.paidDate)}</td>
-                    <td>${DEPARTMENT_LABELS[p.department]}</td>
-                    <td>${CATEGORY_LABELS[p.category]}</td>
+                    <td>${DEPARTMENT_LABELS[p.department] || p.department || '—'}</td>
+                    <td>${CATEGORY_LABELS[p.category] || p.category || '—'}</td>
                   </tr>`).join('')}
                 </tbody>
               </table>
