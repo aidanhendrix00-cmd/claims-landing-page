@@ -3461,8 +3461,16 @@ escalated: 'escalated',
 notifiedName: 'notified_name',
 notifiedAt: 'notified_at',
 cadenceSent: 'cadence_sent',
-lastDayOnSite: 'last_day_on_site'
+lastDayOnSite: 'last_day_on_site',
+doNotContact: 'do_not_contact'
 };
+
+// "DO NOT CONTACT - Sent to Collections Agency". Once an account carries this
+// flag nothing goes out to the customer from clAIms: the cadence skips it and
+// manual sends are refused. Reads its own columns so callers can pass any row.
+const DO_NOT_CONTACT_LABEL = 'DO NOT CONTACT - Sent to Collections Agency';
+function isDoNotContact(account) { return !!(account && account.do_not_contact); }
+const DO_NOT_CONTACT_ERROR = 'This account is marked "' + DO_NOT_CONTACT_LABEL + '". Nothing can be sent to this customer while that flag is on. Clear the flag on the account first if contact should resume.';
 
 function normalizeDateOnly(v) {
 if (v === null || v === undefined || v === '') return null;
@@ -3487,11 +3495,32 @@ if (column === 'wa_signed_at' || column === 'cos_signed_at' || column === 'proje
 if (column === 'follow_up_count') { patch[column] = parseInt(value, 10) || 0; return; }
 if (column === 'cadence_sent') { patch[column] = (value && typeof value === 'object') ? value : {}; return; }
 if (column === 'lien_filed' || column === 'wa_sent' || column === 'cos_sent' || column === 'docs_complete' || column === 'escalated' || column === 'pa') { patch[column] = !!value; return; }
+if (column === 'do_not_contact') {
+patch[column] = !!value;
+patch.do_not_contact_at = value ? new Date().toISOString() : null;
+patch.do_not_contact_by = value ? String(user.full_name || user.email || '').slice(0, 160) : null;
+return;
+}
 patch[column] = (value === '' ? null : value);
 });
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
 patch.updated_at = new Date().toISOString();
 await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
+// Flagging (or clearing) DO NOT CONTACT is a decision worth an audit trail:
+// it lands in Employees Activity and in the account's own notes.
+if (Object.prototype.hasOwnProperty.call(patch, 'do_not_contact')) {
+const flagged = !!patch.do_not_contact;
+const text = flagged
+? 'Marked "' + DO_NOT_CONTACT_LABEL + '". All automated cadences, follow-ups and manual sends to this customer are stopped.'
+: 'Cleared "' + DO_NOT_CONTACT_LABEL + '". Automated cadences and follow-ups may resume.';
+await logUserActivity(env, user, account, 'escalation', text);
+try {
+await pgInsert(env, 'account_notes', {
+tenant_id: user.tenant_id, account_id: account.id, body: text,
+author_name: user.full_name || user.email || 'Team member', source: 'dashboard'
+});
+} catch (e) {}
+}
 // A response being logged is the one edit the dashboard does not also send
 // as a note, so it is recorded here against whoever logged it.
 if (Object.prototype.hasOwnProperty.call(patch, 'response_summary') && patch.response_summary) {
@@ -3651,7 +3680,10 @@ const cadenceTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(settings.te
 if (tenantLockState(cadenceTenant, Date.now()) === 'locked') { summary.skipped = -3; return summary; }
 if (withinQuietHours(settings, now)) { summary.skipped = -2; return summary; }
 
-const statusFilter = 'status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')';
+// Accounts marked DO NOT CONTACT (sent to a collections agency) are never
+// even considered: the cadence must not touch them. `not.is.true` also
+// covers rows that predate the column.
+const statusFilter = 'status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')&do_not_contact=not.is.true';
 // A per-user settings row only automates accounts its owner can already see:
 // admins cover the whole tenant, everyone else their own office.
 let officeFilter = '';
@@ -3666,6 +3698,8 @@ const checkpoints = cadenceCheckpointsFor(settings);
 const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
 
 for (const account of accounts) {
+// Filtered out above already; restated so the rule holds even if the query changes.
+if (isDoNotContact(account)) { summary.skipped++; continue; }
 if (account.escalated) { summary.skipped++; continue; }
 if (!account.invoiced_at) { summary.skipped++; continue; }
 const balance = Number(account.amount || 0) - Number(account.paid_amount || 0);
@@ -4069,6 +4103,7 @@ const account = await accountForUser(env, user, body.accountId);
 if (!account) return json({ ok: false, error: 'Account not found' }, 404);
 const full = await pgSelectOne(env, 'accounts', 'id=' + pgEq(account.id) + '&select=*');
 if (!full) return json({ ok: false, error: 'Account not found' }, 404);
+if (isDoNotContact(full)) return json({ ok: false, code: 'do_not_contact', error: DO_NOT_CONTACT_ERROR }, 409);
 
 const to = String(body.to || full.contact_email || '').trim();
 if (!to || to.indexOf('@') === -1) {
@@ -4675,6 +4710,7 @@ push(a.cos_signed_at, 'document', 'Certificate of Satisfaction signed', null, 's
 push(a.demand_letter_sent_at, 'demand', 'Demand letter sent', null, 'system');
 push(a.noil_sent_at, 'noil', 'Notice of Intent to Lien sent', null, 'system');
 push(a.notified_at, 'escalation', 'Escalated' + (a.notified_name ? (' - ' + a.notified_name + ' notified') : ''), null, 'dashboard');
+if (a.do_not_contact) push(a.do_not_contact_at || a.updated_at, 'escalation', DO_NOT_CONTACT_LABEL, a.do_not_contact_by ? ('flagged by ' + a.do_not_contact_by) : null, 'dashboard');
 push(a.paid_at, 'payment', 'Paid in full', null, 'system');
 comms.forEach(function (c) {
 const who = [c.recipient_role, c.recipient_email].filter(Boolean).join(' - ');
@@ -4707,6 +4743,7 @@ followUpCount: a.follow_up_count || 0, lastContact: a.last_contact, currentlyWit
 waSent: !!a.wa_sent, waSignedAt: a.wa_signed_at, cosSent: !!a.cos_sent, cosSignedAt: a.cos_signed_at,
 demandLetterSentAt: a.demand_letter_sent_at, noilSentAt: a.noil_sent_at, lienFiled: !!a.lien_filed, pa: !!a.pa,
 escalated: !!a.escalated, notifiedName: a.notified_name, notifiedAt: a.notified_at,
+doNotContact: !!a.do_not_contact, doNotContactAt: a.do_not_contact_at || null, doNotContactBy: a.do_not_contact_by || null,
 projectedPaymentDate: a.projected_payment_date, paymentType: a.payment_type, lastDayOnSite: a.last_day_on_site || null,
 note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at
 },
@@ -4754,6 +4791,9 @@ department: a.department,
 category: a.category,
 officeLocation: a.office,
 escalated: !!a.escalated,
+doNotContact: !!a.do_not_contact,
+doNotContactAt: a.do_not_contact_at || null,
+doNotContactBy: a.do_not_contact_by || null,
 notifiedName: a.notified_name,
 notifiedAt: a.notified_at,
 noilSentAt: a.noil_sent_at,
