@@ -73,6 +73,36 @@ const STRIPE_LINKS = {
   enterprise: null
 };
 
+// ---------------------------------------------------------------------------
+// Billing exemption policy
+// Exactly one company is exempt from payment: the platform's own workspace
+// (tenants.slug 'base', tenant id 1), administered by
+// info@claims-collection.net. Every other company must pay through Stripe
+// before anyone on it can sign in, keeps access only while it is paid up
+// (see tenantLockState), and nothing in this file marks a company active
+// without a successful Stripe payment (see activateTenantAfterPayment).
+// The 'base' slug cannot be produced by signup (uniqueSlug never reuses an
+// existing slug), so the slug is the exemption key.
+// ---------------------------------------------------------------------------
+const BILLING_EXEMPT_TENANT_SLUG = 'base';
+const BILLING_EXEMPT_ADMIN_EMAIL = 'info@claims-collection.net';
+// Accepts a tenants row ({ slug }) or a session user ({ tenant_slug }).
+function isBillingExempt(t) {
+  if (!t) return false;
+  const slug = t.slug !== undefined ? t.slug : t.tenant_slug;
+  return String(slug || '') === BILLING_EXEMPT_TENANT_SLUG;
+}
+// Stripe Payment Link for a company that still has to pay. The plan the
+// clAIms team selected for the company wins over the size-based
+// recommendation; null when the plan has no self-serve link (Enterprise).
+function checkoutUrlFor(tenant, email) {
+  if (!tenant) return null;
+  const plan = tenant.selected_plan || tenant.recommended_plan || 'starter';
+  const link = STRIPE_LINKS[plan];
+  if (!link) return null;
+  return link + '?prefilled_email=' + encodeURIComponent(email || '') + '&client_reference_id=' + tenant.id;
+}
+
 const HELP_WIDGET_HTML = '<style>' +
   '#clms-help-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#C29B57;color:#171717;border:none;box-shadow:0 10px 30px -8px rgba(23,23,23,0.45);cursor:pointer;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:700;font-size:22px;z-index:99999;display:flex;align-items:center;justify-content:center;transition:transform .15s ease, box-shadow .15s ease;line-height:1;}' +
   '#clms-help-btn:hover{transform:scale(1.06);box-shadow:0 14px 36px -8px rgba(23,23,23,0.55);}' +
@@ -3048,6 +3078,8 @@ if (!match) return json({ ok: false, error: 'Missing bearer token' }, 401);
 const apiKey = match[1].trim();
 const integration = await pgSelectOne(env, 'integrations', 'api_key=' + pgEq(apiKey) + '&status=' + pgEq('connected') + '&select=id,tenant_id');
 if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
+const syncHold = await integrationBillingHold(env, integration.tenant_id);
+if (syncHold) return syncHold;
 let body;
 try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
 const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
@@ -3871,10 +3903,26 @@ if (!match) return null;
 return await pgSelectOne(env, 'integrations',
 'api_key=' + pgEq(match[1].trim()) + '&status=' + pgEq('connected') + '&select=id,tenant_id');
 }
+// Integration keys get the same billing rule as people: a company that has
+// not paid, or whose payment lapsed past its grace window, is served nothing
+// (no CRM sync in, no outbox out) until a payment goes through. Returns the
+// 402 response to send, or null when the company is in good standing.
+async function integrationBillingHold(env, tenantId) {
+let tenant = null;
+try { tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,slug,status,access_until'); } catch (e) {}
+if (!tenant) return null;
+if (tenantLockState(tenant, Date.now()) !== 'locked') return null;
+return json({ ok: false, locked: true, code: tenantNeverPaid(tenant) ? 'payment_required' : 'billing_hold',
+error: tenantNeverPaid(tenant)
+? 'This company\'s clAIms account is not active yet. Its admin needs to finish payment before the integration can sync.'
+: 'Access on hold due to no payment. The company admin needs to add or edit the payment method before the integration can sync.' }, 402);
+}
 
 async function handleOutboxPull(request, env) {
 const integration = await integrationFromKey(request, env);
 if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
+const outboxHold = await integrationBillingHold(env, integration.tenant_id);
+if (outboxHold) return outboxHold;
 const url = new URL(request.url);
 const limit = Math.min(parseInt(url.searchParams.get('limit'), 10) || 50, 200);
 const rows = await pgSelect(env, 'integration_outbox',
@@ -4869,14 +4917,15 @@ await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { email_verified: true, veri
 const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=*');
 
 if (tenant && user.role === 'admin' && tenant.admin_user_id === user.id) {
-const plan = tenant.recommended_plan || 'starter';
-const link = STRIPE_LINKS[plan];
-if (!link) {
+// Every company pays before it gets in; the exempt workspace and a company
+// that already paid just go to the login.
+if (isBillingExempt(tenant) || String(tenant.status || '') === 'active') return redirectTo('/?login=1');
+const paymentUrl = checkoutUrlFor(tenant, user.email);
+if (!paymentUrl) {
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenant.id), { status: 'verified' });
 return redirectTo('/?verify=enterprise');
 }
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenant.id), { status: 'payment_pending' });
-const paymentUrl = link + '?prefilled_email=' + encodeURIComponent(user.email) + '&client_reference_id=' + tenant.id;
 return redirectTo(paymentUrl);
 }
 
@@ -4970,7 +5019,7 @@ async function countIntegrationsConnected(env, tenantId) {
 }
 // Returns an error string when the tenant has no free seat, else null.
 async function seatLimitError(env, user) {
-  if (user.tenant_slug === 'base') return null;
+  if (isBillingExempt(user)) return null;
   const limits = planLimitsFor(user);
   if (!limits.seats) return null;
   const used = await countSeatsUsed(env, user.tenant_id);
@@ -5018,17 +5067,29 @@ return null;
 //   canceled -> 'grace' until access_until (= paid_through, or 30 days after
 //               the last successful payment when paid_through is unknown),
 //               then 'locked'.
-// The platform's own base tenant is never locked.
+//   anything that is not 'active' and has never paid (pending_verification,
+//               verified, payment_pending) -> 'locked' (see 'payment_required'
+//               in fetch()/lockedPageHtml). A company only becomes active
+//               through a successful Stripe payment.
+// The platform's own exempt workspace (info@claims-collection.net) is never
+// locked; it is the only company exempt from payment.
 const CANCELED_GRACE_DAYS = 30;
 function tenantLockState(tenant, now) {
   if (!tenant) return 'ok';
-  if (tenant.slug === 'base') return 'ok';
+  if (isBillingExempt(tenant)) return 'ok';
   const status = String(tenant.status || '');
+  if (status === 'active') return 'ok';
   if (status === 'past_due' || status === 'canceled') {
     const until = tenant.access_until ? new Date(tenant.access_until).getTime() : 0;
     return (until && (now || Date.now()) < until) ? 'grace' : 'locked';
   }
-  return 'ok';
+  return 'locked';
+}
+// True for a company that has never completed a payment (as opposed to one
+// that paid before and lapsed). Drives the wording and the call to action.
+function tenantNeverPaid(tenant) {
+  const status = String((tenant && tenant.status) || '');
+  return status !== 'active' && status !== 'past_due' && status !== 'canceled';
 }
 // End of the service period a paid invoice covers: the latest line-item
 // period end (line periods are the service window; the invoice's own
@@ -5065,13 +5126,71 @@ pathname === '/api/stripe-webhook';
 async function lockedTenantFor(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return null;
-const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=id,status,company_name,slug,access_until');
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=id,status,company_name,slug,access_until,selected_plan,recommended_plan');
 if (!tenant || !isTenantLocked(tenant)) return null;
 return { user: user, tenant: tenant };
+}
+// JSON body for a request from a company without access: one that never paid
+// (payment_required - admins get the Stripe checkout link) or one that paid
+// before and lapsed (billing_hold - admins fix it in the billing portal).
+function lockedApiBody(info) {
+const isAdmin = info.user.role === 'admin';
+if (tenantNeverPaid(info.tenant)) {
+const url = checkoutUrlFor(info.tenant, info.user.email);
+return { ok: false, locked: true, code: 'payment_required', role: info.user.role, redirect: isAdmin ? url : null,
+error: isAdmin
+? (url ? 'Your company account is not active yet. Finish payment to activate it.' : 'Your plan requires a custom quote. Our team will reach out shortly, or contact hndrx@claims-collection.net.')
+: "Your company's account is not active yet. Ask your company admin to finish payment." };
+}
+return { ok: false, locked: true, code: 'billing_hold', role: info.user.role,
+error: isAdmin
+? 'Access on hold due to no payment. Add or edit your payment method, or submit payment promptly, to be granted access.'
+: 'Access on hold due to no payment. Ask your company admin to add or edit the payment method.' };
+}
+// Sign-in policy for a company that is not paid up (the exempt workspace is
+// never gated). Never paid: the admin is sent to Stripe to pay (or told a
+// quote is coming) and everyone else waits for the admin. Paid before and
+// lapsed: admins may sign in to fix billing - the hold page takes over from
+// there - while everyone else is told access is on hold. During a grace
+// window everyone still gets in. Returns the JSON body to refuse with, or null.
+function loginPaymentGate(tenant, user) {
+if (!tenant || isBillingExempt(tenant)) return null;
+const state = tenantLockState(tenant, Date.now());
+if (state === 'ok' || state === 'grace') return null;
+const isAdmin = user.role === 'admin';
+if (tenantNeverPaid(tenant)) {
+if (!isAdmin) return { ok: false, code: 'payment_required', error: "Your company's account is not active yet. Ask your company admin to finish payment." };
+const url = checkoutUrlFor(tenant, user.email);
+if (url) return { ok: false, code: 'payment_required', error: 'Your company account is verified — finish payment to activate it.', redirect: url };
+return { ok: false, code: 'custom_quote', error: 'Your plan requires a custom quote. Our team will reach out shortly, or contact hndrx@claims-collection.net.' };
+}
+if (isAdmin) return null;
+return { ok: false, code: 'billing_hold', error: 'Access on hold due to no payment. Ask your company admin to add or edit the payment method.' };
 }
 function lockedPageHtml(info) {
 const isAdmin = info.user.role === 'admin';
 const company = escapeHtml(info.tenant.company_name || 'Your company');
+if (tenantNeverPaid(info.tenant)) {
+const url = checkoutUrlFor(info.tenant, info.user.email);
+const payAction = isAdmin
+? (url
+? '<p style="margin:28px 0;display:flex;gap:10px;flex-wrap:wrap;">' +
+'<a href="' + escapeHtml(url) + '" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Complete payment</a>' +
+'<a href="/dashboard" style="border:1px solid #DCC393;color:#171717;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">I\'ve paid &mdash; re-check</a></p>'
+: '<p style="color:#615D53;">Your plan requires a custom quote. Our team will reach out shortly, or contact <a href="mailto:hndrx@claims-collection.net" style="color:#171717;">hndrx@claims-collection.net</a>.</p>')
+: '<p style="color:#615D53;">Ask an admin at your company to finish payment. Access starts automatically the moment the subscription payment goes through.</p>';
+return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
+'<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+'<title>Payment required - clAIms</title></head>' +
+'<body style="margin:0;background:#F5F2EA;font-family:IBM Plex Sans,Arial,sans-serif;color:#171717;">' +
+'<div style="max-width:560px;margin:14vh auto;background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:36px 40px;">' +
+'<div style="font-size:12px;letter-spacing:.08em;color:#C29B57;font-weight:700;">PAYMENT REQUIRED</div>' +
+'<h1 style="font-size:24px;margin:10px 0 14px;">Finish payment to activate ' + company + '</h1>' +
+'<p style="color:#2B2A27;line-height:1.6;">' + company + '\'s clAIms account has not been activated yet. Access for every user starts the moment the subscription payment goes through.</p>' +
+payAction +
+'<p style="color:#9C978A;font-size:12.5px;">Questions? Email support@claims-collection.net</p>' +
+'</div></body></html>';
+}
 const action = isAdmin
 ? '<p style="margin:28px 0;display:flex;gap:10px;flex-wrap:wrap;">' +
 '<a href="/account/subscription" style="background:#171717;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Add or edit payment method</a>' +
@@ -5092,10 +5211,21 @@ action +
 '</div></body></html>';
 }
 
-function subscriptionStatusToTenantStatus(status) {
-if (status === 'past_due' || status === 'unpaid') return 'past_due';
-if (status === 'canceled' || status === 'incomplete_expired') return 'canceled';
-return 'active';
+// Map a Stripe subscription status onto the company's access status. Only a
+// subscription Stripe itself reports as 'active' (i.e. paid) activates a
+// company. A trial, a subscription whose first payment has not gone through
+// ('incomplete') or any status we do not know never grants access on its own:
+// a company that has not paid stays waiting for payment, and a company with a
+// payment history keeps whatever state that history earned it (its grace
+// window is not extended or cut short by a courtesy trial).
+function subscriptionStatusToTenantStatus(status, currentStatus) {
+const s = String(status || '');
+if (s === 'active') return 'active';
+if (s === 'past_due' || s === 'unpaid' || s === 'paused') return 'past_due';
+if (s === 'canceled' || s === 'incomplete_expired') return 'canceled';
+const cur = String(currentStatus || '');
+if (cur === 'active' || cur === 'past_due' || cur === 'canceled') return cur;
+return 'payment_pending';
 }
 
 async function tenantIdForStripeCustomer(env, customerId, fallbackTenantId) {
@@ -5131,39 +5261,53 @@ cancel_at_period_end: !!sub.cancel_at_period_end,
 canceled_at: isoFromUnix(sub.canceled_at),
 updated_at: new Date().toISOString()
 }, 'stripe_subscription_id');
-const patch = { status: subscriptionStatusToTenantStatus(sub.status) };
-if (plan) patch.selected_plan = plan;
-// Remember the plan before this event so a real plan change (upgrade or
-// downgrade made in Stripe) can be announced to the company's admins.
-let previousPlan = null;
-if (plan) {
-try { const prevRow = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=selected_plan,recommended_plan'); previousPlan = prevRow ? (prevRow.selected_plan || prevRow.recommended_plan || null) : null; } catch (e) {}
+// Where the company stands now decides what this event may do to it.
+let current = null;
+try { current = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,slug,status,selected_plan,recommended_plan,paid_through'); } catch (e) {}
+const currentStatus = current ? String(current.status || '') : '';
+const previousPlan = current ? (current.selected_plan || current.recommended_plan || null) : null;
+let nextStatus = null;
+if (isBillingExempt(current)) {
+// The exempt workspace is never activated, held or cancelled by billing.
+nextStatus = null;
+} else if (tenantNeverPaid(current)) {
+// A company that has never paid is activated only by a confirmed payment
+// (checkout paid, delayed payment confirmed, paid invoice) - never by a
+// subscription object on its own, whatever its status. Until then it keeps
+// waiting for payment.
+nextStatus = currentStatus || 'payment_pending';
+} else {
+nextStatus = subscriptionStatusToTenantStatus(sub.status, currentStatus);
 }
-if (patch.status === 'canceled' || patch.status === 'past_due') {
+const patch = {};
+if (nextStatus && nextStatus !== currentStatus) patch.status = nextStatus;
+if (plan) patch.selected_plan = plan;
+if (nextStatus === 'canceled' || nextStatus === 'past_due') {
 // Access continues through the end of the period already paid for, then
 // the company is frozen. paid_through comes from the last paid invoice; if
-// it is unknown (older tenants) fall back to 30 days after the last payment.
-let tenantRow = null;
-try { tenantRow = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=paid_through'); } catch (e) {}
-let accessUntil = accessEndFromPaidThrough(tenantRow);
-if (!accessUntil && patch.status === 'canceled' && !(tenantRow && tenantRow.paid_through)) {
+// it is unknown, fall back to 30 days after the last successful payment on
+// record. With no successful payment on record there is nothing to honour,
+// so the hold starts now.
+let accessUntil = accessEndFromPaidThrough(current);
+if (!accessUntil && !(current && current.paid_through)) {
 let lastPaid = null;
 try {
-const paidRows = await pgSelect(env, 'payments', 'tenant_id=' + pgEq(tenantId) + '&status=' + pgEq('paid') + '&select=paid_at&order=paid_at.desc.nullslast&limit=1');
+const paidRows = await pgSelect(env, 'payments', 'tenant_id=' + pgEq(tenantId) + '&status=' + pgEq('paid') + '&amount_paid=gt.0&select=paid_at&order=paid_at.desc.nullslast&limit=1');
 if (paidRows && paidRows[0] && paidRows[0].paid_at) lastPaid = new Date(paidRows[0].paid_at).getTime();
 } catch (e) {}
-if (!lastPaid && sub.current_period_start) lastPaid = sub.current_period_start * 1000;
-if (!lastPaid) lastPaid = Date.now();
-accessUntil = new Date(lastPaid + CANCELED_GRACE_DAYS * 86400000).toISOString();
+if (lastPaid) {
+const candidate = lastPaid + CANCELED_GRACE_DAYS * 86400000;
+if (candidate > Date.now()) accessUntil = new Date(candidate).toISOString();
+}
 }
 patch.access_until = accessUntil;
-} else if (patch.status === 'active') {
+} else if (nextStatus === 'active') {
 patch.access_until = null;
 }
-await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
+if (Object.keys(patch).length) await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
 // The lock is enforced per-request in fetch() and handleDashboard, so it applies
 // immediately without purging session rows here.
-if (plan && previousPlan && plan !== previousPlan && patch.status === 'active') {
+if (plan && previousPlan && plan !== previousPlan && nextStatus === 'active') {
 try { await notifyPlanChange(env, tenantId, previousPlan, plan, 'stripe'); } catch (e) {}
 }
 return tenantId;
@@ -5285,6 +5429,55 @@ invoice_pdf: invoice.invoice_pdf || null,
 updated_at: new Date().toISOString()
 }, 'stripe_invoice_id');
 return tenantId;
+}
+
+// The one way a company becomes active: a confirmed Stripe payment. Called
+// from checkout.session.completed (payment_status 'paid'),
+// checkout.session.async_payment_succeeded (delayed payment methods) and
+// invoice.paid with a non-zero amount. Idempotent - a company that is already
+// active just has its Stripe customer and paid-through date kept current.
+// Returns 'activated' | 'restored' | 'unchanged' | null (unknown tenant).
+async function activateTenantAfterPayment(env, tenantId, opts) {
+opts = opts || {};
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=*');
+if (!tenant) return null;
+if (isBillingExempt(tenant)) return 'unchanged';
+const firstActivation = tenantNeverPaid(tenant);
+const restored = !firstActivation && String(tenant.status || '') !== 'active';
+const patch = {};
+if (opts.customerId && tenant.stripe_customer_id !== opts.customerId) patch.stripe_customer_id = opts.customerId;
+if (opts.paidThrough && (!tenant.paid_through || new Date(opts.paidThrough).getTime() > new Date(tenant.paid_through).getTime())) patch.paid_through = opts.paidThrough;
+if (firstActivation || restored) { patch.status = 'active'; patch.access_until = null; }
+// Only seed integration_status on first activation - a re-checkout or plan
+// change must not wipe out a company's onboarding progress.
+if (firstActivation && !tenant.integration_status) patch.integration_status = 'not_started';
+if (Object.keys(patch).length) await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
+if (firstActivation) {
+// The admin who signed the company up has been waiting in pending_verification.
+await pgUpdate(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&role=' + pgEq('admin') + '&status=' + pgEq('pending_verification'), { status: 'active' });
+try {
+const notifyHtml = '<div style="font-family:sans-serif;"><h2>Payment received</h2><p>' + escapeHtml(tenant.company_name || ('Tenant ' + tenantId)) + ' has completed payment and is now active. Plan: ' + escapeHtml(tenant.selected_plan || tenant.recommended_plan || 'n/a') + '. Confirmed via ' + escapeHtml(opts.source || 'stripe') + '.</p></div>';
+await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Payment received: ' + (tenant.company_name || ('Tenant ' + tenantId)), html: notifyHtml, kind: 'payment_received', tenantId: tenant.id });
+} catch (e) {}
+return 'activated';
+}
+return restored ? 'restored' : 'unchanged';
+}
+
+// Tell the internal inbox about a checkout that finished without money
+// changing hands (a trial, a 100% discount, or a delayed payment method still
+// clearing). The company is not activated until a payment actually lands.
+async function notifyCheckoutWithoutPayment(env, tenant, session, reason) {
+try {
+const name = tenant ? (tenant.company_name || ('Tenant ' + tenant.id)) : ('Tenant ' + (session.client_reference_id || '?'));
+const html = '<div style="font-family:sans-serif;"><h2>Checkout completed without payment</h2>' +
+'<p><b>' + escapeHtml(name) + '</b> completed Stripe checkout with payment status <b>' + escapeHtml(String(session.payment_status || 'unknown')) + '</b> (' + escapeHtml(reason) + ').</p>' +
+'<p>Per the billing policy, only the ' + escapeHtml(BILLING_EXEMPT_ADMIN_EMAIL) + ' workspace is exempt from payment, so this company stays inactive until a real payment goes through. ' +
+'It will activate automatically on the first paid invoice (for example when a trial ends and the first charge succeeds, or when a bank debit clears).</p>' +
+(session.customer ? '<p>Stripe customer: ' + escapeHtml(String(session.customer)) + '</p>' : '') +
+'</div>';
+await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Checkout without payment: ' + name, html: html, kind: 'checkout_unpaid', tenantId: tenant ? tenant.id : null });
+} catch (e) {}
 }
 
 
@@ -5498,7 +5691,7 @@ function statusCls(st){ return st==='complete'?'ok':(st==='in_progress'?'warn':'
 function msgEl(id){ return document.getElementById(id); }
 function setMsg(id, text, good){ var m=msgEl(id); if(m){ m.textContent=text; m.style.color=good?'#1F5346':'#8A1C13'; } }
 function card(c,i){
-if(c.isBase){ return '<div class="co"><h2>'+esc(c.company||c.slug)+'</h2><div class="meta">Internal clAIms workspace - nothing to provision here.</div></div>'; }
+if(c.isBase){ return '<div class="co"><h2>'+esc(c.company||c.slug)+'</h2><div class="meta">'+pill('exempt from payment','ok')+' Internal clAIms workspace ('+esc(c.exemptAdminEmail||'info@claims-collection.net')+') - the only company that runs without a paid subscription. Nothing to provision here.</div></div>'; }
 var pills = pill(c.status||'unknown',(c.status==='active')?'ok':((c.status==='past_due')?'bad':'warn')) + pill('setup: '+(c.integrationStatus||'not started'), statusCls(c.integrationStatus)) + (c.plan?pill(c.plan,'mut'):'');
 var meta = [];
 if(c.domain) meta.push(c.domain);
@@ -5671,7 +5864,9 @@ const officeKeys = Object.keys(offices);
 return {
 tenantId: t.id,
 slug: t.slug,
-isBase: t.slug === 'base',
+isBase: isBillingExempt(t),
+billingExempt: isBillingExempt(t),
+exemptAdminEmail: isBillingExempt(t) ? BILLING_EXEMPT_ADMIN_EMAIL : null,
 company: t.company_name,
 domain: t.domain,
 status: t.status,
@@ -5776,28 +5971,48 @@ return new Response('Invalid signature', { status: 400 });
 let event;
 try { event = JSON.parse(rawBody); } catch (e) { return new Response('Bad payload', { status: 400 }); }
 
-if (event.type === 'checkout.session.completed') {
+// Checkout: link the Stripe customer to the company, mirror the subscription,
+// and activate the company only when Stripe confirms the payment went
+// through. A checkout that completes without payment (trial, 100% discount,
+// or a bank debit still clearing) leaves the company waiting; it activates on
+// async_payment_succeeded or the first paid invoice.
+if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
 const session = event.data.object;
 const tenantId = session.client_reference_id;
 if (tenantId) {
-const existingTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=integration_status');
-const tenantPatch = { status: 'active', stripe_customer_id: session.customer || null };
-// Only seed integration_status on first checkout - a re-checkout or plan change
-// must not wipe out a company's onboarding progress.
-if (!existingTenant || !existingTenant.integration_status) { tenantPatch.integration_status = 'not_started'; }
-await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), tenantPatch);
+const checkoutTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,slug,company_name,status,stripe_customer_id');
+if (checkoutTenant && session.customer && checkoutTenant.stripe_customer_id !== session.customer) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), { stripe_customer_id: session.customer });
+}
 if (session.subscription) {
 const subRes = await stripeRequest(env, 'GET', 'subscriptions/' + session.subscription, { 'expand[]': 'items.data.price.product' });
 if (subRes && subRes.ok && subRes.data) { await mirrorSubscription(env, subRes.data, tenantId); }
 }
-await pgUpdate(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&role=' + pgEq('admin'), { status: 'active' });
-
-const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=*');
-if (tenant) {
-const notifyHtml = '<div style="font-family:sans-serif;"><h2>Payment received</h2><p>' + escapeHtml(tenant.company_name) + ' has completed payment and is now active. Plan: ' + escapeHtml(tenant.selected_plan || tenant.recommended_plan || 'n/a') + '.</p></div>';
-await sendEmail(env, { to: NOTIFY_EMAIL, subject: 'Payment received: ' + tenant.company_name, html: notifyHtml, kind: 'payment_received', tenantId: tenant.id });
+if (session.payment_status === 'paid') {
+// Record the invoice this checkout paid (its webhook may have arrived
+// before the customer was linked to the company) so paid_through is right.
+let paidThrough = null;
+try {
+const subInvoiceId = session.invoice || null;
+if (subInvoiceId) {
+const invRes = await stripeRequest(env, 'GET', 'invoices/' + subInvoiceId);
+if (invRes && invRes.ok && invRes.data && invRes.data.status === 'paid') {
+await mirrorInvoice(env, invRes.data, 'paid');
+paidThrough = invoicePaidThrough(invRes.data);
 }
 }
+} catch (e) {}
+await activateTenantAfterPayment(env, tenantId, { customerId: session.customer || null, paidThrough: paidThrough, source: event.type });
+} else {
+await notifyCheckoutWithoutPayment(env, checkoutTenant, session,
+session.payment_status === 'no_payment_required' ? 'trial or 100% discount - no charge was made' : 'delayed payment method - waiting for the funds to clear');
+}
+}
+}
+if (event.type === 'checkout.session.async_payment_failed') {
+const failedSession = event.data.object;
+const failedCheckoutTenant = failedSession.client_reference_id ? await pgSelectOne(env, 'tenants', 'id=' + pgEq(failedSession.client_reference_id) + '&select=id,company_name') : null;
+await notifyCheckoutWithoutPayment(env, failedCheckoutTenant, failedSession, 'delayed payment failed - the company stays inactive until it pays');
 }
 
 // Plan changes and cancellations made in the Stripe billing portal only reach
@@ -5811,16 +6026,22 @@ await mirrorSubscription(env, event.data.object, null);
 if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
 const paidInvoice = event.data.object;
 const paidTenantId = await mirrorInvoice(env, paidInvoice, 'paid');
-// A successful payment restores access immediately for a company locked
-// for non-payment or sitting in its cancellation grace window, and records
-// how far the company is now paid through (never moved backwards).
+// A paid invoice with money behind it activates a company that was still
+// waiting for its first payment (delayed payment methods, a trial's first
+// real charge, webhook ordering), restores access for a company on hold or
+// in its cancellation grace window, and records how far the company is now
+// paid through (never moved backwards). A $0 invoice (trial, full discount)
+// changes nothing: only a real payment grants access.
 if (paidTenantId) {
-const paidTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(paidTenantId) + '&select=status,paid_through');
-const paidPatch = {};
 const throughIso = invoicePaidThrough(paidInvoice);
-if (throughIso && (!paidTenant || !paidTenant.paid_through || new Date(throughIso).getTime() > new Date(paidTenant.paid_through).getTime())) paidPatch.paid_through = throughIso;
-if (paidTenant && (paidTenant.status === 'past_due' || paidTenant.status === 'canceled')) { paidPatch.status = 'active'; paidPatch.access_until = null; }
-if (Object.keys(paidPatch).length) await pgUpdate(env, 'tenants', 'id=' + pgEq(paidTenantId), paidPatch);
+if (Number(paidInvoice.amount_paid || 0) > 0) {
+await activateTenantAfterPayment(env, paidTenantId, { customerId: paidInvoice.customer || null, paidThrough: throughIso, source: event.type });
+} else if (throughIso) {
+const paidTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(paidTenantId) + '&select=status,paid_through');
+if (paidTenant && String(paidTenant.status || '') === 'active' && (!paidTenant.paid_through || new Date(throughIso).getTime() > new Date(paidTenant.paid_through).getTime())) {
+await pgUpdate(env, 'tenants', 'id=' + pgEq(paidTenantId), { paid_through: throughIso });
+}
+}
 }
 }
 
@@ -6044,18 +6265,8 @@ return json({ ok: false, error: 'Your access request was declined. Contact your 
 }
 
 const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=*');
-if (tenant && user.role === 'admin' && (tenant.status === 'verified' || tenant.status === 'payment_pending')) {
-const plan = tenant.recommended_plan || 'starter';
-const link = STRIPE_LINKS[plan];
-if (link) {
-const paymentUrl = link + '?prefilled_email=' + encodeURIComponent(user.email) + '&client_reference_id=' + tenant.id;
-return json({ ok: false, error: 'Your company account is verified — finish payment to activate it.', redirect: paymentUrl }, 403);
-}
-return json({ ok: false, error: 'Your plan requires a custom quote. Our team will reach out shortly, or contact hndrx@claims-collection.net.' }, 403);
-}
-if (tenant && tenant.status !== 'active' && user.role !== 'admin') {
-return json({ ok: false, error: "Your company's account setup is not finished yet. Please contact your admin." }, 403);
-}
+const gate = loginPaymentGate(tenant, user);
+if (gate) return json(gate, 403);
 
 const token = randomToken();
 const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
@@ -6381,12 +6592,7 @@ const url = new URL(request.url);
 // A locked company keeps every record but loses access until payment resumes.
 if (url.pathname.indexOf('/api/') === 0 && !allowedWhileLocked(url.pathname)) {
 const lockedCtx = await lockedTenantFor(request, env);
-if (lockedCtx) {
-return json({ ok: false, locked: true, code: 'billing_hold', role: lockedCtx.user.role,
-error: lockedCtx.user.role === 'admin'
-? 'Access on hold due to no payment. Add or edit your payment method, or submit payment promptly, to be granted access.'
-: 'Access on hold due to no payment. Ask your company admin to add or edit the payment method.' }, 402);
-}
+if (lockedCtx) return json(lockedApiBody(lockedCtx), 402);
 }
 
 if (url.pathname === '/email-logo.png' && request.method === 'GET') {
