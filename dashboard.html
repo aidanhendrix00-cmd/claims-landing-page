@@ -185,6 +185,24 @@
   .amount .paid-line{display:block;font-family:var(--font-body);font-weight:500;font-size:11px;color:#8A4B18;margin-top:3px;}
   .amount .owed-label{display:block;font-family:var(--font-mono);font-weight:400;font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--slate-soft);margin-bottom:2px;}
   .badge.partial{background:#FBE9D8;color:#8A4B18;border:1px solid #F1D3B4;}
+  /* DO NOT CONTACT - Sent to Collections Agency: the whole account reads red. */
+  .badge.dnc{background:#B42318;color:#fff;border:1px solid #912018;letter-spacing:0.04em;}
+  .card.dnc{background:#FEF3F2;border-color:#F04438;box-shadow:inset 4px 0 0 #B42318;position:relative;}
+  .card.dnc .name{color:#912018;}
+  .card.dnc .btn-primary[disabled]{background:#FDA29B;border-color:#FDA29B;color:#7A271A;cursor:not-allowed;opacity:1;}
+  .dnc-banner{grid-column:1 / -1;display:flex;flex-direction:column;gap:2px;background:#B42318;color:#fff;border-radius:8px;padding:8px 12px;margin:-4px 0 2px;}
+  .dnc-banner-title{font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;}
+  .dnc-banner-sub{font-size:11.5px;opacity:0.92;}
+  table.sheet tr.dnc-row td, table.log tr.dnc-row td, tr.dnc-row td{background:#FEF3F2 !important;color:#912018;}
+  tr.dnc-row td:first-child{box-shadow:inset 4px 0 0 #B42318;}
+  .dnc-cell{margin-top:4px;}
+  .dnc-toggle{display:flex;align-items:flex-start;gap:10px;border:1px solid #F04438;background:#FEF3F2;border-radius:10px;padding:12px 14px;margin-top:6px;}
+  .dnc-toggle input{margin-top:3px;width:16px;height:16px;accent-color:#B42318;flex:none;}
+  .dnc-toggle > span{display:block;min-width:0;}
+  .dnc-toggle .t{display:block;font-family:var(--font-display);font-size:12.5px;font-weight:700;color:#912018;letter-spacing:0.02em;}
+  .dnc-toggle .d{display:block;font-size:11.5px;color:#7A271A;line-height:1.5;margin-top:2px;}
+  .dnc-toggle.on{background:#B42318;border-color:#912018;}
+  .dnc-toggle.on .t,.dnc-toggle.on .d{color:#fff;}
   .paid-sub{display:block;font-family:var(--font-body);font-weight:400;font-size:10.5px;color:#8A4B18;margin-top:2px;white-space:nowrap;}
   .aging-office{margin-top:22px;}
   .aging-office-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:10px 14px;background:#171717;color:#EDEFF1;border-radius:10px 10px 0 0;}
@@ -675,7 +693,7 @@
           <div class="rname">Autonomous Cadence Follow-Ups</div>
           <div class="rdesc">Follow-ups, the Day-30 Demand Letter, and the Day-40 NOIL are drafted and sent automatically as each invoice crosses a cadence checkpoint &#8212; no manual "send" click required.</div>
           <div class="rtrigger">CADENCE: 1 · 3 · 5 · 7 · 10 · 15 · 25 · 30 (Demand) · 40 (NOIL)</div>
-          <button class="btn-small" style="margin-top:10px;" onclick="runCadenceNow()">Run Cadence Check Now</button>
+          <button class="btn-small" style="margin-top:10px;" data-demo-only="1" onclick="runCadenceNow()">Run Cadence Check Now</button>
         </div>
         <label class="switch"><input type="checkbox" id="auto-cadence" checked="" onchange="toggleAutomation('autoCadence', this.checked)"><span class="slider"></span></label>
       </div>
@@ -974,10 +992,19 @@
       <div id="detail-activity"></div>
     </div>
 
+    <div class="drawer-section">
+      <h4>Collections Agency</h4>
+      <label class="dnc-toggle" id="detail-dnc-toggle">
+        <input type="checkbox" id="detail-dnc-check" onchange="setDoNotContact(currentDetailId, this.checked)">
+        <span><span class="t">DO NOT CONTACT &mdash; Sent to Collections Agency</span>
+        <span class="d" id="detail-dnc-desc">Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and A/R Spreadsheet, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.</span></span>
+      </label>
+    </div>
+
     <div class="drawer-actions">
       <button class="btn-small" id="detail-escalate-btn" onclick="escalateFromDetail()">Escalate</button>
       <button class="btn-ghost" onclick="openAccountHistory(currentDetailId)">Account History</button>
-      <button class="btn-ghost" onclick="openDrawer(currentDetailId, 'followup')">Draft Follow-Up</button>
+      <button class="btn-ghost" id="detail-followup-btn" onclick="openDrawer(currentDetailId, 'followup')">Draft Follow-Up</button>
       <button class="btn-amber" id="detail-demand-btn" style="display:none;" onclick="openDrawer(currentDetailId, 'demand')">Draft Demand Letter</button>
       <button class="btn-rust" id="detail-noil-btn" style="display:none;" onclick="openDrawer(currentDetailId, 'noil')">Draft NOIL</button>
       <button class="btn-solid" id="detail-payment-btn" data-manager-only="1" onclick="openPaymentForm(currentDetailId)">Record a Payment</button>
@@ -1347,6 +1374,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
       waSignedDate: null, cosSignedDate: null,
       documents: baseDocs('c'+base.id), activity: [],
       escalated: false, cadenceSent: backfilledCadence, needsAttention: false,
+      doNotContact: false, doNotContactAt: null, doNotContactBy: null,
       lastUpdatedAtDay: base.days,
       lastContact: null, responded: 'none', responseSummary: '',
       projectedPaymentDate: isoDate(projected)
@@ -1396,7 +1424,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
         makeInvoice({ id:37, name:"Ashton Medical Plaza", meta:"Storm damage cleanup; Unit 137", payer:"private", contact:"Risk Manager", amount:16614.00, days:97, followups:1, note:"No response yet to second follow-up.", jobStatus:"work_completed", department:"contents", category:"textiles", officeLocation:"hill_country" }),
         makeInvoice({ id:38, name:"Bluebonnet Self Storage", meta:"Storm damage cleanup; Unit 138", payer:"insurance", contact:"Site Supervisor", amount:9519.00, days:8, followups:0, note:"Escalated to regional office for review.", jobStatus:"pending_start", department:"reconstruction", officeLocation:"houston", escalated:true }),
         makeInvoice({ id:39, name:"Trailhead Office Park", meta:"Content pack-out & storage; Unit 139", payer:"private", contact:"Risk Manager", amount:3353.00, days:77, followups:3, note:"Invoice submitted and processed; awaiting check-cut date confirmation.", jobStatus:"pending_start", department:"contents", category:"pack_out", officeLocation:"houston" }),
-        makeInvoice({ id:40, name:"Copperline Manufacturing", meta:"Textile & fabric cleaning; Unit 140", payer:"pm", contact:"Adjuster", amount:8941.00, days:76, followups:0, note:"Follow-up sent; contact requested additional documentation.", jobStatus:"pending_start", department:"contents", category:"pack_out", officeLocation:"houston" }),
+        makeInvoice({ id:40, name:"Copperline Manufacturing", meta:"Textile & fabric cleaning; Unit 140", payer:"pm", contact:"Adjuster", amount:8941.00, days:76, followups:3, note:"No response after three follow-ups and a demand letter. Placed with Lone Star Recovery Group on referral; agency handles all contact from here.", jobStatus:"in_ar", department:"contents", category:"pack_out", officeLocation:"houston", doNotContact:true, doNotContactBy:"Jordan Blake", doNotContactAt: new Date(Date.now() - 4 * 86400000).toISOString() }),
         makeInvoice({ id:41, name:"Silver Oaks Community", meta:"Content pack-out & storage; Unit 141", payer:"private", contact:"Risk Manager", amount:1536.00, days:8, followups:0, note:"Adjuster confirmed scope; payment expected next cycle.", jobStatus:"pending_start", department:"mitigation", category:"board_up_tarping", officeLocation:"arizona" }),
         makeInvoice({ id:42, name:"Lakeside Event Venue", meta:"Textile & fabric cleaning; Unit 142", payer:"pm", contact:"Regional Manager", amount:5951.00, days:5, followups:0, note:"Awaiting signed COS before invoice can be finalized.", jobStatus:"in_ar", department:"mitigation", category:"mold_remediation", officeLocation:"hill_country" }),
         makeInvoice({ id:43, name:"Northgate Retail Center", meta:"Board-up & tarping; Unit 143", payer:"pm", contact:"Adjuster", amount:11424.00, days:37, followups:2, note:"Client disputes minor line item; under review.", jobStatus:"in_progress", department:"contents", category:"textiles", officeLocation:"houston" }),
@@ -1716,7 +1744,9 @@ await loadRealIntegrations();
     if (!data.ok) return;
     window.__me = data;
     applyTenantConfig(data);
-    state.currentUser = { email: data.email, role: data.role, office: data.office || null };
+    state.currentUser = { email: data.email, role: data.role, office: data.office || null, fullName: data.fullName || null };
+    // Demo-only controls: the time simulator and the local cadence trigger.
+    document.querySelectorAll('.sim-clock, [data-demo-only]').forEach(function(el){ el.style.display = 'none'; });
     document.querySelectorAll('[data-admin-only]').forEach(function(el){
       el.style.display = (state.currentUser.role === 'admin') ? '' : 'none';
     });
@@ -2010,6 +2040,9 @@ async function loadRealAccounts(){
           documents: [],
           activity: [],
           escalated: !!a.escalated,
+          doNotContact: !!a.doNotContact,
+          doNotContactAt: a.doNotContactAt || null,
+          doNotContactBy: a.doNotContactBy || null,
           cadenceSent: a.cadenceSent || {},
           needsAttention: false,
           days: ageDays,
@@ -2285,6 +2318,19 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
   function money2(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   function partialBadgeHTML(inv){ return isPartiallyPaid(inv) ? '<span class="badge partial" title="A payment has been applied; the balance shown is what is still owed">PARTIAL PAYMENT</span>' : ''; }
 
+  /* ---- DO NOT CONTACT - Sent to Collections Agency ----
+     Set from an account's Manage drawer. While it is on, the account is shown
+     in red on the Invoice Queue and A/R Spreadsheet, no follow-up can be
+     drafted or sent, and the autonomous cadence skips it entirely. */
+  const DNC_LABEL = 'DO NOT CONTACT - Sent to Collections Agency';
+  function isDoNotContact(inv){ return !!(inv && inv.doNotContact); }
+  function dncBadgeHTML(inv){ return isDoNotContact(inv) ? '<span class="badge dnc" title="' + DNC_LABEL + '">DO NOT CONTACT &middot; COLLECTIONS AGENCY</span>' : ''; }
+  function dncBannerHTML(inv){
+    const by = inv.doNotContactBy ? (' by ' + hEsc(inv.doNotContactBy)) : '';
+    const when = inv.doNotContactAt ? (' on ' + hEsc(hDate(inv.doNotContactAt))) : '';
+    return '<div class="dnc-banner"><span class="dnc-banner-title">' + DNC_LABEL + '</span><span class="dnc-banner-sub">Flagged' + by + when + '. All automated cadences and follow-ups are stopped for this account.</span></div>';
+  }
+
   /* ============================================================
      KPIs
      ============================================================ */
@@ -2328,7 +2374,8 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
   function renderTodoList(){
 const wrap = document.getElementById('todo-list');
 if(!wrap) return;
-const open = activeInvoices();
+// Accounts sent to a collections agency are not anyone's follow-up to do.
+const open = activeInvoices().filter(inv => !isDoNotContact(inv));
 const items = open.map(inv => {
 const cp = nextCadenceCheckpoint(inv);
 const due = inv.escalated || !cp || (inv.days >= cp.day);
@@ -2474,8 +2521,10 @@ function todoRowHTML(item, num, priority){
     const escBadge = inv.escalated ? `<span class="badge escalated">ESCALATED</span>` : '';
     const warnBadge = inv.needsAttention ? `<span class="badge warn">NEEDS ATTENTION</span>` : '';
     const staleBadge = isStale(inv) ? `<span class="badge stale">STALE &mdash; ${staleDaysCount(inv)}D NO UPDATE</span>` : '';
+    const dnc = isDoNotContact(inv);
     return `
-      <div class="card">
+      <div class="card${dnc ? ' dnc' : ''}">
+        ${dnc ? dncBannerHTML(inv) : ''}
         <div class="who">
           <div class="name">${inv.name}</div>
           <div class="meta">${inv.meta} &middot; <span style="font-family:var(--font-mono);">${inv.invoiceNumber || '\u2014'}</span> &middot; <span style="font-family:var(--font-mono);">${inv.jobNumber}</span></div>
@@ -2487,7 +2536,7 @@ function todoRowHTML(item, num, priority){
             <span class="badge cat">${CATEGORY_LABELS[inv.category].toUpperCase()}</span>
             <span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus].toUpperCase()}</span>
             <span class="badge cw">WITH: ${CURRENTLY_WITH_LABELS[inv.currentlyWith].toUpperCase()}</span>
-            ${partialBadgeHTML(inv)}${escBadge}${warnBadge}${staleBadge}
+            ${dncBadgeHTML(inv)}${partialBadgeHTML(inv)}${escBadge}${warnBadge}${staleBadge}
           </div>
         </div>
         <div class="amount">${isPartiallyPaid(inv) ? '<span class="owed-label">Balance owed</span>' : ''}${money2(balanceDue(inv))}
@@ -2504,7 +2553,9 @@ function todoRowHTML(item, num, priority){
         <div class="actions">
           <button class="btn-small" onclick="openAccountHistory(${inv.id})" title="Every follow-up, letter, payment, document and note on this account">Account History</button>
           <button class="btn-small" onclick="openDetail(${inv.id})">Manage</button>
-          <button class="btn-primary" onclick="openDrawer(${inv.id}, 'followup')">Draft Now</button>
+          ${dnc
+            ? `<button class="btn-primary" disabled title="${DNC_LABEL}: no follow-ups can be drafted or sent">Contact stopped</button>`
+            : `<button class="btn-primary" onclick="openDrawer(${inv.id}, 'followup')">Draft Now</button>`}
         </div>
       </div>`;
   }
@@ -2529,6 +2580,42 @@ function todoRowHTML(item, num, priority){
 
     if(items.length === 0){ el.innerHTML = `<div class="empty">No invoices match your current filters.</div>`; return; }
     el.innerHTML = items.map(inv => cardHTML(inv)).join('');
+  }
+
+  // Flag or clear "DO NOT CONTACT - Sent to Collections Agency" on an account.
+  // Persists for real tenants (the worker stops the cadence and refuses sends
+  // server-side too); the demo applies the same rules locally.
+  async function setDoNotContact(id, on){
+    const inv = findInv(id);
+    if(!inv) return;
+    on = !!on;
+    if(inv.doNotContact === on) return;
+    inv.doNotContact = on;
+    inv.doNotContactAt = on ? new Date().toISOString() : null;
+    inv.doNotContactBy = on ? ((state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || 'You') : null;
+    const text = on
+      ? 'Marked "' + DNC_LABEL + '". All automated cadences, follow-ups and manual sends to this customer are stopped.'
+      : 'Cleared "' + DNC_LABEL + '". Automated cadences and follow-ups may resume.';
+    // The worker writes its own note + activity entry for real accounts; the
+    // demo records it locally so the drawer and history reflect it at once.
+    if(isRemoteInvoice(inv)){
+      const res = await persistInvoice(inv, ['doNotContact']);
+      if(!res || !res.ok){
+        inv.doNotContact = !on;
+        inv.doNotContactAt = null; inv.doNotContactBy = null;
+        showToast('Could not update the account. Please try again.');
+        if(currentDetailId === id) openDetail(id);
+        renderAll();
+        return;
+      }
+      // Source other than 'manual' so the note is not posted a second time.
+      addActivity(inv, text, 'dashboard', 'skip');
+    } else {
+      addActivity(inv, text, 'manual', 'escalation');
+    }
+    showToast(on ? (inv.name + ' marked DO NOT CONTACT \u2014 all automations stopped') : (inv.name + ': contact may resume'));
+    if(currentDetailId === id) openDetail(id);
+    renderAll();
   }
 
   function escalateInvoice(id){
@@ -2616,11 +2703,11 @@ saveState(); renderAll();
     const rows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter).slice().sort((a,b)=>balanceDue(b)-balanceDue(a));
     if(rows.length === 0){ body.innerHTML = `<tr><td colspan="24" style="text-align:center;padding:24px;color:var(--slate);">No open invoices match the current filters. Paid invoices have moved to the Collected tab.</td></tr>`; return; }
     body.innerHTML = rows.map(inv => `
-      <tr>
+      <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
         <td>${inv.invoiceNumber}</td>
         <td style="font-family:var(--font-mono);">${inv.jobNumber}</td>
         <td>${fmtDate(inv.invoiceDate)}</td>
-        <td>${inv.name}</td>
+        <td>${inv.name}${isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : ''}</td>
         <td><span class="badge office">${OFFICE_LABELS[inv.officeLocation]}</span></td>
         <td><span class="badge dept">${DEPARTMENT_LABELS[inv.department]}</span></td>
         <td><span class="badge cat">${CATEGORY_LABELS[inv.category]}</span></td>
@@ -2766,8 +2853,8 @@ saveState(); renderAll();
           <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Category</th><th>Payer</th><th>Status</th><th>Age</th><th>Since contact</th><th class="amt">Balance owed</th><th></th></tr></thead><tbody>
           ${rows.map(inv => {
             const age = agingDays(inv);
-            return `<tr>
-              <td><div style="font-weight:600;color:var(--ink);">${hEsc(inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${inv.meta || ''}</div></td>
+            return `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
+              <td><div style="font-weight:600;color:var(--ink);">${hEsc(inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${inv.meta || ''}</div>${isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : ''}</td>
               <td style="font-family:var(--font-mono);font-size:11.5px;white-space:nowrap;">${hEsc(inv.invoiceNumber || '—')}${inv.invoiceDate ? `<div style="font-size:10.5px;color:var(--slate-soft);">${fmtDate(inv.invoiceDate)}</div>` : ''}</td>
               <td><span class="badge cat">${CATEGORY_LABELS[inv.category] || inv.category || '—'}</span></td>
               <td><span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer] || inv.payer || '—'}</span></td>
@@ -3434,8 +3521,17 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     syncUploadOther();
     uploadNote('');
     loadRemoteDocuments(inv);
-    document.getElementById('detail-demand-btn').style.display = inv.days >= 30 ? 'inline-block' : 'none';
-    document.getElementById('detail-noil-btn').style.display = inv.days >= 40 ? 'inline-block' : 'none';
+    // DO NOT CONTACT: reflect the flag, and hide every way of drafting a message
+    // to this customer while it is on.
+    const dnc = isDoNotContact(inv);
+    document.getElementById('detail-dnc-check').checked = dnc;
+    document.getElementById('detail-dnc-toggle').classList.toggle('on', dnc);
+    document.getElementById('detail-dnc-desc').textContent = dnc
+      ? ('Flagged' + (inv.doNotContactBy ? (' by ' + inv.doNotContactBy) : '') + (inv.doNotContactAt ? (' on ' + hDate(inv.doNotContactAt)) : '') + '. Every automated cadence and follow-up is stopped and nothing can be sent to this customer from clAIms. Turn this off if the agency returns the account.')
+      : 'Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and A/R Spreadsheet, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.';
+    document.getElementById('detail-followup-btn').style.display = dnc ? 'none' : 'inline-block';
+    document.getElementById('detail-demand-btn').style.display = (!dnc && inv.days >= 30) ? 'inline-block' : 'none';
+    document.getElementById('detail-noil-btn').style.display = (!dnc && inv.days >= 40) ? 'inline-block' : 'none';
     document.getElementById('detail-escalate-btn').textContent = inv.escalated ? 'Un-escalate' : 'Escalate';
     document.getElementById('detail-escalate-btn').onclick = inv.escalated ? () => { unescalateInvoice(id); closeDetail(); } : () => escalateFromDetail();
     document.getElementById('detail-payment-btn').style.display = (inv.jobStatus === 'paid' || !canRecordPayments()) ? 'none' : 'inline-block';
@@ -4490,9 +4586,14 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
 
   async function runCadenceForAll(){
+    // The browser-side engine exists for the interactive demo. Real companies
+    // are served by the worker's scheduled cadence; running this locally for
+    // them would draft against real accounts and log sends that never went out.
+    if(state.currentUser) return;
     if(!state.automationSettings.autoCadence) return;
     for(const inv of activeInvoices()){
       if(inv.escalated) continue;
+      if(isDoNotContact(inv)) continue;   // sent to collections: the cadence never touches it
       const checkpoint = nextCadenceCheckpoint(inv);
       if(checkpoint && inv.days >= checkpoint.day){
         await autoSendForCheckpoint(inv, checkpoint);
@@ -4501,6 +4602,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
 
   async function autoSendForCheckpoint(inv, checkpoint){
+    if(isDoNotContact(inv)) return;
     const draftType = checkpointDraftType(checkpoint);
     if(state.automationSettings.requireReview){
       addActivity(inv, `Day ${checkpoint.day} cadence checkpoint reached (${checkpoint.label}) \u2014 held for manual review before sending.`, 'automation');
@@ -4719,6 +4821,11 @@ Do not invent facts beyond what's given.`;
     currentDraftType = draftType || 'followup';
     currentInvoice = findInv(id);
     if(!currentInvoice) return;
+    if(isDoNotContact(currentInvoice)){
+      showToast(currentInvoice.name + ' is marked DO NOT CONTACT \u2014 sent to a collections agency. Nothing can be drafted or sent.');
+      currentInvoice = null;
+      return;
+    }
     currentRecipient = recipientDefault(currentInvoice);
     customSubject = null;
     document.getElementById('overlay-detail').classList.remove('open');
@@ -4778,6 +4885,13 @@ Do not invent facts beyond what's given.`;
   function approveSend(){
     const approveBtn = document.getElementById('approve-btn');
     const inv = currentInvoice;
+    if(!inv) return;
+    if(isDoNotContact(inv)){
+      // Flagged while the drawer was open: refuse here too, the way the server does.
+      showToast(inv.name + ' is marked DO NOT CONTACT \u2014 nothing was sent.');
+      closeDrawer();
+      return;
+    }
     const typeLabels = { followup: 'Follow-Up', demand: 'Demand Letter', noil: 'NOIL' };
     const recipientLabel = recipientDisplayName(inv, currentRecipient);
     const bodyText = document.getElementById('draft-text').value;
