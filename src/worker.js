@@ -1937,6 +1937,51 @@ function escapeHtml(s) {
   });
 }
 
+// Readable plain text for an email we sent, so the dashboard can show the
+// message itself without ever rendering stored HTML. Block-level tags become
+// line breaks, list items get a bullet, links keep their href, tags are
+// dropped and entities are decoded.
+function htmlToText(html) {
+  if (!html) return '';
+  let s = String(html);
+  s = s.replace(/<(script|style)[\s\S]*?<\/\1>/gi, '');
+  s = s.replace(/<\s*br\s*\/?\s*>/gi, '\n');
+  s = s.replace(/<\s*li[^>]*>/gi, '\n- ');
+  s = s.replace(/<\s*a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, function (m, href, inner) {
+    const label = inner.replace(/<[^>]*>/g, '').trim();
+    if (!label) return href;
+    return label.indexOf(href) !== -1 ? label : (label + ' (' + href + ')');
+  });
+  s = s.replace(/<\s*\/\s*(p|div|tr|h[1-6]|li|table|blockquote|section)\s*>/gi, '\n');
+  s = s.replace(/<\s*\/\s*td\s*>\s*<\s*td[^>]*>/gi, ': ');
+  s = s.replace(/<[^>]+>/g, '');
+  s = s.replace(/&nbsp;/gi, ' ').replace(/&mdash;/gi, '—').replace(/&ndash;/gi, '–')
+       .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+       .replace(/&quot;/gi, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, function (m, d) { return String.fromCharCode(parseInt(d, 10)); });
+  s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/^[\s\n]+|[\s\n]+$/g, '');
+  return s;
+}
+// What the dashboard shows for one sent message. Bodies are stored as the HTML
+// we actually sent; bodyText is what gets displayed (escaped, never rendered).
+const COMMS_BODY_LIMIT = 20000;
+function commsToJson(c) {
+  const text = htmlToText(c.body);
+  return {
+    id: c.id, at: c.sent_at, kind: c.kind, label: commsKindLabel(c.kind), cadenceDay: c.cadence_day,
+    recipientRole: c.recipient_role, recipientEmail: c.recipient_email, subject: c.subject,
+    status: c.status, error: c.error,
+    body: text, preview: text.slice(0, 160), hasBody: !!text,
+    source: c.cadence_day ? 'automation' : 'manual'
+  };
+}
+function commsKindLabel(kind) {
+  const k = String(kind || '').toLowerCase();
+  if (k.indexOf('noil') !== -1) return 'NOIL';
+  if (k.indexOf('demand') !== -1) return 'Demand letter';
+  if (k.indexOf('payment') !== -1) return 'Payment email';
+  return 'Follow-up';
+}
+
 function json(obj, status) {
   return new Response(JSON.stringify(obj), { status: status || 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': NO_STORE } });
 }
@@ -3684,6 +3729,7 @@ await pgInsert(env, 'invoice_comms', {
 tenant_id: settings.tenant_id, account_id: account.id, cadence_day: due.day,
 kind: due.kind, recipient_role: recipient.role, recipient_email: to,
 subject: subject, status: (result && result.ok) ? 'sent' : 'failed',
+body: String(html || '').slice(0, COMMS_BODY_LIMIT),
 error: (result && result.ok) ? null : String((result && result.error) || 'Send failed')
 });
 
@@ -4076,6 +4122,7 @@ await pgInsert(env, 'invoice_comms', {
 tenant_id: user.tenant_id, account_id: account.id, cadence_day: null,
 kind: 'manual_' + draftType, recipient_role: body.recipient || null, recipient_email: to,
 subject: subject, status: okSent ? 'sent' : 'failed',
+body: String(html || '').slice(0, COMMS_BODY_LIMIT),
 error: okSent ? null : String((result && result.error) || 'Send failed')
 });
 
@@ -4551,6 +4598,46 @@ return json({ ok: true, days: days, automationActor: AUTOMATION_ACTOR, people: p
 // itself, every communication (cadence and manual), external activity pushed
 // by the CRM, payments, documents, notes, other invoices for the same
 // customer, and a merged timeline of all of it, newest first.
+// Every message sent for one account - cadence and manual, plus anything the
+// CRM pushed - newest first, with the body of each. Backs the "See messages
+// sent" button on the Comms Log; deliberately lighter than the full history.
+async function handleInvoiceMessages(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+const accountId = url.searchParams.get('accountId');
+if (!accountId) return json({ ok: false, error: 'accountId is required' }, 400);
+const account = await accountForUser(env, user, accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const limit = Math.min(parseInt(url.searchParams.get('limit'), 10) || 50, 200);
+const tid = pgEq(user.tenant_id);
+const aid = pgEq(account.id);
+const safe = async function (p) { try { return (await p) || []; } catch (e) { return []; } };
+const both = await Promise.all([
+safe(pgSelect(env, 'invoice_comms', 'account_id=' + aid + '&tenant_id=' + tid + '&select=*&order=sent_at.desc.nullslast&limit=' + limit)),
+safe(pgSelect(env, 'account_activity', 'account_id=' + aid + '&tenant_id=' + tid + '&select=*&order=sent_at.desc.nullslast&limit=' + limit))
+]);
+const messages = both[0].map(commsToJson);
+// Sends the CRM made outside clAIms belong in the same list; they carry no
+// body, so they are shown as a record of the send rather than a message.
+both[1].forEach(function (x) {
+const type = String(x.type || '');
+if (type && type.indexOf('email') === -1 && type.indexOf('letter') === -1 && type.indexOf('noil') === -1 && type.indexOf('follow') === -1) return;
+messages.push({
+id: 'crm-' + x.id, at: x.sent_at, kind: x.type, label: commsKindLabel(x.type), cadenceDay: null,
+recipientRole: null, recipientEmail: x.recipient || null, subject: x.subject || null,
+status: x.status || 'sent', error: null, body: '', preview: '', hasBody: false,
+source: x.source || 'crm'
+});
+});
+messages.sort(function (a, b) { return new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime(); });
+return json({
+ok: true,
+account: { id: account.id, customerName: account.customer_name, invoiceNumber: account.invoice_number || ('INV-' + (10000 + account.id)) },
+messages: messages.slice(0, limit)
+});
+}
+
 async function handleAccountHistory(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -4578,13 +4665,7 @@ let relQ = 'tenant_id=' + tid + '&customer_name=' + pgEq(a.customer_name) + '&id
 if (user.role !== 'admin') relQ += '&office=' + pgEq(user.office || '__none__');
 related = await safe(pgSelect(env, 'accounts', relQ));
 }
-const kindLabel = function (kind) {
-const k = String(kind || '').toLowerCase();
-if (k.indexOf('noil') !== -1) return 'NOIL';
-if (k.indexOf('demand') !== -1) return 'Demand letter';
-if (k.indexOf('payment') !== -1) return 'Payment email';
-return 'Follow-up';
-};
+const kindLabel = commsKindLabel;
 const timeline = [];
 const push = function (at, type, title, detail, source) { if (!at) return; timeline.push({ at: at, type: type, title: title, detail: detail || null, source: source || null }); };
 push(a.invoiced_at, 'invoice', 'Invoice ' + (a.invoice_number || ('INV-' + (10000 + a.id))) + ' created for $' + Number(a.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), null, 'system');
@@ -4629,7 +4710,7 @@ escalated: !!a.escalated, notifiedName: a.notified_name, notifiedAt: a.notified_
 projectedPaymentDate: a.projected_payment_date, paymentType: a.payment_type, lastDayOnSite: a.last_day_on_site || null,
 note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at
 },
-comms: comms.map(function (c) { return { id: c.id, at: c.sent_at, kind: c.kind, label: kindLabel(c.kind), cadenceDay: c.cadence_day, recipientRole: c.recipient_role, recipientEmail: c.recipient_email, subject: c.subject, status: c.status, error: c.error }; }),
+comms: comms.map(commsToJson),
 activity: activity.map(function (x) { return { id: x.id, at: x.sent_at, type: x.type, recipient: x.recipient, subject: x.subject, status: x.status, source: x.source }; }),
 payments: payments.map(function (p) { return { id: p.id, at: p.deposited_on, amount: money(p.amount), method: p.method, payerName: p.payer_name, reference: p.reference, bankName: p.bank_name, memo: p.memo }; }),
 documents: docs.map(documentToJson),
@@ -6774,6 +6855,9 @@ return handleIntegrationsList(request, env);
 }
 if (url.pathname === '/api/accounts/history' && request.method === 'GET') {
 return handleAccountHistory(request, env);
+}
+if (url.pathname === '/api/invoices/messages' && request.method === 'GET') {
+return handleInvoiceMessages(request, env);
 }
 if (url.pathname === '/api/accounts/ping' && request.method === 'GET') {
 return handleAccountsPing(request, env);
