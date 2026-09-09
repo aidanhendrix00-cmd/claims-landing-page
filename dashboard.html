@@ -282,6 +282,9 @@
   .status-pill.none{background:#F2F3F2;color:var(--slate-soft);}
   .status-pill.automation{background:var(--violet-soft);color:var(--violet);}
   .status-pill.auto-tag{background:var(--violet-soft);color:var(--violet);font-family:var(--font-mono);}
+  .status-pill.delivered{background:#EEF0F5;color:var(--slate);}
+  .status-pill.held_for_review{background:var(--amber-soft);color:#946218;}
+  .status-pill.no_recipient,.status-pill.bounced,.status-pill.failed{background:#FEF3F2;color:#B42318;}
 
   /* Spreadsheet view */
   .sheet-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
@@ -2140,6 +2143,7 @@ async function loadRealAccounts(){
       paymentsLog.sort(function(x, y){ return String(x.paidDate) < String(y.paidDate) ? -1 : (String(x.paidDate) > String(y.paidDate) ? 1 : 0); });
       state.invoices = invoices;
       await loadAccountNotes(invoices);
+      await loadServerComms(invoices);
       state.paymentsLog = paymentsLog;
       if (typeof saveState === 'function') saveState();
       if (typeof renderAll === 'function') renderAll();
@@ -2158,6 +2162,45 @@ async function loadRealAccounts(){
   let __pingV = null;
   let __pingMaxId = null;
   let __pingBusy = false;
+  // Everything the company has sent, read back from the server. Cadence
+  // follow-ups go out from the scheduled sweep, so before this the Comms Log
+  // only ever showed what the browser you were sitting at had sent itself.
+  const COMMS_ROLE_LABELS = { adjuster:'Insurance Adjuster', homeowner:'Homeowner', pm:'Property Manager', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
+  function serverCommsToLog(rows, invoices){
+    const byId = {};
+    (invoices || []).forEach(function(i){ byId[i.id] = i; });
+    return (rows || []).map(function(c){
+      const inv = byId[c.accountId];
+      const role = c.recipientRole || '';
+      const who = COMMS_ROLE_LABELS[role] || (inv ? recipientDisplayName(inv, role) : '') || c.recipientEmail || '\u2014';
+      return {
+        invoiceId: c.accountId,
+        invoiceName: c.accountName || (inv ? inv.name : '\u2014'),
+        amount: c.amount == null ? (inv ? inv.amount : 0) : c.amount,
+        sentAt: c.at ? fmtDate(c.at) : '\u2014',
+        draftType: c.label || 'Follow-up',
+        status: c.status || 'sent',
+        source: c.source === 'automation' ? 'automation' : 'manual',
+        recipient: who,
+        subject: c.subject || null,
+        preview: c.preview || '',
+        body: c.body || '',
+        sentTs: c.at || null
+      };
+    });
+  }
+
+  async function loadServerComms(invoices){
+    try {
+      const r = await fetch('/api/invoices/comms', { credentials: 'same-origin', cache: 'no-store' });
+      const j = await r.json();
+      // Only replace the log on a good answer, so a blip never blanks the view.
+      if(!j || !j.ok || !Array.isArray(j.comms)) return false;
+      state.commsLog = serverCommsToLog(j.comms, invoices);
+      return true;
+    } catch(e) { return false; }
+  }
+
   async function pingRealtimeSync(){
     if (document.visibilityState !== 'visible' || __pingBusy) return;
     if (!(window.__me && window.__me.ok)) return;
@@ -3201,7 +3244,7 @@ saveState(); renderAll();
               <td>${s.recipient || '\u2014'}</td>
               <td style="font-family:var(--font-mono);font-size:11px;">${s.subject || '\u2014'}</td>
               <td>${s.source === 'automation' ? '<span class="status-pill auto-tag">AUTONOMOUS</span>' : 'Manual'}</td>
-              <td><span class="status-pill ${s.status}">${s.status}</span></td>
+              <td><span class="status-pill ${s.status}">${msgStatusLabel(s.status)}</span></td>
               <td style="white-space:nowrap;"><button class="btn-small" onclick="openMessagesSent(${JSON.stringify(s.invoiceId)})" title="Read the most recent follow-up, demand letter or NOIL sent on this account">See messages sent</button></td>
             </tr>
           `).join('')}
