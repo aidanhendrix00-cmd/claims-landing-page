@@ -4822,6 +4822,60 @@ paidDate: a.paid_at
 return json({ ok: true, accounts });
 }
 
+// Manual invoice entry from the dashboard. Most accounts arrive through the
+// accounting/CRM integration, but not every job does, so "+ Add Invoice" has to
+// create a real row rather than a browser-only one. Without this the invoice
+// lived in one tab, vanished on the next refresh, and - because its id looked
+// like a real account id - later edits were written to whatever account already
+// held that id.
+async function handleAccountCreate(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const name = String(body.name || '').trim();
+if (!name) return json({ ok: false, error: 'Customer or property name is required.' }, 400);
+const amount = Number(body.amount);
+if (!isFinite(amount) || amount <= 0) return json({ ok: false, error: 'Enter an invoice amount greater than zero.' }, 400);
+// Employees and managers can only file an invoice against their own office.
+let office = body.office ? String(body.office).slice(0, 60) : (user.office || null);
+if (user.role !== 'admin') office = user.office || null;
+// "Days outstanding" from the form becomes a real invoice date, so the age the
+// dashboard shows keeps counting on its own from here.
+let days = parseInt(body.days, 10);
+if (!isFinite(days) || days < 0) days = 0;
+if (days > 3650) days = 3650;
+const invoicedAt = new Date(Date.now() - days * 86400000).toISOString();
+const row = await pgInsert(env, 'accounts', {
+tenant_id: user.tenant_id,
+office: office,
+customer_name: name.slice(0, 200),
+meta: body.meta ? String(body.meta).slice(0, 300) : null,
+payer: body.payer ? String(body.payer).slice(0, 40) : null,
+contact: body.contact ? String(body.contact).slice(0, 120) : null,
+contact_email: body.contactEmail ? String(body.contactEmail).trim().slice(0, 200) : null,
+claim_number: body.claimNumber ? String(body.claimNumber).slice(0, 80) : null,
+invoice_number: body.invoiceNumber ? String(body.invoiceNumber).slice(0, 60) : null,
+amount: amount,
+invoiced_at: invoicedAt,
+status: CADENCE_OPEN_STATUSES.indexOf(String(body.jobStatus || '')) === -1 ? 'in_ar' : String(body.jobStatus),
+department: body.department ? String(body.department).slice(0, 40) : null,
+category: body.category ? String(body.category).slice(0, 40) : null,
+note: body.note ? String(body.note).slice(0, 500) : null,
+follow_up_count: 0,
+paid_amount: 0
+});
+if (!row || !row.id) return json({ ok: false, error: 'The invoice could not be saved. Please try again.' }, 500);
+await logUserActivity(env, user, row, 'invoice', 'Invoice added manually for ' + name + '.');
+await pgInsert(env, 'account_notes', {
+tenant_id: user.tenant_id, account_id: row.id,
+body: 'Invoice added manually from the dashboard.',
+author_name: user.full_name || user.email, source: 'dashboard',
+occurred_at: new Date().toISOString()
+}).catch(function () {});
+return json({ ok: true, accountId: row.id });
+}
+
 async function handleTeamList(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -6901,6 +6955,9 @@ return handleInvoiceMessages(request, env);
 }
 if (url.pathname === '/api/accounts/ping' && request.method === 'GET') {
 return handleAccountsPing(request, env);
+}
+if (url.pathname === '/api/accounts' && request.method === 'POST') {
+return handleAccountCreate(request, env);
 }
 if (url.pathname === '/api/accounts' && request.method === 'GET') {
 return handleAccounts(request, env);
