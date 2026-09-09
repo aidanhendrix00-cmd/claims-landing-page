@@ -665,7 +665,7 @@
     <section class="view" id="view-responses">
       <div class="topbar"><div><h1>Response Received</h1><p>Replies logged autonomously the moment an invoice's status flips to "replied" &#8212; and reflected immediately in the A/R Spreadsheet's Response Summary column</p></div></div>
 
-      <div class="sf-sim-card">
+      <div class="sf-sim-card" data-demo-only="1">
         <h3>Simulate an Incoming Response</h3>
         <p>In production this fires automatically when a reply email lands in the shared inbox tied to an invoice. This panel lets you trigger that same autonomous flow on demand for testing &#8212; Claude drafts a realistic reply, logs it here, and updates the A/R Spreadsheet in one step.</p>
         <div class="sf-sim-row" style="grid-template-columns:1fr auto;">
@@ -934,7 +934,7 @@
     <div class="form-row"><label>Note / Context</label><textarea id="f-note" placeholder="e.g. Awaiting adjuster review, last contact 6/12"></textarea></div>
     <div class="drawer-actions">
       <button class="btn-ghost" onclick="closeAddInvoice()">Cancel</button>
-      <button class="btn-solid" onclick="submitAddInvoice()">Add to Queue</button>
+      <button class="btn-solid" id="add-invoice-btn" onclick="submitAddInvoice()">Add to Queue</button>
     </div>
   </div>
 </div>
@@ -1513,7 +1513,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
       officeFilter: 'all',
       paymentDateFilter: 'all',
       customIntegrations: [],
-      nextId: 31,
+      nextId: 56,
       nextDocId: 100,
       nextIntegrationId: 1
     };
@@ -2624,6 +2624,9 @@ if(!inv) return;
 inv.escalated = true;
 inv.notifiedName = null;
 inv.notifiedAt = new Date().toISOString();
+// Save the flag, or the account drops back out of Escalations on the next
+// refresh and the autonomous cadence starts chasing it again.
+persistInvoice(inv, ['escalated', 'notifiedAt']);
 addActivity(inv, 'Invoice escalated for manager attention; removed from autonomous cadence.', 'manual', 'escalation');
 saveState(); renderAll();
 showToast(`${inv.name} moved to Escalations`);
@@ -2643,6 +2646,7 @@ departmentLabel: DEPARTMENT_LABELS[inv.department]
 }).then(function(r){ return r.json(); }).then(function(res){
 if(res && res.ok && res.notifiedName){
 inv.notifiedName = res.notifiedName;
+persistInvoice(inv, ['notifiedName']);
 addActivity(inv, `Escalation notice emailed to ${res.notifiedName}${res.notifiedEmail ? ` (${res.notifiedEmail})` : ''}.`, 'automation');
 } else {
 const why = (res && res.error) ? res.error : 'the notification could not be delivered.';
@@ -2659,6 +2663,7 @@ saveState(); renderAll();
     const inv = findInv(id);
     if(!inv) return;
     inv.escalated = false;
+    persistInvoice(inv, ['escalated']);
     addActivity(inv, 'Returned to active cadence.', 'manual', 'escalation');
     saveState(); renderAll();
     showToast(`${inv.name} returned to Queue`);
@@ -3476,7 +3481,17 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
   function closeAddInvoice(){ document.getElementById('overlay-add').classList.remove('open'); }
 
-  function submitAddInvoice(){
+  // Never hand out an id an existing invoice already uses: findInv() returns the
+  // first match, so a collision would quietly point payments, drafts and edits
+  // at the wrong account.
+  function nextInvoiceId(){
+    let next = Number(state.nextId) || 1;
+    state.invoices.forEach(function(i){ const n = Number(i.id); if(isFinite(n) && n >= next) next = n + 1; });
+    state.nextId = next + 1;
+    return next;
+  }
+
+  async function submitAddInvoice(){
     const name = document.getElementById('f-name').value.trim();
     const meta = document.getElementById('f-meta').value.trim() || 'Placeholder job detail';
     const payer = document.getElementById('f-payer').value;
@@ -3487,9 +3502,37 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const days = parseInt(document.getElementById('f-days').value, 10);
     const note = document.getElementById('f-note').value.trim() || 'No additional notes provided.';
     if(!name || isNaN(amount) || isNaN(days)){ showToast('Please fill in name, amount, and days.'); return; }
-
     const contactMap = { insurance: 'Adjuster', pm: 'Property Manager', private: 'Homeowner/Board Contact' };
-    const newInv = makeInvoice({ id: state.nextId++, name, meta, payer, department, category, officeLocation, contact: contactMap[payer], amount, days, note, jobStatus:'pending_start' });
+
+    // A signed-in company's invoices belong in Supabase, not in one browser tab.
+    // Saving first means the account is shared with the team, survives a refresh,
+    // and carries the real id that every later edit is written against.
+    if(state.currentUser){
+      const btn = document.getElementById('add-invoice-btn');
+      if(btn){ btn.disabled = true; btn.textContent = 'Saving\u2026'; }
+      let res = null;
+      try {
+        const r = await fetch('/api/accounts', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, meta: meta, payer: payer, department: department,
+            category: category, office: officeLocation, contact: contactMap[payer],
+            amount: amount, days: days, note: note, jobStatus: 'pending_start' })
+        });
+        res = await r.json();
+      } catch(e) { res = null; }
+      if(btn){ btn.disabled = false; btn.textContent = 'Add to Queue'; }
+      if(!res || !res.ok){
+        showToast((res && res.error) || 'The invoice could not be saved. Please try again.');
+        return;
+      }
+      closeAddInvoice();
+      await loadRealAccounts();
+      showToast(`${name} added to Queue`);
+      return;
+    }
+
+    const newInv = makeInvoice({ id: nextInvoiceId(), name, meta, payer, department, category, officeLocation, contact: contactMap[payer], amount, days, note, jobStatus:'pending_start' });
     addActivity(newInv, 'Invoice added to queue.', 'manual', 'invoice');
     logFinancialEvent('new_invoice', newInv, amount);
     state.invoices.push(newInv);
