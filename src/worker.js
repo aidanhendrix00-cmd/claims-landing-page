@@ -3722,7 +3722,8 @@ if (already) { summary.skipped++; continue; }
 const recent = await pgSelect(env, 'invoice_comms',
 'account_id=' + pgEq(account.id) + '&sent_at=gte.' + encodeURIComponent(weekAgo) + '&status=' + pgEq('sent') + '&select=id'
 ) || [];
-if (recent.length >= (settings.max_per_week || 2)) { summary.skipped++; continue; }
+const weeklyCap = (settings.max_per_week === null || settings.max_per_week === undefined) ? 2 : Number(settings.max_per_week);
+if (recent.length >= weeklyCap) { summary.skipped++; continue; }
 
 const recipient = cadenceRecipient(account);
 const to = (account.contact_email || '').trim();
@@ -4671,6 +4672,50 @@ ok: true,
 account: { id: account.id, customerName: account.customer_name, invoiceNumber: account.invoice_number || ('INV-' + (10000 + account.id)) },
 messages: messages.slice(0, limit)
 });
+}
+
+// The Comms Log needs every message this user can see, not just the ones their
+// own browser happened to send. Cadence follow-ups go out from the scheduled
+// sweep on the server, so without this they were invisible to everyone.
+async function handleInvoiceCommsList(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+let limit = parseInt(url.searchParams.get('limit'), 10);
+if (!isFinite(limit) || limit < 1) limit = 400;
+if (limit > 1000) limit = 1000;
+// Same visibility rule as /api/accounts: admins see the company, everyone else
+// sees their own office.
+let accountQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,customer_name,invoice_number,amount,office,department&order=invoiced_at.desc';
+if (user.role !== 'admin') accountQuery += '&office=' + pgEq(user.office || '__none__');
+const accounts = await pgSelect(env, 'accounts', accountQuery) || [];
+if (!accounts.length) return json({ ok: true, comms: [] });
+const byId = {};
+accounts.forEach(function (a) { byId[a.id] = a; });
+let rows;
+if (user.role === 'admin') {
+rows = await pgSelect(env, 'invoice_comms',
+'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=sent_at.desc.nullslast&limit=' + limit) || [];
+} else {
+// Keep the id list bounded; the accounts query is newest-invoiced first.
+const ids = accounts.slice(0, 900).map(function (a) { return a.id; });
+rows = await pgSelect(env, 'invoice_comms',
+'tenant_id=' + pgEq(user.tenant_id) + '&account_id=in.(' + ids.join(',') + ')&select=*&order=sent_at.desc.nullslast&limit=' + limit) || [];
+}
+const comms = [];
+rows.forEach(function (c) {
+const a = byId[c.account_id];
+if (!a) return; // outside this user's office
+comms.push(Object.assign(commsToJson(c), {
+accountId: c.account_id,
+accountName: a.customer_name || null,
+invoiceNumber: a.invoice_number || ('INV-' + (10000 + a.id)),
+amount: a.amount == null ? null : Number(a.amount),
+office: a.office || null,
+department: a.department || null
+}));
+});
+return json({ ok: true, comms: comms });
 }
 
 async function handleAccountHistory(request, env) {
@@ -6949,6 +6994,9 @@ return handleIntegrationsList(request, env);
 }
 if (url.pathname === '/api/accounts/history' && request.method === 'GET') {
 return handleAccountHistory(request, env);
+}
+if (url.pathname === '/api/invoices/comms' && request.method === 'GET') {
+return handleInvoiceCommsList(request, env);
 }
 if (url.pathname === '/api/invoices/messages' && request.method === 'GET') {
 return handleInvoiceMessages(request, env);
