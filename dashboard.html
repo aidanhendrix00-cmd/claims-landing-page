@@ -482,7 +482,7 @@
   <aside class="sidebar">
     <nav id="nav">
       <button class="nav-item active" data-view="queue"><span class="left"><span class="ic">Q</span> Invoice Queue</span><span class="count" id="nav-count-queue"></span></button>
-      <button class="nav-item" data-view="sheet"><span class="left"><span class="ic">S</span> A/R Spreadsheet</span></button>
+      <button class="nav-item" data-view="sheet"><span class="left"><span class="ic">S</span> Accounts Receivable</span></button>
       <button class="nav-item" data-view="report"><span class="left"><span class="ic">R</span> Aging Report</span></button>
       <button class="nav-item" data-view="invoicedmtd"><span class="left"><span class="ic">M</span> Invoiced MTD</span><span class="count" id="nav-count-mtd"></span></button>
       <button class="nav-item" data-view="collectedmtd"><span class="left"><span class="ic">$</span> Collected This Month</span><span class="count" id="nav-count-collected"></span></button>
@@ -534,7 +534,7 @@
       <div class="topbar">
         <div>
           <h1>Invoice Queue</h1>
-          <p>Aging accounts receivable &#8212; status synced from Salesforce, follow-ups sent automatically on cadence</p>
+          <p>Aging accounts receivable &#8212; status synced from your CRM, follow-ups sent automatically on cadence</p>
         </div>
         <div class="topbar-actions">
           <button class="btn-ghost" onclick="resetDemoData()">Reset Demo Data</button>
@@ -573,9 +573,9 @@
       <div class="queue" id="queue"></div>
     </section>
 
-    <!-- ===================== A/R SPREADSHEET VIEW ===================== -->
+    <!-- ===================== ACCOUNTS RECEIVABLE VIEW ===================== -->
     <section class="view" id="view-sheet">
-      <div class="topbar"><div><h1>A/R Spreadsheet</h1><p>Full accounts receivable ledger with autonomous contact tracking</p></div></div>
+      <div class="topbar"><div><h1>Accounts Receivable</h1><p>Your full A/R ledger with autonomous contact tracking</p></div></div>
       <div class="section-head">
         <h2>Ledger</h2>
         <div class="toolbar">
@@ -601,7 +601,7 @@
             <tr>
               <th>Invoice #</th><th>Job #</th><th>Invoice Date</th><th>Account / Owner</th><th>Office</th><th>Department</th><th>Category</th><th>Amount</th>
               <th>Job Status</th><th>Currently With</th><th>Claim #</th><th title="Public Adjuster involved on this claim">PA</th><th>NOIL</th><th>Lien</th><th>Last Contact</th><th>Responded?</th><th>Response Summary</th>
-              <th>Recent Salesforce Update</th>
+              <th>Recent CRM Update</th>
               <th>WA Sent</th><th>Date of WA Signature</th><th>COS Sent</th><th>Date of COS Signature</th><th>Projected Payment Date</th><th>Payment Type</th>
             </tr>
           </thead>
@@ -623,7 +623,7 @@
 
     <!-- ===================== INVOICED MONTH TO DATE VIEW ===================== -->
     <section class="view" id="view-invoicedmtd">
-      <div class="topbar"><div><h1>Invoiced Month to Date</h1><p>Synced automatically from NetSuite &amp; Salesforce &#8212; sorted by office location, broken down by department</p></div></div>
+      <div class="topbar"><div><h1>Invoiced Month to Date</h1><p>Synced automatically from NetSuite &amp; your CRM &#8212; sorted by office location, broken down by department</p></div></div>
       <div class="kpis" id="mtd-kpis"></div>
       <div class="report-card" style="margin-bottom:18px;">
         <h3>By Office Location</h3>
@@ -666,11 +666,11 @@
 
     <!-- ===================== RESPONSE RECEIVED VIEW ===================== -->
     <section class="view" id="view-responses">
-      <div class="topbar"><div><h1>Response Received</h1><p>Replies logged autonomously the moment an invoice's status flips to "replied" &#8212; and reflected immediately in the A/R Spreadsheet's Response Summary column</p></div></div>
+      <div class="topbar"><div><h1>Response Received</h1><p>Replies logged autonomously the moment an invoice's status flips to "replied" &#8212; and reflected immediately in the Response Summary column on Accounts Receivable</p></div></div>
 
       <div class="sf-sim-card" data-demo-only="1">
         <h3>Simulate an Incoming Response</h3>
-        <p>In production this fires automatically when a reply email lands in the shared inbox tied to an invoice. This panel lets you trigger that same autonomous flow on demand for testing &#8212; Claude drafts a realistic reply, logs it here, and updates the A/R Spreadsheet in one step.</p>
+        <p>In production this fires automatically when a reply email lands in the shared inbox tied to an invoice. This panel lets you trigger that same autonomous flow on demand for testing &#8212; Claude drafts a realistic reply, logs it here, and updates Accounts Receivable in one step.</p>
         <div class="sf-sim-row" style="grid-template-columns:1fr auto;">
           <select id="resp-sim-invoice"></select>
           <button class="btn-primary" onclick="simulateIncomingResponse()" id="resp-sim-btn">Simulate Incoming Response</button>
@@ -689,7 +689,7 @@
 
     <!-- ===================== AUTOMATIONS VIEW ===================== -->
     <section class="view" id="view-automations">
-      <div class="topbar"><div><h1>Automations</h1><p>Autonomous Salesforce-triggered sends and account updates</p></div></div>
+      <div class="topbar"><div><h1>Automations</h1><p>Autonomous CRM-triggered sends and account updates</p></div></div>
 
       <div class="rule-card">
         <div>
@@ -713,8 +713,8 @@
       <div class="rule-card">
         <div>
           <div class="rname">Certificate of Satisfaction (COS) Auto-Send</div>
-          <div class="rdesc">Automatically emails a COS to the account owner the moment Salesforce reports a job's status as <b>Work Completed</b>.</div>
-          <div class="rtrigger">TRIGGER: Salesforce Job Status &#8594; Work Completed</div>
+          <div class="rdesc">Automatically emails a COS to the account owner the moment your CRM reports a job's status as <b>Work Completed</b>.</div>
+          <div class="rtrigger">TRIGGER: CRM Job Status &#8594; Work Completed</div>
         </div>
         <label class="switch"><input type="checkbox" id="auto-cos" checked="" onchange="toggleAutomation('cos', this.checked)"><span class="slider"></span></label>
       </div>
@@ -722,7 +722,7 @@
       <div class="rule-card">
         <div>
           <div class="rname">Payment Request Auto-Send</div>
-          <div class="rdesc">Once Salesforce reports a job as <b>In A/R</b> and supporting documentation is complete, automatically emails the homeowner the estimate, photos, invoice, and a payment link &#8212; on the first day both conditions are true.</div>
+          <div class="rdesc">Once your CRM reports a job as <b>In A/R</b> and supporting documentation is complete, automatically emails the homeowner the estimate, photos, invoice, and a payment link &#8212; on the first day both conditions are true.</div>
           <div class="rtrigger">TRIGGER: Job Status &#8594; In A/R + Docs Complete</div>
         </div>
         <label class="switch"><input type="checkbox" id="auto-pay" checked="" onchange="toggleAutomation('pay', this.checked)"><span class="slider"></span></label>
@@ -874,7 +874,7 @@
     <div class="drawer-section">
       <h4>Attach Documents</h4>
       <div id="draft-doc-checks"></div>
-      <div class="hint">Selected documents are pulled from the Salesforce account and referenced in the draft below.</div>
+      <div class="hint">Selected documents are pulled from the CRM account and referenced in the draft below.</div>
     </div>
 
     <div class="drawer-section" id="subject-section" style="display:none;">
@@ -899,7 +899,7 @@
 <div class="overlay" id="overlay-add">
   <div class="drawer">
     <div class="drawer-head"><h3>Add Invoice</h3><button class="close" onclick="closeAddInvoice()">Close ×</button></div>
-    <div class="drawer-sub">Placeholder entry &#8212; in production this would sync automatically from NetSuite/Salesforce.</div>
+    <div class="drawer-sub">Placeholder entry &#8212; in production this would sync automatically from NetSuite or your CRM.</div>
     <div class="form-row"><label>Customer / Property Name</label><input id="f-name" placeholder="e.g. Cedar Ridge Apartments"></div>
     <div class="form-grid-2">
       <div class="form-row"><label>Job Type / Unit</label><input id="f-meta" placeholder="e.g. Water mitigation, Unit 4"></div>
@@ -949,9 +949,9 @@
     <div class="drawer-sub" id="detail-sub"></div>
 
     <div class="drawer-section" style="margin-top:0;padding-top:0;border-top:none;">
-      <h4>Job Status <span style="text-transform:none;font-weight:400;">(read from Salesforce)</span></h4>
+      <h4>Job Status <span style="text-transform:none;font-weight:400;">(read from your CRM)</span></h4>
       <div id="detail-status-badge"></div>
-      <div class="hint">Status updates automatically when it changes in Salesforce. Use Integrations &#8594; "Simulate an Incoming Salesforce Update" to test this in the demo.</div>
+      <div class="hint">Status updates automatically when it changes in your CRM.</div>
     </div>
 
     <div class="drawer-section">
@@ -970,7 +970,7 @@
     </div>
 
     <div class="drawer-section">
-      <h4>Documents (Salesforce Files)</h4>
+      <h4>Documents (CRM Files)</h4>
       <div id="detail-docs"></div>
       <div class="upload-row">
         <select id="detail-upload-type" onchange="syncUploadOther()">
@@ -991,7 +991,7 @@
     </div>
 
     <div class="drawer-section">
-      <h4>Account Activity (Salesforce Notes)</h4>
+      <h4>Account Activity (CRM Notes)</h4>
       <div id="detail-activity"></div>
     </div>
 
@@ -1000,7 +1000,7 @@
       <label class="dnc-toggle" id="detail-dnc-toggle">
         <input type="checkbox" id="detail-dnc-check" onchange="setDoNotContact(currentDetailId, this.checked)">
         <span><span class="t">DO NOT CONTACT &mdash; Sent to Collections Agency</span>
-        <span class="d" id="detail-dnc-desc">Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and A/R Spreadsheet, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.</span></span>
+        <span class="d" id="detail-dnc-desc">Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and Accounts Receivable, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.</span></span>
       </label>
     </div>
 
@@ -1064,6 +1064,24 @@
     <div class="drawer-actions">
       <button class="btn-small" id="msg-history-btn" onclick="openAccountHistory(currentMessagesId)">Full account history</button>
       <button class="btn-small" onclick="closeMessagesSent()">Close</button>
+    </div>
+  </div>
+</div>
+<!-- "See Response" on Response Received: the most recent reply on an account,
+     with anything earlier listed underneath. -->
+<div class="overlay" id="overlay-response">
+  <div class="drawer wide" style="max-width:760px;">
+    <div class="drawer-head"><h3 id="resp-title">Response received</h3><button class="close" onclick="closeResponseSeen()">Close ×</button></div>
+    <div class="drawer-sub" id="resp-sub"></div>
+    <div id="resp-current"></div>
+    <div class="drawer-section" id="resp-earlier-wrap">
+      <h4>Earlier responses on this account <span id="resp-earlier-count" style="text-transform:none;font-weight:400;"></span></h4>
+      <div id="resp-earlier"></div>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn-small" onclick="openMessagesSent(currentResponseId)">See messages sent</button>
+      <button class="btn-small" onclick="openAccountHistory(currentResponseId)">Full account history</button>
+      <button class="btn-small" onclick="closeResponseSeen()">Close</button>
     </div>
   </div>
 </div>
@@ -1133,7 +1151,7 @@
     <div class="form-row"><label>Bank Name</label><input id="pf-bank" placeholder="e.g. Chase, Wells Fargo"></div>
     <div class="form-row"><label>Memo / Notes</label><textarea id="pf-memo" placeholder="Optional"></textarea></div>
 
-    <div class="hint" style="margin-bottom:14px;">If the amount received is less than the balance due, the invoice stays open in the A/R Spreadsheet with the remaining balance tracked. It only moves to Collected once fully paid.</div>
+    <div class="hint" style="margin-bottom:14px;">If the amount received is less than the balance due, the invoice stays open in Accounts Receivable with the remaining balance tracked. It only moves to Collected once fully paid.</div>
 
     <div class="drawer-actions">
       <button class="btn-ghost" onclick="closePaymentForm()">Cancel</button>
@@ -1151,7 +1169,7 @@
     </div>
     <div class="drawer-sub" id="preview-sub"></div>
     <div id="preview-body"></div>
-    <div class="doc-preview-note">Simulated preview for this demo &#8212; in production this renders the actual file synced from Salesforce Files.</div>
+    <div class="doc-preview-note">Simulated preview for this demo &#8212; in production this renders the actual file synced from your CRM.</div>
     <div class="drawer-actions">
       <button class="btn-ghost" onclick="closePreview()">Close</button>
       <button class="btn-solid" onclick="downloadDoc(previewingDocId)">Download</button>
@@ -2144,6 +2162,17 @@ async function loadRealAccounts(){
       state.invoices = invoices;
       await loadAccountNotes(invoices);
       await loadServerComms(invoices);
+      // Response Received for a real company: every account whose reply state
+      // is "replied" carries the customer's answer, so list those - newest
+      // first - and tie each to the last thing we sent that account.
+      const lastSentType = {};
+      (state.commsLog || []).forEach(function(c){ if(lastSentType[c.invoiceId] === undefined) lastSentType[c.invoiceId] = c.draftType; });
+      state.responsesLog = invoices
+        .filter(function(i){ return i.responded === 'replied' && i.responseSummary; })
+        .map(function(i){ return { invoiceId: i.id, invoiceName: i.name, amount: i.amount,
+          receivedAt: i.lastContact ? fmtDate(i.lastContact) : '\u2014', receivedTs: i.lastContact || null,
+          inResponseTo: lastSentType[i.id] || 'Follow-Up', summary: i.responseSummary, jobStatus: i.jobStatus, source: 'crm' }; })
+        .sort(function(a, b){ return String(b.receivedTs || '') < String(a.receivedTs || '') ? -1 : (String(b.receivedTs || '') > String(a.receivedTs || '') ? 1 : 0); });
       state.paymentsLog = paymentsLog;
       if (typeof saveState === 'function') saveState();
       if (typeof renderAll === 'function') renderAll();
@@ -2723,7 +2752,7 @@ saveState(); renderAll();
   function latestSalesforceUpdateHTML(inv){
     if(!inv.activity || inv.activity.length === 0) return '<span style="color:var(--slate-soft);">\u2014</span>';
     const latest = inv.activity[0];
-    return `<span class="sf-tag">SF</span>${latest.text}<span class="su-ts">${latest.ts}</span>`;
+    return `<span class="sf-tag">CRM</span>${latest.text}<span class="su-ts">${latest.ts}</span>`;
   }
 
   function respondedLabel(inv){
@@ -2794,7 +2823,7 @@ saveState(); renderAll();
     persistInvoice(inv, [field]);
     const labels = { waSent: 'Work Authorization', cosSent: 'Certificate of Satisfaction', noilSent: 'NOIL', lienFiled: 'Lien', pa: 'PA (Public Adjuster)' };
     const verb = field === 'pa' ? (val ? 'involved' : 'not involved') : (field === 'lienFiled' ? (val ? 'filed' : 'not filed') : (val ? 'sent' : 'not sent'));
-    addActivity(inv, `${labels[field]} marked ${verb} (manual edit via A/R spreadsheet).`, 'manual', 'update');
+    addActivity(inv, `${labels[field]} marked ${verb} (manual edit via Accounts Receivable).`, 'manual', 'update');
     saveState(); renderAll();
   }
   function setSignatureDate(id, field, val){
@@ -3013,7 +3042,7 @@ saveState(); renderAll();
     const total = records.reduce((s,r) => s + r.amount, 0);
     document.getElementById('mtd-kpis').innerHTML = `
       <div class="kpi"><div class="label">Invoiced &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${records.length} invoice${records.length===1?'':'s'} dated this month</div></div>
-      <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">NetSuite + Salesforce</div><div class="sub">Synced automatically, no manual entry</div></div>
+      <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">NetSuite + CRM</div><div class="sub">Synced automatically, no manual entry</div></div>
       <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${OFFICE_LOCATIONS.map(o => OFFICE_LABELS[o]).join(', ')}</div></div>
     `;
     renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', records);
@@ -3261,7 +3290,7 @@ saveState(); renderAll();
     if(rows.length === 0){ wrap.innerHTML = `<div class="empty">No responses logged yet${state.deptFilter!=='all' ? ' for this department' : ''}. Responses are captured automatically whenever a sent email comes back as "replied" &mdash; or trigger one above to see it flow through live.</div>`; return; }
     wrap.innerHTML = `
       <table class="log">
-        <thead><tr><th>Customer</th><th>Amount</th><th>Received</th><th>In Response To</th><th>Job Status</th><th>Response Summary</th></tr></thead>
+        <thead><tr><th>Customer</th><th>Amount</th><th>Received</th><th>In Response To</th><th>Job Status</th><th>Response Summary</th><th>Response</th></tr></thead>
         <tbody>
           ${rows.map(r => `
             <tr>
@@ -3271,6 +3300,7 @@ saveState(); renderAll();
               <td>${r.inResponseTo}</td>
               <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[r.jobStatus] || r.jobStatus}</span></td>
               <td class="resp-summary">${r.summary}</td>
+              <td style="white-space:nowrap;"><button class="btn-small" onclick="openResponseSeen(${JSON.stringify(r.invoiceId)})" title="Read the most recent response received on this account">See Response</button></td>
             </tr>
           `).join('')}
         </tbody>
@@ -3334,12 +3364,12 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       inv.responseSummary = text;
       state.responsesLog.unshift({
         invoiceId: inv.id, invoiceName: inv.name, amount: inv.amount,
-        receivedAt: fmtDate(now), inResponseTo: typeLabels[lastType],
+        receivedAt: fmtDate(now), receivedTs: now.toISOString(), inResponseTo: typeLabels[lastType],
         summary: text, jobStatus: inv.jobStatus, source: 'automation'
       });
       addActivity(inv, `Response received: "${text}"`, 'automation');
       saveState(); renderAll();
-      showToast(`Simulated response logged for ${inv.name} \u2014 A/R Spreadsheet updated`);
+      showToast(`Simulated response logged for ${inv.name} \u2014 Accounts Receivable updated`);
     }catch(e){
       showToast("Couldn't generate a simulated response right now (network/API issue).");
     }finally{
@@ -3614,7 +3644,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('detail-dnc-toggle').classList.toggle('on', dnc);
     document.getElementById('detail-dnc-desc').textContent = dnc
       ? ('Flagged' + (inv.doNotContactBy ? (' by ' + inv.doNotContactBy) : '') + (inv.doNotContactAt ? (' on ' + hDate(inv.doNotContactAt)) : '') + '. Every automated cadence and follow-up is stopped and nothing can be sent to this customer from clAIms. Turn this off if the agency returns the account.')
-      : 'Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and A/R Spreadsheet, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.';
+      : 'Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and Accounts Receivable, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.';
     document.getElementById('detail-followup-btn').style.display = dnc ? 'none' : 'inline-block';
     document.getElementById('detail-demand-btn').style.display = (!dnc && inv.days >= 30) ? 'inline-block' : 'none';
     document.getElementById('detail-noil-btn').style.display = (!dnc && inv.days >= 40) ? 'inline-block' : 'none';
@@ -3680,6 +3710,79 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   function msgStatusLabel(s){ const k = String(s || '').toLowerCase(); return MSG_STATUS_LABELS[k] || (s ? String(s) : 'Sent'); }
   // recipient_role as the API stores it, in the words the dashboard uses.
   const MSG_RECIPIENT_LABELS = { adjuster:'Adjuster', homeowner:'Homeowner', pm:'Commercial or Property Management', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
+
+  /* ============================================================
+     "SEE RESPONSE" (Response Received)
+     Shows the most recent reply logged on an account. Replies arrive as a
+     one-line summary (what the adjuster, property manager or homeowner said),
+     so that is the body; earlier replies on the same account sit underneath.
+     ============================================================ */
+  let currentResponseId = null;
+  let currentResponses = [];
+  let currentResponseIdx = 0;
+  function responseTime(r){ const d = hParse(r.receivedTs || r.receivedAt); return d ? d.getTime() : 0; }
+  function responsesFor(id){
+    return state.responsesLog.filter(r => String(r.invoiceId) === String(id)).slice().sort((a, b) => responseTime(b) - responseTime(a));
+  }
+  function responseSourceLabel(r){
+    if(r.source === 'automation') return 'Captured automatically from the reply';
+    if(r.source === 'crm') return 'Synced from your CRM';
+    return 'Logged by your team';
+  }
+  function openResponseSeen(id){
+    const inv = findInv(id);
+    currentResponseId = id;
+    currentResponses = responsesFor(id);
+    // The account itself may carry a reply the log does not (a CRM sync that
+    // landed before this tab loaded); surface it rather than showing nothing.
+    if(!currentResponses.length && inv && inv.responded === 'replied' && inv.responseSummary){
+      currentResponses = [{ invoiceId: inv.id, invoiceName: inv.name, amount: inv.amount, receivedAt: inv.lastContact ? fmtDate(inv.lastContact) : '\u2014', receivedTs: inv.lastContact || null, inResponseTo: 'Follow-Up', summary: inv.responseSummary, jobStatus: inv.jobStatus, source: 'crm' }];
+    }
+    currentResponseIdx = 0;
+    document.getElementById('resp-title').textContent = 'Response received \u2014 ' + ((inv && inv.name) || (currentResponses[0] && currentResponses[0].invoiceName) || 'Account');
+    renderResponseSeen();
+    document.getElementById('overlay-response').classList.add('open');
+  }
+  function closeResponseSeen(){
+    document.getElementById('overlay-response').classList.remove('open');
+    currentResponseId = null; currentResponses = []; currentResponseIdx = 0;
+  }
+  function selectResponse(i){ currentResponseIdx = i; renderResponseSeen(); }
+  function renderResponseSeen(){
+    const inv = findInv(currentResponseId);
+    const list = currentResponses;
+    const sub = document.getElementById('resp-sub');
+    const cur = document.getElementById('resp-current');
+    const earlierWrap = document.getElementById('resp-earlier-wrap');
+    const earlier = document.getElementById('resp-earlier');
+    const amount = inv ? inv.amount : (list[0] ? list[0].amount : 0);
+    sub.textContent = hMoney(amount) + ' \u00b7 ' + (list.length ? (list.length + ' response' + (list.length === 1 ? '' : 's') + ' on this account') : 'no responses on this account yet');
+    if(!list.length){
+      cur.innerHTML = '<div class="msg-card"><div class="msg-body empty">Nothing has come back on this account yet. When the customer replies to a follow-up it will show here.</div></div>';
+      earlierWrap.style.display = 'none';
+      return;
+    }
+    const r = list[Math.min(currentResponseIdx, list.length - 1)];
+    const others = list.filter((x, i) => i !== Math.min(currentResponseIdx, list.length - 1));
+    cur.innerHTML = '<div class="msg-card">' +
+      '<div class="msg-head"><span class="msg-type">' + (currentResponseIdx === 0 ? 'Most recent response' : 'Earlier response') + '</span>' +
+      '<span class="msg-when">Received ' + hEsc(r.receivedAt || '') + '</span></div>' +
+      '<div class="msg-meta">' +
+        '<span>In response to</span><b>' + hEsc(r.inResponseTo || 'Follow-Up') + '</b>' +
+        '<span>Job status</span><b>' + hEsc(STATUS_LABELS[r.jobStatus] || r.jobStatus || '\u2014') + '</b>' +
+        '<span>Source</span><b>' + hEsc(responseSourceLabel(r)) + '</b>' +
+      '</div>' +
+      '<div class="msg-body">' + hEsc(r.summary || '') + '</div>' +
+      '</div>';
+    if(!others.length){ earlierWrap.style.display = 'none'; return; }
+    earlierWrap.style.display = '';
+    document.getElementById('resp-earlier-count').textContent = '(' + others.length + ')';
+    earlier.innerHTML = list.map((x, i) => i === Math.min(currentResponseIdx, list.length - 1) ? '' :
+      '<div class="msg-row" onclick="selectResponse(' + i + ')">' +
+        '<div class="l"><div class="t">' + hEsc(x.inResponseTo || 'Follow-Up') + '</div><div class="p">' + hEsc(x.summary || '') + '</div></div>' +
+        '<div class="r">' + hEsc(x.receivedAt || '') + '</div>' +
+      '</div>').join('');
+  }
 
   async function openMessagesSent(id){
     const inv = findInv(id);
@@ -4344,7 +4447,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const wrap = document.getElementById('detail-activity');
     if(!inv.activity || inv.activity.length === 0){ wrap.innerHTML = `<div class="empty" style="padding:16px;">No account activity yet.</div>`; return; }
     wrap.innerHTML = `<div class="activity-feed">${inv.activity.map(a => `
-      <div class="activity-item"><div class="txt"><span class="sf-tag">SF NOTE</span>${a.text}</div><div class="ts">${a.ts}</div></div>
+      <div class="activity-item"><div class="txt"><span class="sf-tag">CRM NOTE</span>${a.text}</div><div class="ts">${a.ts}</div></div>
     `).join('')}</div>`;
   }
 
@@ -4451,7 +4554,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     if(doc.kind === 'Photos') return mockPhotosHTML(inv, doc);
     if(doc.kind === 'WorkAuth' || doc.kind === 'COS') return mockTextDocHTML(inv, doc);
     if(doc.kind === 'MoistureLog') return mockMoistureLogHTML(inv);
-    return `<div class="doc-preview-meta">${doc.name}</div><div class="doc-preview-textblock"><p>Preview not available for this document type in the demo &mdash; contents would render here from the actual file stored in Salesforce.</p></div>`;
+    return `<div class="doc-preview-meta">${doc.name}</div><div class="doc-preview-textblock"><p>Preview not available for this document type in the demo &mdash; contents would render here from the actual file stored in your CRM.</p></div>`;
   }
 
   function previewDocument(docId){
@@ -4603,15 +4706,15 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const oldStatus = inv.jobStatus;
     inv.jobStatus = newStatus;
     if(oldStatus !== newStatus){
-      addActivity(inv, `Status synced from Salesforce: ${STATUS_LABELS[oldStatus]} \u2192 ${STATUS_LABELS[newStatus]}.`, 'automation');
+      addActivity(inv, `Status synced from your CRM: ${STATUS_LABELS[oldStatus]} \u2192 ${STATUS_LABELS[newStatus]}.`, 'automation');
     }
     if(alsoDocs && !inv.docsComplete){
       inv.docsComplete = true;
-      addActivity(inv, 'Supporting documentation marked complete (synced from Salesforce).', 'automation');
+      addActivity(inv, 'Supporting documentation marked complete (synced from your CRM).', 'automation');
     }
     runAutomationChecks(inv);
     saveState(); renderAll();
-    showToast(`Salesforce update applied to ${inv.name}`);
+    showToast(`CRM update applied to ${inv.name}`);
   }
 
   function runAutomationChecks(inv){
@@ -4647,9 +4750,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       ...state.automationLog.filter(a=>invoiceDeptMatches(a.invoiceId)).map(a => ({ ts:a.sentAt, txt: `<b>${a.type}</b> sent for ${a.invoiceName}` })),
       ...state.commsLog.filter(c=>c.source==='automation' && invoiceDeptMatches(c.invoiceId)).map(c => ({ ts:c.sentAt, txt: `<b>${c.draftType}</b> autonomously sent for ${c.invoiceName}` }))
     ];
-    if(combined.length === 0){ el.innerHTML = `<div class="activity-item"><div class="txt">No autonomous sends yet${state.deptFilter!=='all' ? ' for this department' : ''}. Advance the demo clock or push a Salesforce status update to trigger one.</div></div>`; return; }
+    if(combined.length === 0){ el.innerHTML = `<div class="activity-item"><div class="txt">No autonomous sends yet${state.deptFilter!=='all' ? ' for this department' : ''}. Advance the demo clock or push a CRM status update to trigger one.</div></div>`; return; }
     el.innerHTML = combined.slice(0,30).map(a => `
-      <div class="activity-item"><div class="txt"><span class="sf-tag">SF NOTE</span>${a.txt}</div><div class="ts">${a.ts}</div></div>
+      <div class="activity-item"><div class="txt"><span class="sf-tag">CRM NOTE</span>${a.txt}</div><div class="ts">${a.ts}</div></div>
     `).join('');
   }
 
@@ -4826,7 +4929,7 @@ Do not invent facts beyond what's given.`;
       inv.responseSummary = bank[Math.floor(Math.random()*bank.length)] || '';
       state.responsesLog.unshift({
         invoiceId: inv.id, invoiceName: inv.name, amount: inv.amount,
-        receivedAt: fmtDate(now), inResponseTo: typeLabels[draftType],
+        receivedAt: fmtDate(now), receivedTs: now.toISOString(), inResponseTo: typeLabels[draftType],
         summary: inv.responseSummary, jobStatus: inv.jobStatus, source: source || 'automation'
       });
       addActivity(inv, `Response received: "${inv.responseSummary}"`, 'automation');
@@ -5033,7 +5136,7 @@ Do not invent facts beyond what's given.`;
   /* ============================================================
      INTEGRATIONS + TOAST
      ============================================================ */
-  function fakeSync(system){ showToast(`${system === 'netsuite' ? 'NetSuite' : 'Salesforce'} sync complete (placeholder)`); }
+  function fakeSync(system){ showToast(`${system === 'netsuite' ? 'NetSuite' : 'CRM'} sync complete (placeholder)`); }
 
   /* ============================================================
      ADD INTEGRATION
