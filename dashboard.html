@@ -344,9 +344,14 @@
   .sf-sim-row{display:grid;grid-template-columns:1.4fr 1fr auto;gap:10px;align-items:center;}
   .sf-sim-row select{font-size:12.5px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);font-family:var(--font-body);}
 
-  .overlay{position:fixed;inset:0;background:rgba(22,35,58,0.45);display:none;align-items:center;justify-content:center;z-index:50;padding:20px;}
-  .overlay.open{display:flex;}
-  .drawer{background:var(--panel);width:100%;max-width:600px;border-radius:14px;padding:24px 26px;box-shadow:0 20px 60px rgba(22,35,58,0.25);max-height:90vh;overflow-y:auto;}
+  /* Drawers sit above everything the page injects (the demo tour's spotlight
+     and tip, the account page, the help widget), fade in rather than snapping,
+     and a drawer opened later always lands on top of one opened earlier. */
+  .overlay{position:fixed;inset:0;background:rgba(22,35,58,0.45);display:flex;align-items:center;justify-content:center;z-index:1000000;padding:20px;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .22s ease,visibility 0s linear .22s;}
+  .overlay.open{opacity:1;visibility:visible;pointer-events:auto;transition:opacity .22s ease,visibility 0s;}
+  .drawer{background:var(--panel);width:100%;max-width:600px;border-radius:14px;padding:24px 26px;box-shadow:0 20px 60px rgba(22,35,58,0.25);max-height:90vh;overflow-y:auto;transform:translateY(14px) scale(.985);opacity:0;transition:transform .26s cubic-bezier(.2,.8,.2,1),opacity .2s ease;}
+  .overlay.open .drawer{transform:none;opacity:1;}
+  @media (prefers-reduced-motion: reduce){ .overlay,.drawer{transition:none;} }
   .drawer.wide{max-width:680px;}
   .drawer-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;}
   .drawer-head h3{font-family:var(--font-display);font-size:16px;margin:0;}
@@ -394,7 +399,8 @@
   .doc-preview-textblock p{font-size:12.5px;line-height:1.7;color:var(--ink);}
   .doc-preview-sig{margin-top:16px;padding-top:12px;border-top:1px dashed var(--line);font-family:var(--font-mono);font-size:11px;color:var(--slate);}
   .doc-preview-note{font-size:11px;color:var(--slate-soft);margin-top:16px;text-align:center;font-style:italic;}
-  .recipient-toggle{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .recipient-toggle{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media (max-width:640px){ .recipient-toggle{grid-template-columns:1fr;} }
   .recipient-btn{
     border:1.5px solid var(--line);border-radius:10px;padding:11px 14px;background:#fff;cursor:pointer;
     text-align:left;display:flex;flex-direction:column;gap:3px;transition:all .12s ease;
@@ -422,7 +428,7 @@
   .cadence-day{font-family:var(--font-mono);font-size:10px;color:var(--slate);}
   .cadence-lbl{font-size:9.5px;color:var(--slate-soft);text-align:center;line-height:1.3;}
 
-  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:12.5px;padding:10px 18px;border-radius:8px;z-index:80;opacity:0;pointer-events:none;transition:opacity .25s ease, transform .25s ease;max-width:80%;text-align:center;}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-size:12.5px;padding:10px 18px;border-radius:8px;z-index:1000500;opacity:0;pointer-events:none;transition:opacity .25s ease, transform .25s ease;max-width:80%;text-align:center;}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px);}
 
   @media (max-width:820px){
@@ -853,6 +859,10 @@
           <span class="rb-title">Homeowner</span>
           <span class="rb-sub" id="recipient-sub-homeowner"></span>
         </button>
+        <button class="recipient-btn" id="recipient-btn-contact" onclick="setRecipient('contact')">
+          <span class="rb-title">Point of Contact</span>
+          <span class="rb-sub" id="recipient-sub-contact"></span>
+        </button>
         <button class="recipient-btn" id="recipient-btn-adjuster" onclick="setRecipient('adjuster')">
           <span class="rb-title">Insurance Adjuster</span>
           <span class="rb-sub" id="recipient-sub-adjuster"></span>
@@ -879,8 +889,8 @@
 
     <div class="drawer-section" id="subject-section" style="display:none;">
       <h4>Subject Line</h4>
-      <input type="text" id="draft-subject" class="subject-input" oninput="onSubjectInput()" readonly="">
-      <div class="hint" id="subject-hint">Locked to the claim number for adjuster correspondence.</div>
+      <input type="text" id="draft-subject" class="subject-input" oninput="onSubjectInput()">
+      <div class="hint" id="subject-hint">Auto-generated &mdash; edit it before approving if needed.</div>
     </div>
 
     <div id="status-row" class="status-line" style="display:none;">
@@ -1079,8 +1089,8 @@
       <div id="resp-earlier"></div>
     </div>
     <div class="drawer-actions">
-      <button class="btn-small" onclick="openMessagesSent(currentResponseId)">See messages sent</button>
-      <button class="btn-small" onclick="openAccountHistory(currentResponseId)">Full account history</button>
+      <button class="btn-small" onclick="responseToMessages()">See messages sent</button>
+      <button class="btn-small" onclick="responseToHistory()">Full account history</button>
       <button class="btn-small" onclick="closeResponseSeen()">Close</button>
     </div>
   </div>
@@ -2255,7 +2265,7 @@ async function loadRealAccounts(){
   // Everything the company has sent, read back from the server. Cadence
   // follow-ups go out from the scheduled sweep, so before this the Comms Log
   // only ever showed what the browser you were sitting at had sent itself.
-  const COMMS_ROLE_LABELS = { adjuster:'Insurance Adjuster', homeowner:'Homeowner', pm:'Property Manager', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
+  const COMMS_ROLE_LABELS = { adjuster:'Insurance Adjuster', homeowner:'Homeowner', contact:'Point of Contact', pm:'Property Manager', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
   function serverCommsToLog(rows, invoices){
     const byId = {};
     (invoices || []).forEach(function(i){ byId[i.id] = i; });
@@ -2497,13 +2507,28 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
      RECIPIENT SELECTION (Homeowner vs. Adjuster)
      ============================================================ */
   function recipientDefault(inv){ return inv.payer === 'insurance' ? 'adjuster' : 'homeowner'; }
+  // The account's point of contact is whoever is on file for it (a property
+  // manager, an AP clerk, a facilities director); generic role words on the
+  // contact field are not a person's name, so they are not shown as one.
+  function contactPersonName(inv){
+    const c = String((inv && inv.contact) || '').trim();
+    if(!c || /^(adjuster|homeowner|property manager|homeowner\/board contact|owner|contact)$/i.test(c)) return '';
+    return c;
+  }
   function recipientDisplayName(inv, recipient){
     if(recipient === 'adjuster') return 'Insurance Adjuster';
+    if(recipient === 'contact'){ const n = contactPersonName(inv); return n ? ('Point of Contact (' + n + ')') : 'Point of Contact'; }
     return inv.payer === 'pm' ? 'Property Manager' : 'Homeowner';
   }
   function recipientRolePhrase(inv, recipient){
     if(recipient === 'adjuster') return 'insurance adjuster handling the claim on this loss';
+    if(recipient === 'contact'){ const n = contactPersonName(inv); return 'point of contact on file for this account' + (n ? (' (' + n + ')') : ''); }
     return inv.payer === 'pm' ? 'property manager overseeing the unit' : 'homeowner whose property was serviced';
+  }
+  // The subject line the drawer starts with. It can always be edited.
+  function autoSubjectFor(inv, recipient, draftType){
+    if(recipient === 'adjuster' && inv && inv.claimNumber) return inv.claimNumber;
+    return defaultSubjectFor(inv, draftType);
   }
   // Calendar date the invoice's cadence clock implies first contact happened,
   // derived the same way invoiceDate is: today minus the simulated day count.
@@ -3775,7 +3800,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   const MSG_STATUS_LABELS = { sent:'Sent', delivered:'Delivered', opened:'Opened', replied:'Replied', bounced:'Bounced', failed:'Failed', held_for_review:'Held for review', no_recipient:'No recipient on file' };
   function msgStatusLabel(s){ const k = String(s || '').toLowerCase(); return MSG_STATUS_LABELS[k] || (s ? String(s) : 'Sent'); }
   // recipient_role as the API stores it, in the words the dashboard uses.
-  const MSG_RECIPIENT_LABELS = { adjuster:'Adjuster', homeowner:'Homeowner', pm:'Commercial or Property Management', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
+  const MSG_RECIPIENT_LABELS = { adjuster:'Adjuster', homeowner:'Homeowner', contact:'Point of Contact', pm:'Commercial or Property Management', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
 
   /* ============================================================
      "SEE RESPONSE" (Response Received)
@@ -3813,6 +3838,24 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('overlay-response').classList.remove('open');
     currentResponseId = null; currentResponses = []; currentResponseIdx = 0;
   }
+  // Hand off from the response drawer to another drawer: close this one so the
+  // next slides into its place instead of stacking behind it.
+  function responseToMessages(){ const id = currentResponseId; closeResponseSeen(); if(id !== null) openMessagesSent(id); }
+  function responseToHistory(){ const id = currentResponseId; closeResponseSeen(); if(id !== null) openAccountHistory(id); }
+  // Whichever drawer opened most recently is on top.
+  (function(){
+    let z = 1000000;
+    const obs = new MutationObserver(function(muts){
+      muts.forEach(function(m){
+        const el = m.target;
+        const wasOpen = /(^|\s)open(\s|$)/.test(m.oldValue || '');
+        const isOpen = el.classList.contains('open');
+        if(isOpen && !wasOpen) el.style.zIndex = String(++z);
+        else if(!isOpen) el.style.zIndex = '';
+      });
+    });
+    document.querySelectorAll('.overlay').forEach(function(el){ obs.observe(el, { attributes: true, attributeFilter: ['class'], attributeOldValue: true }); });
+  })();
   function selectResponse(i){ currentResponseIdx = i; renderResponseSeen(); }
   function renderResponseSeen(){
     const inv = findInv(currentResponseId);
@@ -4912,6 +4955,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     if(recipient === 'adjuster'){
       const claimLine = inv.claimNumber ? `Claim number: ${inv.claimNumber}.` : `No formal claim number is on file for this job \u2014 do not invent one.`;
       recipientGuidance = `This email is going to the INSURANCE ADJUSTER, not the homeowner. Adjusters process claims against precise dates, so explicitly reference: the invoice is currently ${inv.days} day${inv.days===1?'':'s'} outstanding since first contact on ${firstContactDateStr(inv)}, and the underlying invoice itself is ${invoiceAgeDays(inv)} day${invoiceAgeDays(inv)===1?'':'s'} old (dated ${fmtDate(inv.invoiceDate)}). ${claimLine} Early in the email, explicitly state the claim number (if one is on file) and summarize the work performed per the estimate on file: ${inv.scopeOfWork}. Keep the tone businesslike and claims-process-oriented rather than personal \u2014 focus on claim status, documentation, and payment timeline rather than the homeowner's experience. Do NOT write a subject line \u2014 the subject line is handled separately outside this draft and will be set to the claim number.`;
+    } else if(recipient === 'contact'){
+      const n = contactPersonName(inv);
+      recipientGuidance = `This email is going to the account's POINT OF CONTACT${n ? ` (${n})` : ''} \u2014 the person handling this account day to day, not the homeowner and not an insurance adjuster. Be professional and direct: reference the work completed, the balance, and what is needed to release payment, and offer to send anything they need. Do not write a subject line.`;
     } else {
       recipientGuidance = `This email is going to the ${recipient === 'homeowner' && inv.payer !== 'pm' ? 'HOMEOWNER' : 'PROPERTY CONTACT'}, not an insurance adjuster. Keep the tone warmer and relationship-oriented \u2014 focus on the work completed and resolving payment together, and avoid leading with hard day-count figures the way a claims-focused email would. Do not write a subject line.`;
     }
@@ -4956,7 +5002,7 @@ Do not invent facts beyond what's given.`;
   // even in the demo or before AI drafting is configured on the server.
   function templateDraftText(inv, draftType, recipient){
     const money = '$' + inv.amount.toLocaleString(undefined,{minimumFractionDigits:2});
-    const who = recipient === 'adjuster' ? 'there' : ((String(inv.contact || '').trim().split(' ')[0]) || 'there');
+    const who = recipient === 'adjuster' ? 'there' : (recipient === 'contact' ? ((contactPersonName(inv).split(' ')[0]) || 'there') : ((String(inv.contact || '').trim().split(' ')[0]) || 'there'));
     const claimLine = inv.claimNumber ? `\nClaim number: ${inv.claimNumber}` : '';
     const opening = draftType === 'noil'
       ? 'This is a formal notice of our intent to file a lien for unpaid services if the balance below remains unresolved.'
@@ -5029,7 +5075,7 @@ Do not invent facts beyond what's given.`;
     return (draftType === 'noil' ? 'Notice of Intent to Lien - ' : draftType === 'demand' ? 'Demand for payment - ' : 'Outstanding invoice - ') + ((inv && inv.name) || '');
   }
   function onSubjectInput(){
-    if(currentRecipient !== 'adjuster'){ customSubject = document.getElementById('draft-subject').value; }
+    customSubject = document.getElementById('draft-subject').value;
   }
 
   function updateRecipientUI(){
@@ -5043,31 +5089,34 @@ Do not invent facts beyond what's given.`;
       // silently follows you to the next job.
       if(ccEl && ccEl.dataset.invId !== String(inv.id)){ ccEl.value = ''; ccEl.dataset.invId = String(inv.id); }
     }
+    const contactName = contactPersonName(inv);
     document.getElementById('recipient-sub-homeowner').textContent = inv.payer === 'pm' ? 'Property manager on file' : 'Property owner on file';
+    document.getElementById('recipient-sub-contact').textContent = contactName || 'Contact on file for this account';
     document.getElementById('recipient-sub-adjuster').textContent = inv.payer === 'insurance' ? 'Handling this claim' : 'If applicable to this job';
     document.getElementById('recipient-btn-homeowner').classList.toggle('active', currentRecipient === 'homeowner');
+    document.getElementById('recipient-btn-contact').classList.toggle('active', currentRecipient === 'contact');
     document.getElementById('recipient-btn-adjuster').classList.toggle('active', currentRecipient === 'adjuster');
     document.getElementById('recipient-hint').textContent = currentRecipient === 'adjuster'
       ? `Adjuster-focused draft \u2014 will explicitly cite invoice age (${invoiceAgeDays(inv)} days), first contact date (${firstContactDateStr(inv)}), claim number, and work performed per the estimate on file.`
-      : `Homeowner-focused draft \u2014 warmer, relationship-oriented tone rather than leading with day-count figures.`;
+      : currentRecipient === 'contact'
+        ? `Written to the point of contact on this account${contactName ? ` (${contactName})` : ''} \u2014 professional and direct about the work, the balance, and what is needed to release payment.`
+        : `Homeowner-focused draft \u2014 warmer, relationship-oriented tone rather than leading with day-count figures.`;
 
+    // Subject line: auto-generated for the recipient, always editable.
     const subjectSection = document.getElementById('subject-section');
     const subjectInput = document.getElementById('draft-subject');
     const subjectHint = document.getElementById('subject-hint');
     subjectSection.style.display = 'block';
-    if(currentRecipient === 'adjuster'){
-      subjectInput.readOnly = true;
-      subjectInput.value = inv.claimNumber || 'No claim number on file for this job';
-      if(subjectHint) subjectHint.textContent = 'Locked to the claim number for adjuster correspondence.';
-    } else {
-      subjectInput.readOnly = false;
-      subjectInput.value = customSubject !== null ? customSubject : defaultSubjectFor(inv, currentDraftType);
-      if(subjectHint) subjectHint.textContent = 'Sent as the email subject line - edit it before approving if needed.';
-    }
+    subjectInput.readOnly = false;
+    subjectInput.value = customSubject !== null ? customSubject : autoSubjectFor(inv, currentRecipient, currentDraftType);
+    if(subjectHint) subjectHint.textContent = (currentRecipient === 'adjuster' && inv.claimNumber)
+      ? 'Auto-filled with the claim number for adjuster correspondence \u2014 edit it before approving if needed.'
+      : 'Auto-generated \u2014 edit it before approving if needed.';
   }
 
   function setRecipient(recipient){
     currentRecipient = recipient;
+    customSubject = null;   // a new recipient gets its own auto-generated subject
     updateRecipientUI();
     generateDraft(false); // automatic: redraft immediately once a recipient is chosen
   }
@@ -5151,10 +5200,8 @@ Do not invent facts beyond what's given.`;
     const recipientLabel = recipientDisplayName(inv, currentRecipient);
     const bodyText = document.getElementById('draft-text').value;
     const subjectField = document.getElementById('draft-subject');
-    const typedSubject = (subjectField && !subjectField.readOnly && subjectField.value) ? subjectField.value.trim() : '';
-    const subject = currentRecipient === 'adjuster'
-      ? (inv.claimNumber || defaultSubjectFor(inv, currentDraftType))
-      : (typedSubject || defaultSubjectFor(inv, currentDraftType));
+    const typedSubject = (subjectField && subjectField.value) ? subjectField.value.trim() : '';
+    const subject = typedSubject || autoSubjectFor(inv, currentRecipient, currentDraftType);
 
     // Demo invoices are not real accounts, so keep the simulated behaviour there.
     const isRemote = inv && inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/) && state.currentUser;
@@ -5489,7 +5536,7 @@ let toastTimer = null;
      Driven by /api/me (billing block) and by any API answering 402.
      ============================================================ -->
 <style>
-  #billing-hold-overlay{position:fixed;inset:0;z-index:12000;display:none;align-items:center;justify-content:center;background:rgba(22,35,58,.62);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);padding:20px;}
+  #billing-hold-overlay{position:fixed;inset:0;z-index:1000900;display:none;align-items:center;justify-content:center;background:rgba(22,35,58,.62);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);padding:20px;}
   .bh-card{background:#fff;max-width:480px;width:100%;border-radius:16px;border:1px solid var(--line,#DCE2E0);box-shadow:0 24px 70px rgba(22,35,58,.35);padding:34px 38px;font-family:var(--font-body,'IBM Plex Sans',Arial,sans-serif);color:var(--ink,#16233A);text-align:left;}
   .bh-kicker{font-family:var(--font-mono,monospace);font-size:11px;font-weight:700;letter-spacing:.12em;color:#C29B57;margin-bottom:10px;}
   .bh-title{font-family:var(--font-display,'Space Grotesk',sans-serif);font-size:22px;font-weight:700;margin:0 0 12px;}
@@ -5503,7 +5550,7 @@ let toastTimer = null;
   .bh-usernote{font-size:13.5px;color:var(--slate,#5B6B73);line-height:1.6;margin:0 0 4px;}
   .bh-foot{font-size:12px;color:var(--slate-soft,#9AA7AC);border-top:1px solid var(--line,#DCE2E0);padding-top:14px;}
   .bh-foot a{color:#C29B57;text-decoration:none;font-weight:600;}
-  #billing-grace-banner{position:fixed;top:0;left:0;right:0;z-index:11000;display:none;align-items:center;justify-content:center;gap:14px;background:#171717;color:#F3E9D8;padding:10px 46px 10px 18px;font-family:var(--font-body,'IBM Plex Sans',Arial,sans-serif);font-size:13px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.25);}
+  #billing-grace-banner{position:fixed;top:0;left:0;right:0;z-index:1000800;display:none;align-items:center;justify-content:center;gap:14px;background:#171717;color:#F3E9D8;padding:10px 46px 10px 18px;font-family:var(--font-body,'IBM Plex Sans',Arial,sans-serif);font-size:13px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.25);}
   #billing-grace-banner a{color:#DCC393;font-weight:700;text-decoration:none;white-space:nowrap;}
   #billing-grace-banner .bgb-x{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:none;border:none;color:#9C978A;font-size:16px;cursor:pointer;line-height:1;}
 </style>
