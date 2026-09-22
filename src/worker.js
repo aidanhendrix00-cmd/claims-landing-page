@@ -792,7 +792,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div id="integrationsContent" style="display:none;"> ' +
   '<div class="acct-grid" id="integrationsSummaryGrid"> ' +
   '<div class="acct-field"><label>QuickBooks</label><div class="acct-value">Connected</div></div> ' +
-  '<div class="acct-field"><label>Salesforce</label><div class="acct-value">Not connected</div></div> ' +
+  '<div class="acct-field"><label>CRM</label><div class="acct-value">Not connected</div></div> ' +
   '</div> ' +
   '<div style="margin-top:14px;"><button class="btn-outline btn-sm" onclick="openManageIntegrations()">Manage integrations</button></div> ' +
   '</div> ' +
@@ -844,7 +844,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
  'var INTEGRATIONS_CATALOG=[{id:"quickbooks",name:"QuickBooks",category:"Accounting",connected:false},{id:"salesforce",name:"Salesforce",category:"CRM",connected:false},{id:"netsuite",name:"NetSuite",category:"ERP",connected:false},{id:"xactimate",name:"Xactimate",category:"Estimating",connected:false},{id:"docusign",name:"DocuSign",category:"E-Signature",connected:false}]; ' +
   ' ' +
   'var PLAN_FEATURES={ ' +
-  '  starter:{name:"Starter",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]}, ' +
+  '  starter:{name:"Starter",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","Accounts Receivable & aging reports","Email support"]}, ' +
   '  growth:{name:"Growth",features:["5–8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]}, ' +
   '  enterprise:{name:"Enterprise",features:["Unlimited seats","All integrations","Everything in Growth","Multi-office & multi-entity support","Dedicated account manager"]} ' +
   '}; ' +
@@ -1314,7 +1314,7 @@ const DEMO_INTEGRATIONS_SEED_SCRIPT = '<script>' +
 'setTimeout(function(){' +
 'if(typeof state!=="undefined"&&state.customIntegrations&&state.customIntegrations.length===0){' +
 'state.customIntegrations.push(' +
-'{id:state.nextIntegrationId++,name:"Salesforce",category:"crm",environment:"production",baseUrl:"https://na1.salesforce.com",authType:"oauth2",syncFreq:"realtime",keyMasked:"sf_live_\u2022\u2022\u2022\u20227f2a",secretMasked:"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",notes:"",status:"connected",addedAt:"Jan 3, 2026",lastSyncedAt:Date.now()-4*60*1000},' +
+'{id:state.nextIntegrationId++,name:"CRM",category:"crm",environment:"production",baseUrl:"https://api.your-crm.com",authType:"oauth2",syncFreq:"realtime",keyMasked:"crm_live_\u2022\u2022\u2022\u20227f2a",secretMasked:"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",notes:"",status:"connected",addedAt:"Jan 3, 2026",lastSyncedAt:Date.now()-4*60*1000},' +
 '{id:state.nextIntegrationId++,name:"NetSuite",category:"accounting",environment:"production",baseUrl:"https://xxxxx.app.netsuite.com",authType:"oauth2",syncFreq:"hourly",keyMasked:"ns_\u2022\u2022\u2022\u202291cd",secretMasked:"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",notes:"",status:"connected",addedAt:"Jan 3, 2026",lastSyncedAt:Date.now()-52*60*1000}' +
 '); ' +
 'if(typeof saveState==="function") saveState();' +
@@ -1334,7 +1334,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '{sel:"#kpis",title:"Live KPIs",text:"See exactly what is outstanding, overdue, and needs attention today, updated in real time."},' +
   '{sel:"#search",title:"Search and filter",text:"Find any invoice instantly by office, department, payer, or status."},' +
   '{sel:"#queue",title:"Your prioritized queue",text:"clAIms automatically ranks every open invoice so your team always knows who to follow up with next, and why."},' +
-  '{sel:"#view-sheet .topbar",nav:"sheet",title:"A/R Spreadsheet",text:"Your full accounts receivable ledger in one place, with autonomous contact tracking. Notes update automatically as customers reply to follow-up emails or as records change in your account and homeowner database."},' +
+  '{sel:"#view-sheet .topbar",nav:"sheet",title:"Accounts Receivable",text:"Your full A/R ledger in one place, with autonomous contact tracking. Notes update automatically as customers reply to follow-up emails or as records change in your account and homeowner database."},' +
   '{sel:"#view-report .topbar",nav:"report",title:"Aging, at a glance",text:"See exactly how much AR is sitting in each aging bucket, broken down by payer, so nothing slips through the cracks."},' +
   '{sel:"#view-invoicedmtd .topbar",nav:"invoicedmtd",title:"Invoiced Month to Date",text:"Synced automatically from your accounting and CRM systems, sorted by office and broken down by department, so you always know what went out this month."},' +
   '{sel:"#view-collectedmtd .topbar",nav:"collectedmtd",title:"Collected This Month",text:"Updates in real time as payments post, with notes and statuses refreshed automatically from customer email responses and your account database."},' +
@@ -1686,7 +1686,7 @@ const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '<div class="cdap-card-sub">Software connected to your dashboard.</div> ' +
   '<div class="cdap-grid"> ' +
   '<div class="cdap-field"><label>QuickBooks</label><div class="cdap-value">Connected &middot; synced 12 minutes ago</div></div> ' +
-  '<div class="cdap-field"><label>Salesforce</label><div class="cdap-value">Not connected</div></div> ' +
+  '<div class="cdap-field"><label>CRM</label><div class="cdap-value">Not connected</div></div> ' +
   '</div> ' +
   '<div style="margin-top:14px;"><button class="cdap-btn-outline cdap-btn-sm">Manage integrations</button></div> ' +
   '</div> ' +
@@ -2716,7 +2716,7 @@ body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;co
 (function(){
 function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}}
 var PLAN_FEATURES={
-  starter:{name:"Starter",next:"growth",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","A/R spreadsheet & aging reports","Email support"]},
+  starter:{name:"Starter",next:"growth",features:["2–3 user seats","1 integration","Autonomous cadence & AI drafting","Accounts Receivable & aging reports","Email support"]},
   growth:{name:"Growth",next:"enterprise",features:["5–8 user seats","QuickBooks, Dash, Salesforce, NetSuite, and more","Everything in Starter","Invoiced MTD & Collected reporting by office","Priority support"]},
   enterprise:{name:"Enterprise",next:null,features:["Unlimited seats","All integrations","Everything in Growth","Multi-office & multi-entity support","Dedicated account manager"]}
 };
