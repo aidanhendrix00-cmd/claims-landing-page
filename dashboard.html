@@ -1917,13 +1917,15 @@ async function loadAccountNotes(invoices){
   }));
 }
 
-function postAccountNote(inv, text, kind){
+function postAccountNote(inv, text, kind, source){
   if(!inv || !text) return Promise.resolve(null);
   if(!(inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/))) return Promise.resolve(null);
+  const payload = { accountId: inv.id, body: text, activity: kind || 'note' };
+  if(source === 'automation') payload.source = 'automation';
   return fetch('/api/accounts/notes', {
     method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId: inv.id, body: text, activity: kind || 'note' })
+    body: JSON.stringify(payload)
   }).then(function(r){ return r.json(); }).catch(function(){ return null; });
 }
 
@@ -2069,7 +2071,12 @@ async function loadRealAccounts(){
           days: ageDays,
           lastUpdatedAtDay: ageDays,
           jobNumber: 'JOB-' + (5000 + a.id),
-          claimNumber: payerKey === 'insurance' ? ('CLM-' + (240000 + a.id * 331)) : null,
+          // The real claim number when the CRM or the team supplied one; never a
+          // made-up placeholder on a live account (it was going out as the
+          // subject line of adjuster emails).
+          claimNumber: a.claimNumber || null,
+          notifiedName: a.notifiedName || null,
+          notifiedAt: a.notifiedAt || null,
           pa: !!a.pa,
           scopeOfWork: CATEGORY_SCOPE[catKey] || '',
           currentlyWith: a.currentlyWith || currentlyWith,
@@ -2159,9 +2166,44 @@ async function loadRealAccounts(){
         }
       });
       paymentsLog.sort(function(x, y){ return String(x.paidDate) < String(y.paidDate) ? -1 : (String(x.paidDate) > String(y.paidDate) ? 1 : 0); });
+      // Carry over what only this tab knows so a refresh never blanks it: the
+      // document list (loaded lazily when Manage is opened), attention flags,
+      // and activity lines written here that the server has not echoed back.
+      const prevById = {};
+      (state.invoices || []).forEach(function(p){ if (p && p.id !== undefined) prevById[p.id] = p; });
+      invoices.forEach(function(inv){
+        const prev = prevById[inv.id];
+        if (!prev) return;
+        if (Array.isArray(prev.documents) && prev.documents.length) inv.documents = prev.documents;
+        inv.needsAttention = !!prev.needsAttention;
+        inv.paymentEmailSent = !!prev.paymentEmailSent;
+        inv.__localActivity = (prev.activity || []).filter(function(x){ return x && x.at; });
+      });
       state.invoices = invoices;
       await loadAccountNotes(invoices);
+      invoices.forEach(function(inv){
+        const local = inv.__localActivity || [];
+        delete inv.__localActivity;
+        if (!local.length) return;
+        const seen = {};
+        (inv.activity || []).forEach(function(x){ seen[String(x.text || '').trim()] = true; });
+        const extra = local.filter(function(x){ return !seen[String(x.text || '').trim()]; });
+        if (extra.length) inv.activity = extra.concat(inv.activity || []);
+      });
       await loadServerComms(invoices);
+      // A send the server could not deliver is something a person has to look
+      // at; flag it from the server's own record so the alert survives refreshes.
+      const latestStatus = {};
+      (state.commsLog || []).forEach(function(c){ if (latestStatus[c.invoiceId] === undefined) latestStatus[c.invoiceId] = c.status; });
+      invoices.forEach(function(inv){
+        const st = latestStatus[inv.id];
+        if (st === 'failed' || st === 'bounced' || st === 'no_recipient') inv.needsAttention = true;
+      });
+      // The money panel reads from real payment records, so it is populated on
+      // every load instead of only remembering payments made in this tab.
+      state.financialLog = paymentsLog.slice().reverse().slice(0, 50).map(function(pp){
+        return { type: 'payment', invoiceId: pp.invoiceId, invoiceName: pp.invoiceName, amount: pp.amount, officeLocation: pp.officeLocation, ts: fmtDate(pp.paidDate) };
+      });
       // Response Received for a real company: every account whose reply state
       // is "replied" carries the customer's answer, so list those - newest
       // first - and tie each to the last thing we sent that account.
@@ -2183,7 +2225,26 @@ async function loadRealAccounts(){
 
   init();
 
-  setInterval(function(){ if (document.visibilityState === 'visible') loadRealAccounts(); }, 30000);
+  // A background refresh swaps every invoice object and re-renders every view.
+  // Doing that while someone is typing into a field or working in a drawer
+  // throws away what they were doing, so refreshes wait until the dashboard
+  // is idle and run as soon as it is.
+  let __reloadDeferred = false;
+  function dashboardBusy(){
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return true;
+    if (document.querySelector('.overlay.open')) return true;
+    return false;
+  }
+  function refreshRealAccountsIfIdle(){
+    if (!state.currentUser) return;
+    if (document.visibilityState !== 'visible') return;
+    if (dashboardBusy()) { __reloadDeferred = true; return; }
+    __reloadDeferred = false;
+    loadRealAccounts();
+  }
+  setInterval(refreshRealAccountsIfIdle, 30000);
+  setInterval(function(){ if (__reloadDeferred) refreshRealAccountsIfIdle(); }, 4000);
 
   // Real-time sync: a lightweight change probe every 8 seconds. The moment the
   // connected CRM/accounting system posts or updates an invoice (or a teammate
@@ -2233,8 +2294,8 @@ async function loadRealAccounts(){
   async function pingRealtimeSync(){
     if (document.visibilityState !== 'visible' || __pingBusy) return;
     if (!(window.__me && window.__me.ok)) return;
-    const ae = document.activeElement;
-    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+    // Never pull the rug out mid-edit: the next ping still sees the change.
+    if (dashboardBusy()) { __reloadDeferred = true; return; }
     __pingBusy = true;
     try {
       const res = await fetch('/api/accounts/ping', { credentials: 'same-origin', cache: 'no-store' });
@@ -2268,7 +2329,7 @@ async function loadRealAccounts(){
   setInterval(pingRealtimeSync, 8000);
 
 document.addEventListener('visibilitychange', function(){
-if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegrations(); }
+if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadRealIntegrations(); }
 });
 
   function renderAll(){
@@ -2326,7 +2387,12 @@ if (document.visibilityState === 'visible') { loadRealAccounts(); loadRealIntegr
     // `kind` tells the server what the note records for the Employees Activity
     // tab ('escalation', 'site', 'update', ...); 'skip' means the server already
     // logged this action itself (sends, payments, uploads).
-    if((source || 'manual') === 'manual'){ postAccountNote(inv, text, kind); }
+    const src = source || 'manual';
+    if(src === 'manual'){ postAccountNote(inv, text, kind); }
+    // Lines this tab writes on behalf of an automation (e.g. who an escalation
+    // notice went to) are saved as automation notes on a real account, so they
+    // are still there after a refresh and visible to the rest of the team.
+    else if(src === 'automation' && kind !== 'skip' && isRemoteInvoice(inv)){ postAccountNote(inv, text, kind, 'automation'); }
     inv.activity = inv.activity || [];
     inv.activity.unshift({ ts: new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}), text, source: source || 'manual', kind: kind || null, at: new Date().toISOString() });
     // Tracked on the simulated cadence clock (inv.days), not real wall-clock time,
