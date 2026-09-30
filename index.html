@@ -486,7 +486,7 @@
         </div>
 
         <div class="auth-footer-link">Prefer not to type a password? <a href="#" onclick="showAuthMagic(event)">Email me a sign-in link</a></div>
-        <div class="auth-footer-link">Don't have an account? <a href="#" onclick="goToContactFromAuth(event)">Get started</a></div>
+        <div class="auth-footer-link">Don't have an account? <a href="#signup" onclick="swapOverlay(event, '#signup')">Get started</a></div>
       </div>
 
       <div id="resetView">
@@ -536,7 +536,7 @@
     <div class="auth-card" style="max-width:460px;">
       <div class="auth-eyebrow">Create Account</div>
       <h1>Get started with clAIms</h1>
-      <p class="auth-sub">Set up your company account. We will recommend a plan based on your company size.</p>
+      <p class="auth-sub">Tell us about your company and the plan you have in mind. We&rsquo;ll confirm the details and get your dashboard set up.</p>
 
       <div id="signupFormFields">
         <div class="auth-field">
@@ -618,7 +618,7 @@
         <button class="btn-auth" id="su-submit-btn" onclick="submitSignup()">Create Account</button>
       </div>
       <div class="auth-note" id="signupNote"></div>
-      <div class="auth-footer-link">Already have an account? <a href="#" onclick="hideSignupOverlayVisually(); openLogin(); return false;">Log in</a></div>
+      <div class="auth-footer-link">Already have an account? <a href="#login" onclick="swapOverlay(event, '#login')">Log in</a></div>
     </div>
   </div>
 </div>
@@ -632,7 +632,7 @@
   </div>
   <div class="demo-overlay-main">
     <div class="demo-loading" id="demoLoading">Loading the interactive demo&hellip;</div>
-    <iframe id="dashboardFrame" class="dashboard-iframe" title="clAIms Collections Dashboard \u2014 Interactive Demo"></iframe>
+    <iframe id="dashboardFrame" class="dashboard-iframe" title="clAIms Collections Dashboard &mdash; Interactive Demo"></iframe>
   </div>
 </div>
 
@@ -676,7 +676,7 @@
 
         <div class="field">
           <label>Annual Revenue (Credit Sales)</label>
-          <div class="prefix-row"><span>$</span><input type="text" id="revenue" value="4,000,000" inputmode="numeric"></div>
+          <div class="prefix-row"><span>$</span><input type="text" id="revenue" value="10,000,000" inputmode="numeric"></div>
         </div>
 
         <div class="field">
@@ -918,7 +918,7 @@
             <td>Typical monthly price</td>
             <td class="cap">$250–$999+</td>
             <td class="cap">$200–$2,000+, often per seat</td>
-            <td class="claims-col">$299–$2,000 flat</td>
+            <td class="claims-col">$249–$1,650 flat</td>
           </tr>
         </tbody>
       </table>
@@ -1054,7 +1054,8 @@
   function recompute(){
     const revenue = parseRevenue();
     const dso = parseInt(dsoInput.value, 10);
-    const improve = parseInt(improveInput.value, 10);
+    let improve = parseInt(improveInput.value, 10);
+    if(improve > dso - 1){ improve = Math.max(1, dso - 1); improveInput.value = improve; }
     const targetDso = Math.max(1, dso - improve);
 
     const dailySales = revenue / 365;
@@ -1073,9 +1074,10 @@
     tagCurrent.style.left = curPct + '%';
     tagTarget.style.left = tgtPct + '%';
 
+    // Same thresholds the tier cards describe (annual revenue).
     let tier = 'starter';
-    if(arToday >= 5000000) tier = 'enterprise';
-    else if(arToday >= 500000) tier = 'growth';
+    if(revenue >= 2000000) tier = 'enterprise';
+    else if(revenue >= 500000) tier = 'growth';
     document.querySelectorAll('.tier').forEach(t => {
       const isRec = t.dataset.tier === tier;
       t.classList.toggle('recommended', isRec);
@@ -1151,12 +1153,14 @@
     const frame = document.getElementById('dashboardFrame');
     if(!frame) return;
     demoLoaded = true;
+    window.__demoLoadStarted = true;
     const loading = document.getElementById('demoLoading');
     fetch('/api/demo-dashboard').then(r => { if(!r.ok) throw new Error('bad status'); return r.text(); }).then(html => {
       frame.srcdoc = html;
       frame.addEventListener('load', () => { if(loading) loading.classList.add('hide'); }, { once: true });
     }).catch(() => {
       demoLoaded = false;
+      window.__demoLoadStarted = false;
       if(loading) loading.textContent = "Couldn't load the demo right now \u2014 please try again shortly.";
     });
   }
@@ -1188,9 +1192,8 @@
   };
 
   function syncOverlaysWithHash(){
-    Object.keys(OVERLAYS).forEach(h => {
-      if(location.hash === h) OVERLAYS[h].show(); else OVERLAYS[h].hide();
-    });
+    Object.keys(OVERLAYS).forEach(h => { if(location.hash !== h) OVERLAYS[h].hide(); });
+    Object.keys(OVERLAYS).forEach(h => { if(location.hash === h) OVERLAYS[h].show(); });
   }
 
   function navigateToOverlay(hash){
@@ -1216,8 +1219,15 @@
     OVERLAYS[hash].hide();
     try{
       if(location.hash === hash){
-        history.back(); // keeps the URL/back-stack in sync; popstate re-fires
-                         // the hide() above, which is safe to repeat
+        if(history.state && history.state.claimsOverlay === hash){
+          history.back(); // keeps the URL/back-stack in sync; popstate re-fires
+                           // the hide() above, which is safe to repeat
+        } else {
+          // Opened from a bookmark, an emailed link or a redirect: there is no
+          // earlier entry of ours to return to, so stay on the page.
+          history.replaceState(null, '', location.pathname + location.search);
+          syncOverlaysWithHash();
+        }
       }
     }catch(err){
       // same sandboxed-context fallback as navigateToOverlay() above
@@ -1238,7 +1248,37 @@
   window.addEventListener('popstate', syncOverlaysWithHash);
   // Support loading the page directly with #login or #demo in the URL
   // (e.g. a bookmark or shared link)
+  (function applyEntryParams(){
+    try{
+      const params = new URLSearchParams(location.search);
+      const verify = params.get('verify');
+      const wantsLogin = params.get('login') === '1' || !!verify;
+      if(wantsLogin && !location.hash){
+        history.replaceState(null, '', location.pathname + location.search + '#login');
+      }
+      if(verify){
+        const messages = {
+          'missing': { text: "That verification link is missing its code. Open the link from your email again, or request a fresh one below.", kind: 'error' },
+          'invalid': { text: "That verification link isn't valid or has already been used. If you still can't sign in, request a fresh link below.", kind: 'error' },
+          'expired': { text: "That verification link has expired. Sign up again with the same email and we'll send a new one.", kind: 'error' },
+          'enterprise': { text: "Your email is verified. Our team will reach out shortly to set up your Enterprise plan.", kind: 'ok' },
+          'pending-approval': { text: "Your email is verified. Your access is pending approval from your company's admin \u2014 you'll be able to sign in once they approve it.", kind: 'ok' }
+        };
+        const m = messages[verify];
+        if(m){
+          window.__entryNote = m;
+        }
+      }
+    }catch(e){}
+  })();
   syncOverlaysWithHash();
+  (function showEntryNote(){
+    const m = window.__entryNote; if(!m) return;
+    const note = document.getElementById('loginNote'); if(!note) return;
+    note.textContent = m.text;
+    note.classList.add('show');
+    note.style.color = m.kind === 'error' ? '#8A1C13' : '#1F5346';
+  })();
 
   function showAuthReset(e){
     if(e) e.preventDefault();
@@ -1249,6 +1289,7 @@
   }
   function showAuthLogin(e){
     if(e) e.preventDefault();
+    var cv = document.getElementById('clmsResetConfirmView'); if (cv) cv.style.display = 'none';
     document.getElementById('resetView').style.display = 'none';
     var magicViewEl2 = document.getElementById('magicView');
     if (magicViewEl2) magicViewEl2.style.display = 'none';
@@ -1264,44 +1305,76 @@
     var emailInput = document.getElementById('magic-email');
     var email = emailInput ? emailInput.value.trim() : '';
     var note = document.getElementById('magicNote');
+    var btn = document.querySelector('#magicView .btn-auth');
     note.classList.add('show');
-    if (!email) { note.textContent = 'Please enter your email address.'; return; }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { note.textContent = 'Please enter a valid email address.'; return; }
+    if (btn && btn.disabled) return;
+    if (btn) btn.disabled = true;
     note.textContent = 'Sending sign-in link...';
     fetch('/api/magic-link/request', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ email: email })
     }).then(function(res){ return res.json(); }).then(function(data){
-      note.textContent = (data && data.message) || "If that email has an account, we've sent a sign-in link.";
+      if (btn) btn.disabled = false;
+      note.textContent = (data && (data.message || data.error)) || "If that email has an account, we've sent a sign-in link.";
     }).catch(function(){
+      if (btn) btn.disabled = false;
       note.textContent = 'Something went wrong. Please try again.';
     });
   }
+  var loginInFlight = false;
   function submitAuthLogin(){
     var email = document.getElementById('li-username').value.trim();
     var password = document.getElementById('li-password').value;
     var note = document.getElementById('loginNote');
+    var btn = document.querySelector('#loginView .btn-auth');
     note.classList.add('show');
+    note.style.color = '';
+    if (!email || !password) { note.textContent = 'Please enter your email and password.'; return; }
+    if (loginInFlight) return;
+    loginInFlight = true;
+    if (btn) btn.disabled = true;
     note.textContent = 'Logging in...';
     fetch('/api/login', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ email: email, password: password })
     }).then(function(res){ return res.json(); }).then(function(data){
+      loginInFlight = false;
+      if (btn) btn.disabled = false;
       if (data.ok) {
         note.textContent = 'Success! Redirecting...';
         window.location.href = data.redirect || '/dashboard';
       } else {
+        note.textContent = data.error || 'Invalid email or password.';
         if (data.redirect) {
-          note.innerHTML = (data.error || 'Action required.') + ' <a href="' + data.redirect + '" style="color:var(--ink);font-weight:600;">Continue &rarr;</a>';
-        } else {
-          note.textContent = data.error || 'Invalid email or password.';
+          var link = document.createElement('a');
+          link.href = String(data.redirect);
+          link.style.cssText = 'color:var(--ink);font-weight:600;margin-left:6px;';
+          link.textContent = 'Continue \u2192';
+          note.appendChild(document.createTextNode(' '));
+          note.appendChild(link);
         }
       }
     }).catch(function(){
+      loginInFlight = false;
+      if (btn) btn.disabled = false;
       note.textContent = 'Something went wrong. Please try again.';
     });
   }
+  ['li-username','li-password'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); submitAuthLogin(); } });
+  });
+  ['reset-email'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); submitAuthReset(); } });
+  });
+  ['magic-email'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); submitAuthMagic(); } });
+  });
   function submitSignup(){
     var note = document.getElementById('signupNote');
     var fullName = document.getElementById('su-fullname').value.trim();
@@ -1365,19 +1438,40 @@
     var emailInput = document.getElementById('reset-email');
     var email = emailInput ? emailInput.value.trim() : '';
     var note = document.getElementById('resetNote');
+    var btn = document.querySelector('#resetView .btn-auth');
     note.classList.add('show');
-    if (!email) { note.textContent = 'Please enter your email address.'; return; }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { note.textContent = 'Please enter a valid email address.'; return; }
+    if (btn && btn.disabled) return;
+    if (btn) btn.disabled = true;
     note.textContent = 'Sending reset link...';
     fetch('/api/forgot-password', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ email: email })
     }).then(function(res){ return res.json(); }).then(function(data){
-      note.textContent = (data && data.message) || "If an account exists for that email, we've sent a reset link.";
+      if (btn) btn.disabled = false;
+      note.textContent = (data && (data.message || data.error)) || "If an account exists for that email, we've sent a reset link.";
     }).catch(function(){
+      if (btn) btn.disabled = false;
       note.textContent = 'Something went wrong. Please try again.';
     });
   }
+  // Move between the login and signup cards without stacking history entries,
+  // so "Back to home" from the second card returns to the page, not the first card.
+  function swapOverlay(e, hash){
+    if(e) e.preventDefault();
+    try{
+      const st = (history.state && history.state.claimsOverlay) ? { claimsOverlay: hash } : null;
+      history.replaceState(st, OVERLAY_TITLES[hash] || '', hash);
+    }catch(err){}
+    syncOverlaysWithHash();
+  }
+  window.swapOverlay = swapOverlay;
+  // Escape closes whichever overlay is open.
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Escape') return;
+    Object.keys(OVERLAYS).forEach(function(h){ if(location.hash === h) closeOverlay(h); });
+  });
   function goToContactFromAuth(e){
     if(e) e.preventDefault();
     closeAuthOverlay();
@@ -1456,6 +1550,19 @@
 }
 window.syncSoftwareOther = syncSoftwareOther;
 window.submitContact = submitContact;
+
+/* ---- accessibility: associate adjacent labels with their fields ---- */
+(function(){
+  try{
+    document.querySelectorAll('label:not([for])').forEach(function(l){
+      if(l.querySelector('input,select,textarea')) return;
+      var f = l.nextElementSibling;
+      if(f && !/^(INPUT|SELECT|TEXTAREA)$/.test(f.tagName)) f = f.querySelector ? f.querySelector('input,select,textarea') : null;
+      if(f && f.id) l.setAttribute('for', f.id);
+    });
+    ['loginOverlay','signupOverlay','demoOverlay'].forEach(function(id){ var o = document.getElementById(id); if(o){ o.setAttribute('role','dialog'); o.setAttribute('aria-modal','true'); } });
+  }catch(e){}
+})();
 
 /* ---- motion: scroll reveal, header state, calc tick ---- */
 (function(){
