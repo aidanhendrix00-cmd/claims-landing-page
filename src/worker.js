@@ -10,6 +10,37 @@ const NOTIFY_EMAIL = 'hndrx@claims-collection.net';
 const SUPPORT_EMAIL = 'support@claims-collection.net';
 const SALES_EMAIL = 'salesnmarketing@claims-collection.net';
 const FROM_EMAIL = 'clAIms <info@claims-collection.net>';
+
+// Shared brand typography + motion for every standalone page the worker renders.
+const BRAND_FONTS_HEAD = '<link rel="preconnect" href="https://fonts.googleapis.com">' +
+  '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+  '<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">';
+const BRAND_FONT_BODY = '"Instrument Sans","IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif';
+const BRAND_FONT_DISPLAY = '"Bricolage Grotesque","Space Grotesk",system-ui,sans-serif';
+const BRAND_BASE_CSS =
+  ':root{--clms-ease:cubic-bezier(.16,1,.3,1);--clms-spring:cubic-bezier(.34,1.56,.64,1);}' +
+  'body{font-family:' + BRAND_FONT_BODY + ';-webkit-font-smoothing:antialiased;background-image:radial-gradient(1000px 520px at 6% -10%,rgba(194,155,87,.13),transparent 60%),radial-gradient(800px 460px at 100% 0%,rgba(47,122,107,.09),transparent 60%);background-attachment:fixed;}' +
+  'h1,h2,h3,.acct-brand,.ty-card h1,.plan-name{font-family:' + BRAND_FONT_DISPLAY + ';letter-spacing:-0.015em;font-variation-settings:"opsz" 40;}' +
+  'code,pre,.mono{font-family:"JetBrains Mono","IBM Plex Mono",ui-monospace,monospace;}' +
+  '@keyframes clmsIn{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:none;}}' +
+  '.acct-card,.ty-card,.card,.plan-banner,.restricted-box,.sub-card,.gate{animation:clmsIn .6s var(--clms-ease) both;}' +
+  '.acct-card:nth-child(2),.plan-banner+.acct-card{animation-delay:.08s;}.acct-card:nth-child(3){animation-delay:.16s;}.acct-card:nth-child(4){animation-delay:.24s;}.acct-card:nth-child(n+5){animation-delay:.3s;}' +
+  '.acct-panel.active{animation:clmsIn .45s var(--clms-ease) both;}' +
+  '.acct-card,.card,.ty-card{transition:transform .4s var(--clms-ease),box-shadow .4s ease,border-color .3s ease;}' +
+  '.acct-card:hover{transform:translateY(-2px);box-shadow:0 22px 44px -22px rgba(23,23,23,.28);border-color:#DCC393;}' +
+  '.acct-tab{position:relative;border-bottom-color:transparent!important;transition:color .2s ease;}' +
+  '.acct-tab::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,#C29B57,#2F7A6B);transform:scaleX(0);transform-origin:left;transition:transform .35s var(--clms-ease);}' +
+  '.acct-tab.active::after{transform:scaleX(1);}' +
+  '.acct-brand{position:relative;padding-left:14px;}' +
+  '.acct-brand::before{content:"";position:absolute;left:0;top:50%;width:4px;height:60%;transform:translateY(-50%);border-radius:2px;background:linear-gradient(180deg,#C29B57,#2F7A6B);}' +
+  '.btn-dark,.btn-outline,.btn-to-dashboard,.btn-sm,button.primary,a.btn,.btn{transition:transform .35s var(--clms-spring),box-shadow .3s ease,opacity .2s ease,border-color .2s ease,color .2s ease,background .2s ease;}' +
+  '.btn-dark:hover,.btn-outline:hover,.btn-to-dashboard:hover,a.btn:hover,.btn:hover{transform:translateY(-2px);box-shadow:0 12px 24px -12px rgba(23,23,23,.45);}' +
+  '.btn-dark:active,.btn-outline:active,.btn-to-dashboard:active,a.btn:active,.btn:active{transform:translateY(0) scale(.98);transition-duration:.08s;}' +
+  '.acct-field .acct-value{transition:border-color .25s ease;}.acct-field:hover .acct-value{border-bottom-color:#DCC393;}' +
+  '.acct-role-badge{font-family:"JetBrains Mono","IBM Plex Mono",monospace;font-weight:600;}' +
+  '::selection{background:#F3E9D8;color:#171717;}' +
+  ':focus-visible{outline:2px solid #2F7A6B;outline-offset:3px;border-radius:4px;}' +
+  '@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-delay:0ms!important;transition-duration:.001ms!important;}}';
 const OPERATIONS_FROM_EMAIL = 'clAIms Operations <operations@claims-collection.net>';
 const SITE_URL = 'https://claims-collection.net';
 const OFFICE_LABELS = { arizona: 'Arizona', dallas: 'Dallas', houston: 'Houston', hillcountry: 'Hill Country' };
@@ -104,9 +135,9 @@ function checkoutUrlFor(tenant, email) {
 }
 
 const HELP_WIDGET_HTML = '<style>' +
-  '#clms-help-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#C29B57;color:#171717;border:none;box-shadow:0 10px 30px -8px rgba(23,23,23,0.45);cursor:pointer;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:700;font-size:22px;z-index:99999;display:flex;align-items:center;justify-content:center;transition:transform .15s ease, box-shadow .15s ease;line-height:1;}' +
+  '#clms-help-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#C29B57;color:#171717;border:none;box-shadow:0 10px 30px -8px rgba(23,23,23,0.45);cursor:pointer;font-family:"Instrument Sans",Arial,sans-serif;font-weight:700;font-size:22px;z-index:99999;display:flex;align-items:center;justify-content:center;transition:transform .15s ease, box-shadow .15s ease;line-height:1;}' +
   '#clms-help-btn:hover{transform:scale(1.06);box-shadow:0 14px 36px -8px rgba(23,23,23,0.55);}' +
-  '#clms-help-panel{position:fixed;bottom:92px;right:24px;width:320px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #E5E0D2;border-radius:14px;box-shadow:0 24px 60px -20px rgba(23,23,23,0.35);z-index:99999;display:none;overflow:hidden;font-family:"IBM Plex Sans",Arial,sans-serif;}' +
+  '#clms-help-panel{position:fixed;bottom:92px;right:24px;width:320px;max-width:calc(100vw - 32px);background:#fff;border:1px solid #E5E0D2;border-radius:14px;box-shadow:0 24px 60px -20px rgba(23,23,23,0.35);z-index:99999;display:none;overflow:hidden;font-family:"Instrument Sans",Arial,sans-serif;}' +
   '#clms-help-panel.open{display:block;}' +
   '#clms-help-panel .chp-head{background:#171717;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}' +
   '#clms-help-panel .chp-head h4{margin:0;font-size:14px;font-weight:600;}' +
@@ -495,9 +526,9 @@ const GET_STARTED_FORM_SCRIPT = '<script>' +
 const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-8">' +
   '<meta name="viewport" content="width=device-width, initial-scale=1">' +
   '<title>Thank you — clAIms</title>' +
-  '<link rel="icon" href="/favicon.ico">' +
-  '<style>' +
-  'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;box-sizing:border-box;}' +
+  '<link rel="icon" href="/favicon.ico">' + BRAND_FONTS_HEAD +
+  '<style>' + BRAND_BASE_CSS +
+  'body{margin:0;font-family:' + BRAND_FONT_BODY + ';background:#F5F2EA;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;box-sizing:border-box;}' +
   '.ty-card{background:#fff;border:1px solid #E5E0D2;border-radius:16px;padding:48px 40px;max-width:520px;text-align:center;box-shadow:0 24px 60px -20px rgba(23,23,23,0.15);}' +
   '.ty-card .ty-mark{font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#C29B57;margin-bottom:18px;}' +
   '.ty-card h1{font-size:26px;margin:0 0 16px;}' +
@@ -516,10 +547,10 @@ const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-
 const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-8"> ' +
   '<meta name="viewport" content="width=device-width, initial-scale=1"> ' +
   '<title>My Account — clAIms</title> ' +
-  '<link rel="icon" href="/favicon.ico"> ' +
-  '<style> ' +
+  '<link rel="icon" href="/favicon.ico"> ' + BRAND_FONTS_HEAD +
+  '<style> ' + BRAND_BASE_CSS +
   '*{box-sizing:border-box;} ' +
-  'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;color:#171717;} ' +
+  'body{margin:0;font-family:' + BRAND_FONT_BODY + ';background:#F5F2EA;color:#171717;} ' +
   '.acct-topbar{background:#171717;color:#fff;padding:16px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;} ' +
   '.acct-brand{font-weight:700;font-size:18px;letter-spacing:.02em;} ' +
   '.acct-topbar-right{display:flex;align-items:center;gap:16px;flex-wrap:wrap;} ' +
@@ -1275,7 +1306,7 @@ const DEMO_POPUP_SCRIPT = '<script>' +
   'wrap.id="clms-demo-popup";' +
   'wrap.innerHTML=' +
   '\'<style>\'+' +
-  '\'#clms-demo-popup{position:fixed;bottom:24px;left:24px;max-width:300px;background:#D32F2F;color:#fff;padding:16px 18px;border-radius:14px;box-shadow:0 20px 50px -15px rgba(179,25,25,0.55);z-index:99998;font-family:"IBM Plex Sans",Arial,sans-serif;cursor:pointer;animation:clmsPopIn .35s ease;}\'+' +
+  '\'#clms-demo-popup{position:fixed;bottom:24px;left:24px;max-width:300px;background:#D32F2F;color:#fff;padding:16px 18px;border-radius:14px;box-shadow:0 20px 50px -15px rgba(179,25,25,0.55);z-index:99998;font-family:"Instrument Sans",Arial,sans-serif;cursor:pointer;animation:clmsPopIn .35s ease;}\'+' +
   '\'@keyframes clmsPopIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}\'+' +
   '\'@keyframes clmsBangPulse{0%,100%{opacity:1;}50%{opacity:.55;}}\'+' +
   '\'#clms-demo-popup .cdp-close{position:absolute;top:6px;right:10px;background:none;border:none;color:#fff;font-size:16px;cursor:pointer;opacity:.8;line-height:1;}\'+' +
@@ -1356,7 +1387,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   'var style=document.createElement("style");' +
   'style.textContent=' +
   '".clms-tour-spot{position:fixed;pointer-events:none;box-shadow:0 0 0 9999px rgba(10,10,10,.62);border-radius:10px;transition:top .25s ease,left .25s ease,width .25s ease,height .25s ease;z-index:999998;}" +' +
-  '".clms-tour-tip{position:fixed;z-index:999999;background:#171717;color:#fff;border-radius:12px;padding:16px 18px;width:300px;box-shadow:0 20px 50px -15px rgba(0,0,0,.55);font-family:\\"IBM Plex Sans\\",Arial,sans-serif;}" +' +
+  '".clms-tour-tip{position:fixed;z-index:999999;background:#171717;color:#fff;border-radius:12px;padding:16px 18px;width:300px;box-shadow:0 20px 50px -15px rgba(0,0,0,.55);font-family:\\"Instrument Sans\\",Arial,sans-serif;}" +' +
   '".clms-tour-tip .ctt-step{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#C29B57;font-weight:700;margin-bottom:6px;}" +' +
   '".clms-tour-tip h4{margin:0 0 6px;font-size:15px;}" +' +
   '".clms-tour-tip p{margin:0 0 14px;font-size:13px;line-height:1.5;color:#D8D4C8;}" +' +
@@ -1365,7 +1396,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '".clms-tour-tip .ctt-skip{background:none;color:#B7B2A4;padding:7px 4px;}" +' +
   '".clms-tour-tip .ctt-back{background:#2b2b2b;color:#fff;}" +' +
   '".clms-tour-tip .ctt-next{background:#C29B57;color:#171717;}" +' +
-  '".clms-tour-replay{position:fixed;bottom:16px;left:16px;background:#171717;color:#fff;font-size:12px;font-weight:600;padding:9px 14px;border-radius:20px;cursor:pointer;z-index:999997;box-shadow:0 10px 24px -8px rgba(0,0,0,.4);font-family:\\"IBM Plex Sans\\",Arial,sans-serif;display:none;}" +' +
+  '".clms-tour-replay{position:fixed;bottom:16px;left:16px;background:#171717;color:#fff;font-size:12px;font-weight:600;padding:9px 14px;border-radius:20px;cursor:pointer;z-index:999997;box-shadow:0 10px 24px -8px rgba(0,0,0,.4);font-family:\\"Instrument Sans\\",Arial,sans-serif;display:none;}" +' +
   '"@media (max-width:520px){.clms-tour-tip{width:calc(100vw - 32px);}}";' +
   'document.head.appendChild(style);' +
   'spot=document.createElement("div");spot.className="clms-tour-spot";spot.style.display="none";document.body.appendChild(spot);' +
@@ -1444,8 +1475,8 @@ const DEMO_TOUR_SCRIPT = '<script>' +
 
 const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';if(u.indexOf('/api/documents')!==-1){var J=function(o){return Promise.resolve(new Response(JSON.stringify(o),{status:200,headers:{'Content-Type':'application/json'}}));};if(u.indexOf('/api/documents/upload')!==-1){var f=null,k='Other',lb='';try{var B=init&&init.body;if(B&&B.get){f=B.get('file');k=B.get('kind')||'Other';lb=B.get('label')||'';}}catch(e2){}return J({ok:true,demo:true,document:{id:'demo-'+Date.now(),name:(f&&f.name)||'document.pdf',kind:k,label:lb||null,size:(f&&f.size)||0,contentType:(f&&f.type)||null,createdAt:new Date().toISOString(),auto:false}});}if(u.indexOf('/api/documents/delete')!==-1){return J({ok:true,demo:true});}if(u.indexOf('/api/documents/download')!==-1){return J({ok:false,demo:true,error:'Sample document in the demo - not a stored file.'});}return J({ok:true,demo:true,documents:[]});}if(u.indexOf('/api/escalate-notify')!==-1){return Promise.resolve(new Response(JSON.stringify({ok:true,sent:true,demo:true,notifiedName:'Dana Whitfield',notifiedEmail:'dana.whitfield@example.com'}),{status:200,headers:{'Content-Type':'application/json'}}));}for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
 const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
-  '.cdap-trigger{position:fixed;top:16px;right:16px;z-index:99996;background:#171717;color:#fff;border:none;font-family:"IBM Plex Sans",Arial,sans-serif;font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);cursor:pointer;} ' +
-  '#clmsAcctOverlay{display:none;position:fixed;inset:0;background:#F5F2EA;z-index:999995;overflow-y:auto;font-family:"IBM Plex Sans",Arial,sans-serif;color:#171717;} ' +
+  '.cdap-trigger{position:fixed;top:16px;right:16px;z-index:99996;background:#171717;color:#fff;border:none;font-family:' + BRAND_FONT_BODY + ';font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);cursor:pointer;} ' +
+  '#clmsAcctOverlay{display:none;position:fixed;inset:0;background:#F5F2EA;z-index:999995;overflow-y:auto;font-family:' + BRAND_FONT_BODY + ';color:#171717;} ' +
   '#clmsAcctOverlay *{box-sizing:border-box;} ' +
   '.cdap-topbar{background:#171717;color:#fff;padding:16px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;} ' +
   '.cdap-brand{font-weight:700;font-size:18px;letter-spacing:.02em;} ' +
@@ -2264,10 +2295,10 @@ await sendEmail(env, { to: user.email, subject: 'Your clAIms sign-in link', html
 return json({ ok: true, message: "If that email has an account, we've sent a sign-in link." });
 }
 
-const MAGIC_LINK_ERROR_HTML = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign-in link expired — clAIms</title><style>' +
-'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#EEF1F0;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
+const MAGIC_LINK_ERROR_HTML = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign-in link expired — clAIms</title>' + BRAND_FONTS_HEAD + '<style>' + BRAND_BASE_CSS +
+'body{margin:0;font-family:' + BRAND_FONT_BODY + ';background:#F5F2EA;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
 '.card{background:#fff;border-radius:12px;padding:40px;max-width:420px;text-align:center;box-shadow:0 10px 30px -8px rgba(23,23,23,0.15);}' +
-'h1{font-family:\'Space Grotesk\',sans-serif;font-size:22px;margin:0 0 12px;}' +
+'h1{font-family:' + BRAND_FONT_DISPLAY + ';font-size:22px;margin:0 0 12px;}' +
 'p{color:#5B6B73;font-size:14px;line-height:1.5;}' +
 'a{color:#C29B57;font-weight:600;text-decoration:none;}' +
 '</style></head><body><div class="card"><h1>This sign-in link has expired</h1><p>Sign-in links are one-time use and expire after 15 minutes. Head back and request a new one.</p><p><a href="/?login=1">Return to clAIms</a></p></div></body></html>';
@@ -2353,11 +2384,11 @@ const body = valid ? (
 '</div>'
 );
 const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-'<title>Set Your Password &middot; clAIms</title>' +
-'<style>' +
-'body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#EEF1F0;color:#16233A;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
+'<title>Set Your Password &middot; clAIms</title>' + BRAND_FONTS_HEAD +
+'<style>' + BRAND_BASE_CSS +
+'body{margin:0;font-family:' + BRAND_FONT_BODY + ';background:#F5F2EA;color:#171717;display:flex;align-items:center;justify-content:center;min-height:100vh;}' +
 '.card{background:#fff;max-width:400px;width:calc(100% - 48px);padding:32px;border-radius:12px;box-shadow:0 10px 30px rgba(23,23,23,0.12);}' +
-'h1{font-family:"Space Grotesk",sans-serif;font-size:20px;margin:0 0 6px;}' +
+'h1{font-family:' + BRAND_FONT_DISPLAY + ';font-size:20px;margin:0 0 6px;}' +
 '.sub{color:#5B6B73;font-size:13px;margin:0 0 20px;}' +
 '.row{margin-bottom:14px;}' +
 'label{display:block;font-size:12px;font-weight:600;color:#5B6B73;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;}' +
@@ -2641,10 +2672,11 @@ async function handleAccountPage(request, env) {
 const SUBSCRIPTION_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Manage Subscription — clAIms</title>
-<link rel="icon" href="/favicon.ico">
+<link rel="icon" href="/favicon.ico">${BRAND_FONTS_HEAD}
 <style>
+${BRAND_BASE_CSS}
 *{box-sizing:border-box;}
-body{margin:0;font-family:"IBM Plex Sans",Arial,sans-serif;background:#F5F2EA;color:#171717;}
+body{margin:0;font-family:${BRAND_FONT_BODY};background:#F5F2EA;color:#171717;}
 .sub-topbar{background:#171717;color:#fff;padding:16px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
 .sub-brand{font-weight:700;font-size:18px;letter-spacing:.02em;}
 .sub-back{color:#D8D4C8;text-decoration:none;font-size:13.5px;font-weight:600;}
@@ -5401,8 +5433,8 @@ const payAction = isAdmin
 : '<p style="color:#615D53;">Ask an admin at your company to finish payment. Access starts automatically the moment the subscription payment goes through.</p>';
 return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
 '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-'<title>Payment required - clAIms</title></head>' +
-'<body style="margin:0;background:#F5F2EA;font-family:IBM Plex Sans,Arial,sans-serif;color:#171717;">' +
+'<title>Payment required - clAIms</title>' + BRAND_FONTS_HEAD + '<style>' + BRAND_BASE_CSS + '</style></head>' +
+'<body style="margin:0;background:#F5F2EA;font-family:' + BRAND_FONT_BODY + ';color:#171717;">' +
 '<div style="max-width:560px;margin:14vh auto;background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:36px 40px;">' +
 '<div style="font-size:12px;letter-spacing:.08em;color:#C29B57;font-weight:700;">PAYMENT REQUIRED</div>' +
 '<h1 style="font-size:24px;margin:10px 0 14px;">Finish payment to activate ' + company + '</h1>' +
@@ -5418,8 +5450,8 @@ const action = isAdmin
 : '<p style="color:#615D53;">Ask an admin at your company to add or edit the payment method. Access returns automatically once payment is received.</p>';
 return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">' +
 '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-'<title>Access on hold - clAIms</title></head>' +
-'<body style="margin:0;background:#F5F2EA;font-family:IBM Plex Sans,Arial,sans-serif;color:#171717;">' +
+'<title>Access on hold - clAIms</title>' + BRAND_FONTS_HEAD + '<style>' + BRAND_BASE_CSS + '</style></head>' +
+'<body style="margin:0;background:#F5F2EA;font-family:' + BRAND_FONT_BODY + ';color:#171717;">' +
 '<div style="max-width:560px;margin:14vh auto;background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:36px 40px;">' +
 '<div style="font-size:12px;letter-spacing:.08em;color:#C29B57;font-weight:700;">ACCESS ON HOLD</div>' +
 '<h1 style="font-size:24px;margin:10px 0 14px;">Access on hold due to no payment</h1>' +
