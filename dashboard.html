@@ -1245,8 +1245,8 @@
   .hist-table td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
   .hist-empty{font-size:12.5px;color:var(--slate-soft);padding:8px 0;}
   .hist-link{color:var(--ink);text-decoration:underline;cursor:pointer;}
-  .acct-link{color:inherit;text-decoration:none;cursor:pointer;background-image:linear-gradient(currentColor,currentColor);background-repeat:no-repeat;background-size:0% 1px;background-position:0 100%;transition:background-size .22s cubic-bezier(.2,.8,.2,1),color .15s ease;}
-  .acct-link:hover,.acct-link:focus-visible{color:var(--teal);background-size:100% 1px;outline:none;}
+  .acct-link{color:inherit;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(47,122,107,.45);text-decoration-thickness:1px;text-underline-offset:3px;background-image:linear-gradient(var(--teal),var(--teal));background-repeat:no-repeat;background-size:0% 2px;background-position:0 100%;transition:background-size .22s cubic-bezier(.2,.8,.2,1),color .15s ease,text-decoration-color .15s ease;}
+  .acct-link:hover,.acct-link:focus-visible{color:var(--teal);text-decoration-color:transparent;background-size:100% 2px;outline:none;}
 </style>
 <div class="overlay" id="overlay-payment">
   <div class="drawer">
@@ -1761,7 +1761,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
         inv.activity.unshift({
           ts: noteDate.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),
           text: DEMO_SF_NOTES[idx % DEMO_SF_NOTES.length],
-          source: 'salesforce'
+          source: 'crm'
         });
       }
     });
@@ -3912,6 +3912,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     return '<a class="acct-link' + (extraClass ? ' ' + extraClass : '') + '" href="#" onclick="event.preventDefault();event.stopPropagation();openAccountHistory(' + JSON.stringify(id) + ');" title="Open this account">' + label + '</a>';
   }
   function hEsc(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  // Source systems are shown generically: any CRM connector (Salesforce, Dash, etc.) reads as CRM.
+  function hSourceLabel(src){ if(src == null || src === '') return src == null ? null : src; const k = String(src).toLowerCase(); if(/^(salesforce|sf|sfdc|dash|crm)$/.test(k)) return 'CRM'; return String(src); }
   function hMoney(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   // Demo activity stamps look like "Sep 7, 2:15 PM" (no year); the Date parser
   // turns those into 2001, so anything before 2015 is treated as unparsable and
@@ -4270,7 +4272,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       lastDayOnSite: inv.lastDayOnSite || inv.lastOnSiteDate || null, note: inv.note
     };
     const timeline = [];
-    const push = function(at, type, title, detail, source){ if(!at) return; timeline.push({ at: at, type: type, title: title, detail: detail || null, source: source || null }); };
+    const push = function(at, type, title, detail, source){ if(!at) return; timeline.push({ at: at, type: type, title: title, detail: detail || null, source: hSourceLabel(source) }); };
     push(account.invoicedAt, 'invoice', 'Invoice ' + (account.invoiceNumber || '') + ' created for ' + hMoney(account.amount), null, 'system');
     push(account.lastDayOnSite, 'site', 'Last day on site', null, 'crm');
     push(account.waSignedAt, 'document', 'Work Authorization signed', null, 'system');
@@ -4279,7 +4281,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     push(account.noilSentAt, 'noil', 'Notice of Intent to Lien sent', null, 'system');
     comms.forEach(function(c){ const t = /noil/i.test(c.label) ? 'noil' : (/demand/i.test(c.label) ? 'demand' : 'followup'); push(c.at, t, c.label + (c.status === 'sent' ? ' sent' : (c.status ? (' - ' + c.status) : '')), [c.recipientRole, c.subject].filter(Boolean).join(' | '), c.source); });
     payments.forEach(function(p){ push(p.at, 'payment', 'Payment received: ' + hMoney(p.amount), [p.method, p.reference ? ('ref ' + p.reference) : null, p.payerName].filter(Boolean).join(' - '), 'dashboard'); });
-    notes.forEach(function(n){ push(n.ts, 'note', n.text, n.author ? ('by ' + n.author) : null, n.source); });
+    notes.forEach(function(n){ push(n.ts, 'note', n.text, n.author ? ('by ' + hSourceLabel(n.author)) : null, n.source); });
     // Unparsable demo stamps (no year) are the most recent things that happened, so they sort to the top.
     timeline.sort(function(x, y){ const dx = hParse(x.at), dy = hParse(y.at); return (dy ? dy.getTime() : Date.now()) - (dx ? dx.getTime() : Date.now()); });
     return { ok: true, account: account, comms: comms, activity: [], payments: payments, documents: documents, notes: notes, related: related, timeline: timeline };
@@ -4324,7 +4326,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('hist-timeline-count').textContent = tl.length ? ('· ' + tl.length + ' event' + (tl.length === 1 ? '' : 's')) : '';
     document.getElementById('hist-timeline').innerHTML = tl.length
       ? ('<div class="tl">' + tl.map(function(t){
-          return '<div class="tl-item ' + hEsc(t.type || '') + '"><div class="tl-when">' + hEsc(hDateTime(t.at)) + '</div><div class="tl-title">' + hEsc(t.title) + (t.source ? ('<span class="tl-badge">' + hEsc(String(t.source).toUpperCase()) + '</span>') : '') + '</div>' + (t.detail ? ('<div class="tl-detail">' + hEsc(t.detail) + '</div>') : '') + '</div>';
+          return '<div class="tl-item ' + hEsc(t.type || '') + '"><div class="tl-when">' + hEsc(hDateTime(t.at)) + '</div><div class="tl-title">' + hEsc(t.title) + (t.source ? ('<span class="tl-badge">' + hEsc(String(hSourceLabel(t.source)).toUpperCase()) + '</span>') : '') + '</div>' + (t.detail ? ('<div class="tl-detail">' + hEsc(String(t.detail).replace(/^by (salesforce|sfdc|sf|dash)$/i, 'by CRM')) + '</div>') : '') + '</div>';
         }).join('') + '</div>')
       : '<div class="hist-empty">Nothing recorded on this account yet.</div>';
 
