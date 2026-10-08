@@ -291,6 +291,11 @@
   .status-pill.delivered{background:#EEF0F5;color:var(--slate);}
   .status-pill.held_for_review{background:var(--amber-soft);color:#946218;}
   .status-pill.no_recipient,.status-pill.bounced,.status-pill.failed,.status-pill.no_sender{background:#FEF3F2;color:#B42318;}
+  .sheet td.tracker-text{min-width:200px;max-width:260px;}
+  .sheet td.tracker-text textarea{width:100%;min-height:44px;resize:vertical;font:inherit;font-size:12px;line-height:1.35;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:#FFFDF8;color:var(--ink);}
+  .sheet td.tracker-text textarea:focus{outline:2px solid var(--teal);outline-offset:1px;background:#fff;}
+  .sheet td.qb-notes{font-size:12px;line-height:1.35;color:var(--ink);white-space:normal;vertical-align:top;}
+  .sheet td.qb-notes .clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-height:52px;}
   #sender-banner{position:sticky;top:0;z-index:940;background:#FFF4E5;color:#7A4B00;border-bottom:1px solid #F2C879;padding:10px 18px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
   #sender-banner .btn-small{background:#171717;color:#fff;border-color:#171717;}
   #sender-banner .btn-small.ghost{background:transparent;color:#7A4B00;border-color:#E0B96A;}
@@ -735,7 +740,7 @@
       <div class="hint" style="margin-bottom:12px;">* next to a projected payment date means it falls outside the 3-week window (This Week through Following Week).</div>
       <div class="sheet-wrap">
         <table class="sheet" id="sheet-table">
-          <thead>
+          <thead id="sheet-head">
             <tr>
               <th>Invoice #</th><th>Job #</th><th>Invoice Date</th><th>Account / Owner</th><th>Office</th><th>Department</th><th>Category</th><th>Amount</th>
               <th>Job Status</th><th>Currently With</th><th>Claim #</th><th title="Public Adjuster involved on this claim">PA</th><th>NOIL</th><th>Lien</th><th>Last Contact</th><th>Responded?</th><th>Response Summary</th>
@@ -1104,6 +1109,13 @@
   <div class="drawer wide">
     <div class="drawer-head"><h3 id="detail-title">Manage Invoice</h3><button class="close" onclick="closeDetail()">Close ×</button></div>
     <div class="drawer-sub" id="detail-sub"></div>
+
+    <div class="drawer-section" id="detail-tracker" style="display:none;margin-top:0;padding-top:0;border-top:none;">
+      <h4>Collections Tracker</h4>
+      <div class="hist-grid" id="detail-tracker-facts"></div>
+      <div class="form-row" style="margin-top:10px;"><label>Point of contact <span style="font-weight:400;color:var(--slate);">(pulled from QuickBooks; edit freely)</span></label><textarea id="detail-contact-info" rows="2" placeholder="Name, email, phone, role…" onchange="setTrackerText(currentDetailId, 'contactInfo', this.value)"></textarea></div>
+      <div class="form-row"><label>Response summary</label><textarea id="detail-response-summary" rows="2" placeholder="What the customer said…" onchange="setTrackerText(currentDetailId, 'responseSummary', this.value)"></textarea></div>
+    </div>
 
     <div class="drawer-section" style="margin-top:0;padding-top:0;border-top:none;">
       <h4>Job Status <span style="text-transform:none;font-weight:400;">(read from your CRM)</span></h4>
@@ -2549,7 +2561,11 @@ async function loadRealAccounts(){
           projectedPaymentDate: dayOnly(a.projectedPaymentDate) || projected,
           lastDayOnSite: dayOnly(a.lastDayOnSite),
           lastOnSiteDate: dayOnly(a.lastDayOnSite) || dayOnly(a.invoicedDate),
-          contactEmail: a.contactEmail || null
+          contactEmail: a.contactEmail || null,
+          contactInfo: a.contactInfo || '',
+          lastFollowUpAt: a.lastFollowUpAt || null,
+          lastFollowUpBy: a.lastFollowUpBy || null,
+          lastFollowUpKind: a.lastFollowUpKind || null
         };
         if (isPaid && inv.amountPaid + 0.005 < inv.amount) inv.amountPaid = inv.amount;
         invoices.push(inv);
@@ -3179,7 +3195,7 @@ function todoRowHTML(item, num, priority){
         <div class="who">
           <div class="name">${acctLink(inv.id, inv.name)}</div>
           <div class="meta">${hEsc(inv.meta || '')} &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.invoiceNumber || '\u2014')}</span> &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.jobNumber || '')}</span></div>
-          <div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>
+          ${TENANT_DEPTS_CUSTOM ? trackerLineHTML(inv) : `<div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>`}
           <div class="badge-row">
             ${officeBadgeHTML(inv, true)}
             <span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer].toUpperCase()}</span>
@@ -3348,8 +3364,83 @@ saveState(); renderAll();
     return 'none';
   }
 
+  // Tracker columns for companies whose departments are operating companies
+  // (QuickBooks-only workspaces): the ledger a collections desk actually works
+  // from, with the free-text columns editable in place.
+  const TRACKER_COLS = ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?', 'Response Summary', 'QuickBooks Notes', 'Last Follow-Up', 'Projected Collection', 'Payment Type', 'Sent to Collections'];
+  function lastFollowUpHTML(inv){
+    if (!inv.lastFollowUpAt) return '<span style="color:var(--slate-soft);">\u2014</span>';
+    const kind = { followup: 'Follow-up', demand: 'Demand letter', demand_letter: 'Demand letter', noil: 'NOIL', first_contact: 'First contact' }[inv.lastFollowUpKind] || (inv.lastFollowUpKind ? hEsc(inv.lastFollowUpKind) : 'Follow-up');
+    return '<div style="white-space:nowrap;">' + fmtDate(String(inv.lastFollowUpAt).slice(0, 10)) + '</div><div style="font-size:11px;color:var(--slate);">' + kind + (inv.lastFollowUpBy ? ' \u00b7 by ' + hEsc(inv.lastFollowUpBy) : '') + '</div>';
+  }
+  // One-line tracker summary on queue/escalation cards for operating-company
+  // workspaces (replaces the restoration "last on site" line).
+  function trackerLineHTML(inv){
+    const bits = [];
+    if (inv.contactInfo) bits.push('<span title="Point of contact">\u260E ' + hEsc(String(inv.contactInfo).split(/\n/)[0].slice(0, 60)) + '</span>');
+    if (inv.lastFollowUpAt) bits.push('<span title="Last follow-up">Last follow-up ' + fmtDate(String(inv.lastFollowUpAt).slice(0,10)) + (inv.lastFollowUpBy ? ' by ' + hEsc(inv.lastFollowUpBy) : '') + '</span>');
+    if (inv.projectedPaymentDate) bits.push('<span title="Projected collection date">Expected ' + fmtDate(inv.projectedPaymentDate) + (inv.paymentType ? ' via ' + hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType) : '') + '</span>');
+    if (!bits.length) return '';
+    return '<div class="onsite-line" style="gap:10px;flex-wrap:wrap;">' + bits.join('<span style="color:var(--slate-soft);">\u00b7</span>') + '</div>';
+  }
+  function trackerRowHTML(inv){
+    const age = agingDays(inv);
+    const city = OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '\u2014';
+    return `
+      <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
+        <td>${acctLink(inv.id, inv.name)}${isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : ''}</td>
+        <td style="font-family:var(--font-mono);">${hEsc(inv.invoiceNumber || '\u2014')}</td>
+        <td>${fmtDate(inv.invoiceDate)}</td>
+        <td><span class="age-pill ${agingBucketClass(age)}">${age} day${age===1?'':'s'}</span></td>
+        <td><span class="badge dept">${hEsc(DEPARTMENT_LABELS[inv.department] || inv.department || '\u2014')}</span></td>
+        <td><span class="badge office">${hEsc(city)}</span></td>
+        <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}</td>
+        <td class="tracker-text"><textarea rows="2" placeholder="Name, email, phone\u2026" onchange="setTrackerText(${inv.id}, 'contactInfo', this.value)">${hEsc(inv.contactInfo || '')}</textarea></td>
+        <td>${inv.lastContact ? fmtDate(inv.lastContact) : '\u2014'}</td>
+        <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span></td>
+        <td class="tracker-text"><textarea rows="2" placeholder="What they said\u2026" onchange="setTrackerText(${inv.id}, 'responseSummary', this.value)">${hEsc(inv.responseSummary || '')}</textarea></td>
+        <td class="tracker-text qb-notes" title="${hEsc(inv.note || '')}">${inv.note ? '<div class="clamp">' + hEsc(inv.note) + '</div>' : '<span style="color:var(--slate-soft);">\u2014</span>'}</td>
+        <td>${lastFollowUpHTML(inv)}</td>
+        <td><input type="date" value="${hEsc(inv.projectedPaymentDate || '')}" onchange="setProjectedDate(${inv.id}, this.value)"/>${paymentDateOutsideWindow(inv.projectedPaymentDate) ? ' <span class="pd-flag" title="Outside the 3-week window (This Week through Following Week)">*</span>' : ''}</td>
+        <td>
+          <select onchange="setPaymentType(${inv.id}, this.value)">
+            <option value="" ${!inv.paymentType?'selected':''}>&mdash; Select &mdash;</option>
+            <option value="payment_link" ${inv.paymentType==='payment_link'?'selected':''}>Payment Link</option>
+            <option value="check" ${inv.paymentType==='check'?'selected':''}>Check</option>
+            <option value="ach" ${inv.paymentType==='ach'?'selected':''}>ACH</option>
+            <option value="credit_card" ${inv.paymentType==='credit_card'?'selected':''}>Credit Card</option>
+            <option value="wire" ${inv.paymentType==='wire'?'selected':''}>Wire/Direct Deposit</option>
+          </select>
+        </td>
+        <td style="text-align:center;"><input type="checkbox" ${isDoNotContact(inv)?'checked':''} onchange="setDoNotContact(${inv.id}, this.checked)" title="${DNC_LABEL}"/>${inv.doNotContactBy ? '<div style="font-size:10.5px;color:var(--slate-soft);white-space:nowrap;">' + hEsc(inv.doNotContactBy) + '</div>' : ''}</td>
+      </tr>`;
+  }
+  function setTrackerText(id, field, val){
+    const inv = findInv(id);
+    if(!inv) return;
+    const next = String(val || '').trim();
+    if ((inv[field] || '') === next) return;
+    inv[field] = next;
+    if (field === 'responseSummary' && next && (!inv.responded || inv.responded === 'none' || inv.responded === 'sent')) { inv.responded = 'replied'; persistInvoice(inv, ['responseSummary', 'responded']); }
+    else persistInvoice(inv, [field]);
+    addActivity(inv, field === 'contactInfo' ? 'Point of contact updated (Accounts Receivable).' : 'Response summary updated (Accounts Receivable).', 'manual', field === 'contactInfo' ? 'update' : 'response');
+    saveState();
+    // Re-render everything except the sheet so the textarea keeps focus order.
+    renderNavCounts(); renderQueue();
+  }
   function renderSheet(){
     const body = document.getElementById('sheet-body');
+    const head = document.getElementById('sheet-head');
+    const tracker = !!TENANT_DEPTS_CUSTOM;
+    if (head) {
+      if (!head.dataset.standard) head.dataset.standard = head.innerHTML; // the markup's own header, captured before any swap
+      const want = tracker ? 'tracker' : 'standard';
+      if (head.dataset.mode !== want) {
+        head.innerHTML = tracker ? ('<tr>' + TRACKER_COLS.map(function(c){ return '<th' + (c === 'Amount' ? ' class="amt"' : '') + '>' + c + '</th>'; }).join('') + '</tr>') : head.dataset.standard;
+        head.dataset.mode = want;
+      }
+    }
+    const colCount = tracker ? TRACKER_COLS.length : 24;
 
     document.querySelectorAll('#sheet-office-chips .chip').forEach(c => {
       c.classList.toggle('active', c.dataset.office === (state.officeFilter || 'all'));
@@ -3362,18 +3453,20 @@ saveState(); renderAll();
     const foot = document.getElementById('sheet-foot');
 
     const rows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter).slice().sort((a,b)=>balanceDue(b)-balanceDue(a));
-    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="24" style="text-align:center;padding:24px;color:var(--slate);">No open invoices match the current filters. Paid invoices have moved to the Collected tab.</td></tr>`; if(foot) foot.innerHTML = ''; return; }
+    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center;padding:24px;color:var(--slate);">${realEmptyQueueMessage() || 'No open invoices match the current filters. Paid invoices have moved to the Collected tab.'}</td></tr>`; if(foot) foot.innerHTML = ''; return; }
     // Totals for exactly the rows on screen, so the number always matches the table.
     if(foot){
       const totalInvoiced = rows.reduce(function(sum, i){ return sum + (Number(i.amount) || 0); }, 0);
       const totalPaid = rows.reduce(function(sum, i){ return sum + paidAmt(i); }, 0);
       const totalDue = rows.reduce(function(sum, i){ return sum + balanceDue(i); }, 0);
+      const before = tracker ? 6 : 7;
       foot.innerHTML = `<tr class="sheet-total">
-        <td colspan="7"><span class="tot-label">Total</span><span class="tot-sub">${rows.length} invoice${rows.length === 1 ? '' : 's'}${weeksOn.length ? ' \u00b7 expected ' + weeksOn.map(function(k){ return k === 'this_week' ? 'this week' : (k === 'next_week' ? 'next week' : 'the following week'); }).join(', ') : ''}</span></td>
+        <td colspan="${before}"><span class="tot-label">Total</span><span class="tot-sub">${rows.length} invoice${rows.length === 1 ? '' : 's'}${weeksOn.length ? ' \u00b7 expected ' + weeksOn.map(function(k){ return k === 'this_week' ? 'this week' : (k === 'next_week' ? 'next week' : 'the following week'); }).join(', ') : ''}</span></td>
         <td class="amt"><span class="tot-main" id="sheet-total-invoiced">${money2(totalInvoiced)}</span><span class="tot-sub">invoiced${totalPaid > 0.005 ? ' \u00b7 ' + money2(totalPaid) + ' paid \u00b7 ' + money2(totalDue) + ' still due' : ''}</span></td>
-        <td colspan="16"></td>
+        <td colspan="${colCount - before - 1}"></td>
       </tr>`;
     }
+    if (tracker) { body.innerHTML = rows.map(trackerRowHTML).join(''); return; }
     body.innerHTML = rows.map(inv => `
       <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
         <td>${inv.invoiceNumber}</td>
@@ -4120,7 +4213,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
         <div class="who">
           <div class="name">${acctLink(inv.id, inv.name)}</div>
           <div class="meta">${hEsc(inv.meta || '')} &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.invoiceNumber || '\u2014')}</span> &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.jobNumber || '')}</span></div>
-          <div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>
+          ${TENANT_DEPTS_CUSTOM ? trackerLineHTML(inv) : `<div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>`}
           <div class="badge-row">
             ${officeBadgeHTML(inv, true)}
             <span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer].toUpperCase()}</span>
@@ -4264,6 +4357,23 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('detail-escalate-btn').textContent = inv.escalated ? 'Un-escalate' : 'Escalate';
     document.getElementById('detail-escalate-btn').onclick = inv.escalated ? () => { unescalateInvoice(id); closeDetail(); } : () => escalateFromDetail();
     document.getElementById('detail-payment-btn').style.display = (inv.jobStatus === 'paid' || !canRecordPayments()) ? 'none' : 'inline-block';
+    const trackerBox = document.getElementById('detail-tracker');
+    if (trackerBox) {
+      trackerBox.style.display = TENANT_DEPTS_CUSTOM ? '' : 'none';
+      if (TENANT_DEPTS_CUSTOM) {
+        const kv = function(k, v, muted){ return '<div class="hist-kv"><div class="k">' + k + '</div><div class="v' + (muted ? ' muted' : '') + '">' + v + '</div></div>'; };
+        document.getElementById('detail-tracker-facts').innerHTML =
+          kv('Business', hEsc(deptLabel(inv))) +
+          kv('Invoice age', agingDays(inv) + ' days') +
+          kv('Last contact', inv.lastContact ? fmtDate(inv.lastContact) : 'None yet', !inv.lastContact) +
+          kv('Last follow-up', inv.lastFollowUpAt ? (fmtDate(String(inv.lastFollowUpAt).slice(0,10)) + (inv.lastFollowUpBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.lastFollowUpBy) + '</div>' : '')) : 'None yet', !inv.lastFollowUpAt) +
+          kv('Projected collection', inv.projectedPaymentDate ? fmtDate(inv.projectedPaymentDate) : 'Not set', !inv.projectedPaymentDate) +
+          kv('Payment type', hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType || 'Not set'), !inv.paymentType) +
+          kv('QuickBooks notes', inv.note ? hEsc(inv.note).replace(/\n/g, '<br>') : 'None', !inv.note);
+        document.getElementById('detail-contact-info').value = inv.contactInfo || '';
+        document.getElementById('detail-response-summary').value = inv.responseSummary || '';
+      }
+    }
     document.getElementById('overlay-detail').classList.add('open');
   }
   function closeDetail(){ document.getElementById('overlay-detail').classList.remove('open'); currentDetailId = null; renderAll(); }
@@ -4690,6 +4800,13 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Currently with', hEsc(CURRENTLY_WITH_LABELS[a.currentlyWith] || a.currentlyWith || '—')) +
       tile('Payer', hEsc(PAYER_LABELS[a.payer] || a.payer || '—') + (a.pa ? ' <span class="tl-badge">PA</span>' : '')) +
       tile('Contact', hEsc(a.contact || '—') + (a.contactEmail ? ('<div style="font-weight:400;font-size:12px;">' + hEsc(a.contactEmail) + '</div>') : '')) +
+      (TENANT_DEPTS_CUSTOM ? (
+        tile('Point of contact', a.contactInfo ? hEsc(a.contactInfo).replace(/\n/g, '<br>') : 'Not on file', a.contactInfo ? '' : 'muted') +
+        tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(a.lastFollowUpBy) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted') +
+        tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted') +
+        tile('QuickBooks notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted') +
+        tile('Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted')
+      ) : '') +
       tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted') +
       (a.responded && a.responded !== 'none' ? tile('Last response', hEsc(a.responseSummary || a.responded)) : '');
 
