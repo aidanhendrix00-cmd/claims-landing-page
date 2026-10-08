@@ -290,7 +290,10 @@
   .status-pill.auto-tag{background:var(--violet-soft);color:var(--violet);font-family:var(--font-mono);}
   .status-pill.delivered{background:#EEF0F5;color:var(--slate);}
   .status-pill.held_for_review{background:var(--amber-soft);color:#946218;}
-  .status-pill.no_recipient,.status-pill.bounced,.status-pill.failed{background:#FEF3F2;color:#B42318;}
+  .status-pill.no_recipient,.status-pill.bounced,.status-pill.failed,.status-pill.no_sender{background:#FEF3F2;color:#B42318;}
+  #sender-banner{position:sticky;top:0;z-index:940;background:#FFF4E5;color:#7A4B00;border-bottom:1px solid #F2C879;padding:10px 18px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  #sender-banner .btn-small{background:#171717;color:#fff;border-color:#171717;}
+  #sender-banner .btn-small.ghost{background:transparent;color:#7A4B00;border-color:#E0B96A;}
 
   /* Spreadsheet view */
   .sheet-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
@@ -2008,6 +2011,32 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
     if (me && me.integrationProvider) return me.integrationProvider;
     return 'Accounting system';
   }
+  // Own-sender companies: every email leaves from the user's own address, so a
+  // user without a connected mailbox sees a standing reminder until they
+  // connect one (one click with Google or Outlook under My Account).
+  function showSenderBanner(force){
+    const me = (window.__me && window.__me.ok) ? window.__me : null;
+    const snd = me && me.sender;
+    let bar = document.getElementById('sender-banner');
+    const need = !!(window.__CLMS_REAL && snd && snd.required && !snd.ownAddress) || !!force;
+    if (!need){ if (bar) bar.remove(); return; }
+    if (!bar){
+      bar = document.createElement('div'); bar.id = 'sender-banner';
+      const main = document.querySelector('main') || document.body; main.insertBefore(bar, main.firstChild);
+    }
+    const avail = (snd && snd.available) || {};
+    const providers = [avail.google ? 'Google' : null, avail.microsoft ? 'Outlook' : null].filter(Boolean);
+    const how = providers.length ? ('one click with ' + providers.join(' or ')) : 'under My Account';
+    const lapsed = snd && snd.mailboxStatus && snd.mailboxStatus !== 'connected';
+    bar.innerHTML = '<span><b>' + (lapsed ? 'Your connected email needs to be reconnected.' : 'Your follow-ups send from your own email address.') + '</b> ' +
+      (lapsed ? 'Reconnect it so follow-ups keep going out from ' + hEsc(snd.mailboxEmail || 'your address') + '.' : 'Connect your email (' + hEsc(how) + ') so clAIms can send and automate follow-ups as you \u2014 nothing goes out until then.') + '</span>' +
+      '<span style="display:flex;gap:8px;"><a class="btn-small" href="/account#email" style="text-decoration:none;">Connect my email</a><button class="btn-small ghost" onclick="document.getElementById(\'sender-banner\').remove()">Later</button></span>';
+  }
+  function showConnectEmailPrompt(msg){
+    showToast(msg || 'Connect your email under My Account to send from your own address.');
+    const bar = document.getElementById('sender-banner');
+    if (bar) { try { bar.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} bar.style.boxShadow = '0 0 0 3px rgba(242,200,121,.9)'; setTimeout(function(){ bar.style.boxShadow = ''; }, 1600); }
+  }
   function realEmptyQueueMessage(){
     if (!window.__CLMS_REAL || !state || (state.invoices || []).length) return '';
     const me = (window.__me && window.__me.ok) ? window.__me : null;
@@ -2061,6 +2090,7 @@ await loadRealIntegrations();
     if (!data.ok) return;
     window.__me = data;
     applyTenantConfig(data);
+    showSenderBanner(false);
     state.currentUser = { email: data.email, role: data.role, office: data.office || null, fullName: data.fullName || null };
     // Demo-only controls: the time simulator and the local cadence trigger.
     document.querySelectorAll('.sim-clock, [data-demo-only]').forEach(function(el){ el.style.display = 'none'; });
@@ -2607,7 +2637,7 @@ async function loadRealAccounts(){
       (state.commsLog || []).forEach(function(c){ if (latestStatus[c.invoiceId] === undefined) latestStatus[c.invoiceId] = c.status; });
       invoices.forEach(function(inv){
         const st = latestStatus[inv.id];
-        if (st === 'failed' || st === 'bounced' || st === 'no_recipient') inv.needsAttention = true;
+        if (st === 'failed' || st === 'bounced' || st === 'no_recipient' || st === 'no_sender') inv.needsAttention = true;
       });
       // The money panel reads from real payment records, so it is populated on
       // every load instead of only remembering payments made in this tab.
@@ -4292,7 +4322,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   let currentMessages = [];
   let currentMessageIdx = 0;
 
-  const MSG_STATUS_LABELS = { sent:'Sent', delivered:'Delivered', opened:'Opened', replied:'Replied', bounced:'Bounced', failed:'Failed', held_for_review:'Held for review', no_recipient:'No recipient on file' };
+  const MSG_STATUS_LABELS = { sent:'Sent', delivered:'Delivered', opened:'Opened', replied:'Replied', bounced:'Bounced', failed:'Failed', held_for_review:'Held for review', no_recipient:'No recipient on file', no_sender:'Waiting for sender to connect email' };
   function msgStatusLabel(s){ const k = String(s || '').toLowerCase(); return MSG_STATUS_LABELS[k] || (s ? String(s) : 'Sent'); }
   // recipient_role as the API stores it, in the words the dashboard uses.
   const MSG_RECIPIENT_LABELS = { adjuster:'Adjuster', homeowner:'Homeowner', contact:'Point of Contact', pm:'Commercial or Property Management', owner:'Owner', ap:'AP Department', property_manager:'Property Manager', facilities:'Facilities Director' };
@@ -5776,6 +5806,7 @@ Do not invent facts beyond what's given.`;
       approveBtn.disabled = false;
       approveBtn.textContent = "Approve & Send";
       if(!res || !res.ok){
+        if (res && (res.code === 'connect_email' || res.needsReconnect)) { showSenderBanner(true); showConnectEmailPrompt(res.error); return; }
         showToast((res && res.error) || 'The email could not be sent.');
         return;
       }
