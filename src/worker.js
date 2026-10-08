@@ -75,8 +75,9 @@ function normalizeConfigEntries(raw, maxEntries) {
   }
   return n ? out : null;
 }
+const MAX_OFFICES = 24;
 function resolveOffices(raw) {
-  return normalizeConfigEntries(raw, 12) || OFFICE_LABELS;
+  return normalizeConfigEntries(raw, MAX_OFFICES) || OFFICE_LABELS;
 }
 // Departments: null -> the three restoration defaults; entries that only use
 // the default keys -> renames of those pipelines; anything else -> the
@@ -3436,15 +3437,28 @@ if (syncHold) return syncHold;
 let body;
 try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
 const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
-const syncTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(integration.tenant_id) + '&select=offices');
-const syncOffices = resolveOffices(syncTenant ? syncTenant.offices : null);
+const syncTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(integration.tenant_id) + '&select=id,offices,integration_mode');
+let syncOffices = resolveOffices(syncTenant ? syncTenant.offices : null);
+// Self-serve companies (QuickBooks-only) are not pre-configured by us: a city
+// the sync sends that we have not seen yet becomes an office on the spot, so
+// "A1 Valet Trash - Nashville" shows up without anyone editing settings.
+const autoOffices = !!(syncTenant && selfServeIntegrationMode(syncTenant));
+let officesDirty = false;
 let processed = 0;
 for (const raw of items) {
 if (!raw || !raw.externalId || !raw.customerName) continue;
 let status = (raw.status || 'in_ar').toString();
 if (status === 'paid_in_full') status = 'paid';
-const officeSlug = String(raw.office == null ? '' : raw.office).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-const office = syncOffices[officeSlug] ? officeSlug : (syncOffices[officeSlug.replace(/_/g, '')] ? officeSlug.replace(/_/g, '') : null);
+const officeRaw = raw.office != null && String(raw.office).trim() ? raw.office : (raw.city != null ? raw.city : (raw.location != null ? raw.location : ''));
+const officeSlug = String(officeRaw == null ? '' : officeRaw).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+let office = syncOffices[officeSlug] ? officeSlug : (syncOffices[officeSlug.replace(/_/g, '')] ? officeSlug.replace(/_/g, '') : null);
+if (!office && officeSlug && autoOffices && Object.keys(syncOffices).length < MAX_OFFICES) {
+const label = String(officeRaw).trim().slice(0, 40);
+if (syncOffices === OFFICE_LABELS) syncOffices = {}; // never grow the built-in defaults
+syncOffices[officeSlug] = label;
+office = officeSlug;
+officesDirty = true;
+}
 const escalated = !!raw.escalated;
 const waSent = !!raw.waSent;
 try {
@@ -3548,9 +3562,12 @@ status: act.status ? String(act.status).slice(0,40) : null
 }
 } catch (e) {}
 }
+if (officesDirty && syncTenant) {
+try { await pgUpdate(env, 'tenants', 'id=' + pgEq(syncTenant.id), { offices: Object.keys(syncOffices).map(function (k) { return [k, syncOffices[k]]; }) }); } catch (e) {}
+}
 // Every authenticated push from the external system counts as a sync.
 try { await pgUpdate(env, 'integrations', 'id=' + pgEq(integration.id), { last_synced_at: new Date().toISOString() }); } catch (e) {}
-return json({ ok: true, processed });
+return json({ ok: true, processed, offices: Object.keys(syncOffices) });
 }
 
 // Manual "Sync now" from the dashboard or account page: verifies the
@@ -6472,7 +6489,7 @@ var c = DATA[i]; var ta = document.getElementById('off-'+i);
 var lines = ta.value.split(String.fromCharCode(10)).map(function(x){ return x.trim(); }).filter(Boolean);
 if(!lines.length){ setMsg('offmsg-'+i,'Enter at least one office, one per line.',false); return; }
 var pairs = []; var seen = {};
-for(var j=0;j<lines.length && pairs.length<12;j++){ var k = slugKey(lines[j]); if(!k||seen[k]) continue; seen[k]=1; pairs.push([k, lines[j].slice(0,40)]); }
+for(var j=0;j<lines.length && pairs.length<24;j++){ var k = slugKey(lines[j]); if(!k||seen[k]) continue; seen[k]=1; pairs.push([k, lines[j].slice(0,40)]); }
 post('/api/admin/onboarding/config', { tenantId: c.tenantId, offices: pairs }, 'offmsg-'+i, function(){ setMsg('offmsg-'+i,'Saved - keys: '+pairs.map(function(p){ return p[0]; }).join(', '),true); reload(); });
 };
 window.__saveDepts = function(i){
@@ -6630,7 +6647,7 @@ const tenantId = parseInt(body.tenantId, 10);
 if (!tenantId) return json({ ok: false, error: 'Missing tenantId' }, 400);
 const patch = {};
 if (body.offices !== undefined) {
-const map = normalizeConfigEntries(body.offices, 12);
+const map = normalizeConfigEntries(body.offices, MAX_OFFICES);
 patch.offices = map ? Object.keys(map).map(function (k) { return [k, map[k]]; }) : null;
 }
 if (body.departments !== undefined) {
