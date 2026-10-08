@@ -3462,7 +3462,7 @@ officesDirty = true;
 const escalated = !!raw.escalated;
 const waSent = !!raw.waSent;
 try {
-const existing = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&external_id=' + pgEq(String(raw.externalId)) + '&select=id,status,paid_at,paid_amount,amount,noil_sent_at,demand_letter_sent_at,wa_signed_at');
+const existing = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&external_id=' + pgEq(String(raw.externalId)) + '&select=id,status,paid_at,paid_amount,amount,noil_sent_at,demand_letter_sent_at,wa_signed_at,contact_info');
 const nowIso = new Date().toISOString();
 const rawPaidAt = raw.paidAt ? String(raw.paidAt) : null;
 // What the accounting system says has been applied so far. Only trusted when
@@ -3481,6 +3481,7 @@ meta: raw.meta ? String(raw.meta).slice(0,300) : null,
 payer: raw.payer ? String(raw.payer).slice(0,40) : null,
 contact: raw.contact ? String(raw.contact).slice(0,120) : null,
 contact_email: raw.contactEmail ? String(raw.contactEmail).trim().slice(0,200) : null,
+
 claim_number: raw.claimNumber ? String(raw.claimNumber).slice(0,80) : null,
 invoice_number: raw.invoiceNumber ? String(raw.invoiceNumber).slice(0,60) : null,
 amount: Number(raw.amount) || 0,
@@ -3491,9 +3492,34 @@ category: raw.category ? String(raw.category).slice(0,40) : null,
 escalated: escalated,
 wa_sent: waSent,
 follow_up_count: parseInt(raw.followUpCount,10) || 0,
-note: raw.note ? String(raw.note).slice(0,500) : null,
 updated_at: nowIso
 };
+// Notes and the point of contact are only written when the push carries
+// them: a sync that omits them must not wipe what the team typed in.
+const rawNotes = raw.note || raw.notes || raw.qbNotes || raw.quickbooksNotes;
+if (rawNotes !== undefined && rawNotes !== null) commonFields.note = String(rawNotes).slice(0, 4000) || null;
+else if (!existing) commonFields.note = null;
+// Point of contact as free text: whatever the accounting system knows
+// (name, email, phone, role) - sent as one block or assembled from parts.
+if (raw.contactInfo !== undefined && raw.contactInfo !== null) commonFields.contact_info = String(raw.contactInfo).slice(0, 1000) || null;
+else {
+const parts = [raw.contact, raw.contactEmail, raw.contactPhone || raw.phone, raw.contactRole || raw.contactTitle].filter(function (v) { return v != null && String(v).trim(); }).map(function (v) { return String(v).trim(); });
+if (parts.length && (!existing || !existing.contact_info)) commonFields.contact_info = parts.join(' \u00b7 ').slice(0, 1000);
+}
+// Tracker columns the sync (or the agent reading the user's mailbox) may fill:
+// a reply it saw, the projected collection date, how they will pay, who was
+// last followed up with and by whom, and an account handed to collections.
+if (raw.responseSummary) { commonFields.response_summary = String(raw.responseSummary).slice(0, 2000); commonFields.responded = 'replied'; }
+if (raw.responded && ['replied', 'opened', 'sent', 'none'].indexOf(String(raw.responded)) !== -1) commonFields.responded = String(raw.responded);
+if (raw.lastContact) commonFields.last_contact = normalizeDateOnly(raw.lastContact);
+if (raw.projectedPaymentDate || raw.projectedCollectionDate) commonFields.projected_payment_date = normalizeDateOnly(raw.projectedPaymentDate || raw.projectedCollectionDate);
+if (raw.paymentType) commonFields.payment_type = String(raw.paymentType).slice(0, 40);
+if (raw.lastFollowUpAt) { const lf = new Date(raw.lastFollowUpAt); if (!isNaN(lf.getTime())) { commonFields.last_follow_up_at = lf.toISOString(); if (raw.lastFollowUpBy) commonFields.last_follow_up_by = String(raw.lastFollowUpBy).slice(0, 160); if (raw.lastFollowUpKind) commonFields.last_follow_up_kind = String(raw.lastFollowUpKind).slice(0, 40); } }
+if (raw.sentToCollections !== undefined && raw.sentToCollections !== null) {
+commonFields.do_not_contact = !!raw.sentToCollections;
+if (raw.sentToCollections) { commonFields.do_not_contact_at = nowIso; commonFields.do_not_contact_by = 'Accounting sync'; }
+else { commonFields.do_not_contact_at = null; commonFields.do_not_contact_by = null; }
+}
 if (raw.pa !== undefined) commonFields.pa = !!raw.pa;
 // Last day crews were on the job - drives lien deadlines. Accept the common
 // field names CRMs use for it.
@@ -3787,7 +3813,10 @@ notifiedName: 'notified_name',
 notifiedAt: 'notified_at',
 cadenceSent: 'cadence_sent',
 lastDayOnSite: 'last_day_on_site',
-doNotContact: 'do_not_contact'
+doNotContact: 'do_not_contact',
+contact: 'contact',
+contactEmail: 'contact_email',
+contactInfo: 'contact_info'
 };
 
 // "DO NOT CONTACT - Sent to Collections Agency". Once an account carries this
@@ -3828,9 +3857,9 @@ return;
 }
 if (value === '' || value === null || value === undefined) { patch[column] = null; return; }
 if (typeof value === 'object') return;   // never write objects/arrays into text columns
-const LIMITS = { note: 4000, response_summary: 2000, responded: 40, payment_type: 40, currently_with: 40, notified_name: 160, contact: 120, contact_email: 200 };
+const LIMITS = { note: 4000, response_summary: 2000, responded: 40, payment_type: 40, currently_with: 40, notified_name: 160, contact: 120, contact_email: 200, contact_info: 1000 };
 if (column === 'notified_at') { const d = new Date(value); patch[column] = isNaN(d.getTime()) ? null : d.toISOString(); return; }
-patch[column] = String(value).slice(0, LIMITS[column] || 500);
+patch[column] = String(value).trim().slice(0, LIMITS[column] || 500) || null;
 });
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
 patch.updated_at = new Date().toISOString();
@@ -4151,6 +4180,9 @@ const patch = {
 follow_up_count: (parseInt(account.follow_up_count, 10) || 0) + 1,
 last_contact: now.toISOString().slice(0, 10),
 responded: account.responded || 'sent',
+last_follow_up_at: now.toISOString(),
+last_follow_up_by: (cadenceOwner ? String(cadenceOwner.full_name || cadenceOwner.email).slice(0, 140) + ' (automated)' : 'clAIms automation'),
+last_follow_up_kind: due.kind,
 updated_at: now.toISOString()
 };
 if (due.kind === 'noil') patch.noil_sent_at = now.toISOString();
@@ -4604,6 +4636,9 @@ await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), {
 follow_up_count: (parseInt(full.follow_up_count, 10) || 0) + 1,
 last_contact: now.toISOString().slice(0, 10),
 responded: full.responded && full.responded !== 'none' ? full.responded : 'sent',
+last_follow_up_at: now.toISOString(),
+last_follow_up_by: String(user.full_name || user.email || '').slice(0, 160),
+last_follow_up_kind: draftType,
 updated_at: now.toISOString()
 });
 await pgInsert(env, 'account_notes', { occurred_at: new Date().toISOString(),
@@ -5231,7 +5266,8 @@ demandLetterSentAt: a.demand_letter_sent_at, noilSentAt: a.noil_sent_at, lienFil
 escalated: !!a.escalated, notifiedName: a.notified_name, notifiedAt: a.notified_at,
 doNotContact: !!a.do_not_contact, doNotContactAt: a.do_not_contact_at || null, doNotContactBy: a.do_not_contact_by || null,
 projectedPaymentDate: a.projected_payment_date, paymentType: a.payment_type, lastDayOnSite: a.last_day_on_site || null,
-note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at
+note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at,
+contactInfo: a.contact_info || null, lastFollowUpAt: a.last_follow_up_at || null, lastFollowUpBy: a.last_follow_up_by || null, lastFollowUpKind: a.last_follow_up_kind || null
 },
 comms: comms.map(commsToJson),
 activity: activity.map(function (x) { return { id: x.id, at: x.sent_at, type: x.type, recipient: x.recipient, subject: x.subject, status: x.status, source: x.source }; }),
@@ -5300,8 +5336,10 @@ responded: a.responded,
 responseSummary: a.response_summary,
 docsComplete: !!a.docs_complete,
 cadenceSent: a.cadence_sent || {},
-notifiedName: a.notified_name,
-notifiedAt: a.notified_at,
+contactInfo: a.contact_info || null,
+lastFollowUpAt: a.last_follow_up_at || null,
+lastFollowUpBy: a.last_follow_up_by || null,
+lastFollowUpKind: a.last_follow_up_kind || null,
 paidDate: a.paid_at
 };
 });
