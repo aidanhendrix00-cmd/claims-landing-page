@@ -109,6 +109,94 @@ function selfServeIntegrationMode(t) {
 function canSelfServeIntegrations(user) {
   return !!user && (user.tenant_slug === 'base' || !!selfServeIntegrationMode(user));
 }
+
+// Per-company settings (tenants.settings jsonb): branding colours for the
+// signed-in pages and the outbound-email policy. Accepts a tenants row
+// ({ settings }) or a session user ({ tenant_settings }).
+const THEME_KEYS = ['navy', 'accent', 'ink', 'paper', 'accentText'];
+function tenantSettingsOf(t) {
+  if (!t) return {};
+  let raw = t.tenant_settings !== undefined ? t.tenant_settings : t.settings;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (e) { raw = null; } }
+  return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+}
+function safeHexColor(v) {
+  const s = String(v == null ? '' : v).trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toUpperCase() : null;
+}
+function tenantTheme(t) {
+  const theme = tenantSettingsOf(t).theme;
+  if (!theme || typeof theme !== 'object') return null;
+  const out = {};
+  THEME_KEYS.forEach(function (k) { const c = safeHexColor(theme[k]); if (c) out[k] = c; });
+  return (out.navy || out.accent) ? out : null;
+}
+// Companies that only ever email customers from their own people's addresses:
+// a user without a connected mailbox (or a verified sending domain) cannot
+// send, and the cadence holds that user's sends instead of using ours.
+function requiresOwnSender(t) {
+  return tenantSettingsOf(t).requireOwnSender === true;
+}
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgba(hex, a) { const c = hexToRgb(hex); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+function mixHex(hex, withHex, t) {
+  const a = hexToRgb(hex), b = hexToRgb(withHex);
+  const m = a.map(function (v, i) { return Math.round(v + (b[i] - v) * t); });
+  return '#' + m.map(function (v) { return v.toString(16).padStart(2, '0'); }).join('').toUpperCase();
+}
+function readableOn(hex) {
+  const c = hexToRgb(hex);
+  const lum = (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]) / 255;
+  return lum > 0.6 ? '#171717' : '#FFFFFF';
+}
+// Overrides for the signed-in pages: the dashboard reads CSS variables, the
+// account/subscription pages are restyled by selector. Served inline from the
+// page handlers so there is no flash of the default brand.
+function tenantThemeStyle(theme) {
+  if (!theme) return '';
+  const navy = theme.navy || '#171717';
+  const accent = theme.accent || '#C29B57';
+  const ink = theme.ink || mixHex(navy, '#000000', 0.2);
+  const paper = theme.paper || mixHex(accent, '#FFFFFF', 0.92);
+  const accentText = theme.accentText || readableOn(accent);
+  const accentSoft = mixHex(accent, '#FFFFFF', 0.82);
+  const navyDeep = mixHex(navy, '#000000', 0.25);
+  const css =
+    ':root{--brand-navy:' + navy + ';--brand-rust:' + accent + ';--ink:' + ink + ';--paper:' + paper + ';--teal:' + mixHex(navy, accent, 0.35) + ';--teal-soft:' + accentSoft + ';--sf-blue:' + mixHex(navy, accent, 0.35) + ';--shadow-soft:0 1px 2px ' + rgba(navy, 0.05) + ', 0 8px 24px -12px ' + rgba(navy, 0.2) + ';--shadow-lift:0 2px 4px ' + rgba(navy, 0.06) + ', 0 18px 40px -18px ' + rgba(navy, 0.3) + ';}' +
+    '.gh-account-link:not(.gh-home-link),.acct-role-badge.admin,.btn-to-dashboard{color:' + accentText + '!important;background:' + accent + '!important;}' +
+    '.gh-account-link:hover{box-shadow:0 10px 24px -10px ' + rgba(accent, 0.7) + '!important;}' +
+    '.gh-home-link,.gh-logout-btn{color:' + mixHex(accent, '#FFFFFF', 0.6) + '!important;background:transparent!important;}' +
+    '.gh-home-link:hover,.gh-logout-btn:hover{color:#fff!important;border-color:' + accent + '!important;}' +
+    '.global-header{background:linear-gradient(90deg,' + navy + ',' + navyDeep + ')!important;}' +
+    '.sidebar{background:' + navy + '!important;}' +
+    '.nav-item.active::before{background:' + accent + '!important;}.nav-item.active .ic{border-color:' + accent + '!important;color:' + accent + '!important;}' +
+    '.topbar h1::after{background:linear-gradient(90deg,' + accent + ',' + rgba(accent, 0) + ')!important;}' +
+    '.btn-primary{background:' + ink + '!important;border-color:' + ink + '!important;}' +
+    '.badge.dept{background:' + accentSoft + '!important;color:' + ink + '!important;}' +
+    /* account + subscription pages */
+    'body{background-image:radial-gradient(1000px 520px at 6% -10%,' + rgba(accent, 0.16) + ',transparent 60%),radial-gradient(800px 460px at 100% 0%,' + rgba(navy, 0.08) + ',transparent 60%)!important;background-color:' + paper + '!important;}' +
+    '.acct-topbar,.sub-topbar,.plan-banner,.btn-dark{background:' + navy + '!important;}' +
+    '.acct-tab.active{border-bottom-color:' + accent + '!important;}.acct-tab::after{background:linear-gradient(90deg,' + accent + ',' + navy + ')!important;}' +
+    '.acct-brand::before{background:linear-gradient(180deg,' + accent + ',' + navy + ')!important;}' +
+    '.btn-outline:hover{border-color:' + accent + '!important;color:' + ink + '!important;}' +
+    '.plan-banner .plan-label,.plan-feature-list li:before{color:' + accent + '!important;}' +
+    '.acct-card:hover{border-color:' + mixHex(accent, '#FFFFFF', 0.5) + '!important;}' +
+    '#clms-help-btn{background:' + accent + '!important;color:' + accentText + '!important;}';
+  return '<style id="tenant-theme">' + css + '</style>';
+}
+// Drops the company's theme into a page's <head> (before </head> so it wins
+// over the page's own :root block).
+function withTenantTheme(html, user) {
+  const style = tenantThemeStyle(tenantTheme(user));
+  if (!style) return html;
+  if (html.indexOf('</head>') !== -1) return html.replace('</head>', style + '</head>');
+  // dashboard.html has no </head>: land right after its main stylesheet.
+  if (html.indexOf('</style>') !== -1) return html.replace('</style>', '</style>' + style);
+  return style + html;
+}
 async function tenantHasConnectedIntegration(env, tenantId) {
   try {
     const row = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(tenantId) + '&status=' + pgEq('connected') + '&select=id');
@@ -736,7 +824,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<button class="btn-outline btn-sm" onclick="toggleChangePasswordForm()" type="button">Cancel</button> ' +
   '</div> ' +
   '</div> ' +
-  '<div class="acct-card"> ' +
+  '<div class="acct-card" id="email"> ' +
   '<h3>Sending email as you</h3> ' +
   '<div class="acct-card-sub">Connect your work email so follow-ups you send from the dashboard come from your address, and replies come straight back to you. Takes about 30 seconds, nothing technical needed.</div> ' +
   '<div id="mailboxStatus" style="font-size:13.5px;margin:10px 0;">Checking...</div> ' +
@@ -1279,7 +1367,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  function refreshTeam(){ ' +
   '    return fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; } }).catch(function(){}).then(loadTeam).then(function(){ renderTeamTab(); }); ' +
   '  } ' +
-  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active" }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db);n.textContent="A copy of everything you send is saved in your own Sent folder.";return;} if(mb){s.textContent=mb.email+" needs to be reconnected.";s.style.color="#8A1C13";}else{s.textContent="Not connected. Emails send from the clAIms address with your name on them.";s.style.color="";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){if(!confirm("Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
+  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active" }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db);n.textContent="A copy of everything you send is saved in your own Sent folder.";return;} var ownOnly=!!(state.me&&state.me.requireOwnSender); if(mb){s.textContent=mb.email+" needs to be reconnected."+(ownOnly?" Until then nothing sends from you, and your automated follow-ups are on hold.":"");s.style.color="#8A1C13";}else{s.textContent=ownOnly?"Not connected. Your company sends every email from its own people, so follow-ups (manual and automated) wait until you connect your email.":"Not connected. Emails send from the clAIms address with your name on them.";s.style.color=ownOnly?"#8A1C13":"";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){var ownOnly=!!(state.me&&state.me.requireOwnSender);if(!confirm(ownOnly?"Disconnect your email? Your company only sends from its own people, so your follow-ups will pause until you connect an email again.":"Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; mbLoad(); if(window.location.hash==="#email"){ var ec=document.getElementById("email"); if(ec){ setTimeout(function(){ ec.scrollIntoView({behavior:"smooth",block:"center"}); },300); } } } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
   '}); ' +
   '})(); ' +
   '</script> ' +
@@ -2234,7 +2322,7 @@ const token = cookies[SESSION_COOKIE];
 if (!token) return null;
 const row = await pgSelectOne(env, 'sessions',
 'token=' + pgEq(token) +
-'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments,integration_mode))'
+'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments,integration_mode,settings))'
 );
 if (!row || !row.users) return null;
 if (new Date(row.expires_at) < new Date()) return null;
@@ -2259,6 +2347,7 @@ integration_status: t.integration_status,
 tenant_offices: t.offices,
 tenant_departments: t.departments,
 tenant_integration_mode: t.integration_mode || null,
+tenant_settings: t.settings || null,
 selected_plan: t.selected_plan,
 recommended_plan: t.recommended_plan,
 stripe_customer_id: t.stripe_customer_id,
@@ -2798,7 +2887,8 @@ async function handleAccountPage(request, env) {
       headers: { 'Location': new URL('/', request.url).toString() + '?login=1', 'Cache-Control': NO_STORE }
     });
   }
-  return injectHelpWidget(new Response(ACCOUNT_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
+  const accountHtml = withTenantTheme(ACCOUNT_PAGE_HTML, user);
+  return injectHelpWidget(new Response(accountHtml, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
 
 const SUBSCRIPTION_PAGE_HTML = `<!doctype html><html lang="en"><head><meta charset="UTF-8">
@@ -3137,7 +3227,13 @@ return json({ ok: false, error: 'Your ' + connLimits.name + ' plan includes ' + 
 }
 const nowIso = new Date().toISOString();
 const rowPatch = { status: 'connected', api_key: apiKey, connected_at: nowIso };
-if (mode) rowPatch.config_json = JSON.stringify({ provider: mode, credential: credential, realmId: realmId || null, updatedAt: nowIso, updatedBy: user.email });
+if (mode) {
+// Sealed with the same envelope encryption as connected-mailbox tokens when
+// the master key is configured; otherwise stored as pasted.
+let storedCredential = credential;
+if (encryptionReady(env)) { try { storedCredential = await encryptSecret(env, credential); } catch (e) { storedCredential = credential; } }
+rowPatch.config_json = JSON.stringify({ provider: mode, credential: storedCredential, encrypted: storedCredential !== credential, realmId: realmId || null, updatedAt: nowIso, updatedBy: user.email });
+}
 if (existing) {
 await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), rowPatch);
 } else {
@@ -3165,12 +3261,14 @@ const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(integration.tenant
 let cfg = {};
 try { cfg = integration.config_json ? JSON.parse(integration.config_json) : {}; } catch (e) { cfg = {}; }
 if (!cfg || typeof cfg !== 'object') cfg = {};
+let credential = cfg.credential || null;
+if (credential) { const opened = await decryptSecret(env, credential); if (opened === null) return json({ ok: false, error: 'Stored credential cannot be decrypted on this deployment' }, 500); credential = opened; }
 return json({
 ok: true,
 provider: integration.provider,
 mode: selfServeIntegrationMode(tenant) || null,
 company: tenant ? tenant.company_name : null,
-credential: cfg.credential || null,
+credential: credential,
 realmId: cfg.realmId || null,
 offices: resolveOffices(tenant ? tenant.offices : null),
 departments: resolveDepartments(tenant ? tenant.departments : null),
@@ -3874,9 +3972,25 @@ async function runCadenceForTenant(env, settings, now) {
 const summary = { tenantId: settings.tenant_id, considered: 0, sent: 0, held: 0, skipped: 0, failed: 0 };
 if (!settings.enabled) { summary.skipped = -1; return summary; }
 // Strict enforcement: a company on billing hold sends nothing, manual or automated.
-const cadenceTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(settings.tenant_id) + '&select=id,status,slug,access_until');
+const cadenceTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(settings.tenant_id) + '&select=id,status,slug,access_until,company_name,settings');
 if (tenantLockState(cadenceTenant, Date.now()) === 'locked') { summary.skipped = -3; return summary; }
 if (withinQuietHours(settings, now)) { summary.skipped = -2; return summary; }
+// Who the automated sends go out as: the owner of this cadence row, through
+// their connected mailbox when they have one, otherwise from their address on
+// a verified domain, otherwise from the clAIms address carrying their name.
+// Own-sender companies stop at that last step and hold the send instead.
+const ownSenderRequired = requiresOwnSender(cadenceTenant);
+let cadenceOwner = null, ownerMailbox = null, ownerSender = null;
+if (settings.user_id) {
+cadenceOwner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + '&select=id,email,full_name,role,office,status,tenant_id');
+if (cadenceOwner) {
+cadenceOwner.company_name = cadenceTenant ? cadenceTenant.company_name : null;
+ownerMailbox = await mailboxForUser(env, cadenceOwner);
+if (!ownerMailbox) { try { ownerSender = await resolveSender(env, cadenceOwner); } catch (e) { ownerSender = null; } }
+}
+}
+const ownerHasOwnAddress = !!(ownerMailbox || (ownerSender && ownerSender.ownDomain));
+if (ownSenderRequired && !ownerHasOwnAddress) { summary.skipped = -4; summary.reason = 'no_own_sender'; }
 
 // Accounts marked DO NOT CONTACT (sent to a collections agency) are never
 // even considered: the cadence must not touch them. `not.is.true` also
@@ -3913,9 +4027,13 @@ const due = checkpoints.filter(function (c) { return c.day <= ageDays; }).pop();
 if (!due) { summary.skipped++; continue; }
 
 const already = await pgSelectOne(env, 'invoice_comms',
-'account_id=' + pgEq(account.id) + '&cadence_day=' + pgEq(due.day) + '&select=id'
+'account_id=' + pgEq(account.id) + '&cadence_day=' + pgEq(due.day) + '&select=id,status'
 );
-if (already) { summary.skipped++; continue; }
+// A checkpoint that was only blocked (no address / no connected mailbox) is
+// retried once the block clears; anything else counts as handled.
+const retryable = !!(already && (already.status === 'no_sender' || already.status === 'no_recipient'));
+if (already && !retryable) { summary.skipped++; continue; }
+const retryRowId = retryable ? already.id : null;
 
 const recent = await pgSelect(env, 'invoice_comms',
 'account_id=' + pgEq(account.id) + '&sent_at=gte.' + encodeURIComponent(weekAgo) + '&status=' + pgEq('sent') + '&select=id'
@@ -3926,19 +4044,23 @@ if (recent.length >= weeklyCap) { summary.skipped++; continue; }
 const recipient = cadenceRecipient(account);
 const to = (account.contact_email || '').trim();
 
-// Held for review, or no deliverable address: log it and flag the account so
-// it surfaces in the queue instead of silently doing nothing.
-if (settings.require_review || !to) {
+// Held for review, no deliverable address, or (own-sender companies) no
+// connected mailbox: log it and flag the account so it surfaces in the queue
+// instead of silently doing nothing.
+const noOwnSender = ownSenderRequired && !ownerHasOwnAddress;
+if (settings.require_review || !to || noOwnSender) {
+if (retryRowId) { summary.skipped++; continue; } // still blocked, already logged
+const holdStatus = settings.require_review ? 'held_for_review' : (!to ? 'no_recipient' : 'no_sender');
+const holdWhy = settings.require_review ? 'held for review before sending.' : (!to ? 'no contact email on file.' : 'waiting for ' + ((cadenceOwner && (cadenceOwner.full_name || cadenceOwner.email)) || 'the account owner') + ' to connect their email so it sends from their own address.');
 await pgInsert(env, 'invoice_comms', {
 tenant_id: settings.tenant_id, account_id: account.id, cadence_day: due.day,
 kind: due.kind, recipient_role: recipient.role, recipient_email: to || null,
-subject: null, status: settings.require_review ? 'held_for_review' : 'no_recipient',
-error: settings.require_review ? null : 'No contact email on the account'
+subject: null, status: holdStatus,
+error: settings.require_review ? null : (!to ? 'No contact email on the account' : 'No connected mailbox for the sending user')
 });
 await pgInsert(env, 'account_notes', { occurred_at: new Date().toISOString(),
 tenant_id: settings.tenant_id, account_id: account.id,
-body: 'Day ' + due.day + ' cadence checkpoint reached (' + due.kind + ') - ' +
-(settings.require_review ? 'held for review before sending.' : 'no contact email on file.'),
+body: 'Day ' + due.day + ' cadence checkpoint reached (' + due.kind + ') - ' + holdWhy,
 author_name: 'clAIms automation', source: 'automation'
 }).catch(function () {});
 summary.held++;
@@ -3951,20 +4073,28 @@ const subject = due.kind === 'noil' ? 'Notice of Intent to Lien - ' + (account.c
 const html = cadenceEmailBody(account, due, recipient, settings, balance);
 let result = null;
 try {
+if (ownerMailbox) {
+result = await sendViaMailbox(env, ownerMailbox, { to: to, subject: subject, html: html, fromName: quoteDisplayName(cadenceOwner.full_name || ownerMailbox.email) });
+if (result && !result.ok && result.needsReconnect) result = { ok: false, error: 'Connected mailbox needs to be reconnected' };
+} else {
 result = await sendEmail(env, {
 to: to, subject: subject, html: html, kind: 'cadence_' + due.kind,
-tenantId: settings.tenant_id, from: OPERATIONS_FROM_EMAIL,
-replyTo: settings.reply_to || undefined
+tenantId: settings.tenant_id, userId: cadenceOwner ? cadenceOwner.id : undefined,
+from: ownerSender ? ownerSender.from : OPERATIONS_FROM_EMAIL,
+replyTo: settings.reply_to || (ownerSender ? ownerSender.replyTo : undefined) || undefined
 });
+}
 } catch (e) { result = { ok: false, error: String(e) }; }
 
-await pgInsert(env, 'invoice_comms', {
+const commRow = {
 tenant_id: settings.tenant_id, account_id: account.id, cadence_day: due.day,
 kind: due.kind, recipient_role: recipient.role, recipient_email: to,
 subject: subject, status: (result && result.ok) ? 'sent' : 'failed',
 body: String(html || '').slice(0, COMMS_BODY_LIMIT),
 error: (result && result.ok) ? null : String((result && result.error) || 'Send failed')
-});
+};
+if (retryRowId) { commRow.sent_at = now.toISOString(); await pgUpdate(env, 'invoice_comms', 'id=' + pgEq(retryRowId), commRow); }
+else { await pgInsert(env, 'invoice_comms', commRow); }
 
 if (result && result.ok) {
 summary.sent++;
@@ -4319,6 +4449,26 @@ if (!matches) return fallback;
 return { from: '"' + label + '" <' + userEmail + '>', replyTo: userEmail, ownDomain: true };
 }
 
+// How this user's outbound mail leaves today, for the dashboard banner and
+// the send dialog: through their own connected mailbox, from their address on
+// a verified company domain, or from the clAIms address with their name.
+async function senderStatusFor(env, user) {
+  let mailbox = null;
+  try { mailbox = await pgSelectOne(env, 'user_mailboxes', 'user_id=' + pgEq(user.id) + '&select=email,status,provider'); } catch (e) { mailbox = null; }
+  const connected = !!(mailbox && mailbox.status === 'connected');
+  let own = connected;
+  if (!own) { try { own = (await resolveSender(env, user)).ownDomain; } catch (e) { own = false; } }
+  return {
+    mode: connected ? 'mailbox' : (own ? 'domain' : 'platform'),
+    ownAddress: own,
+    mailboxEmail: mailbox ? mailbox.email : null,
+    mailboxStatus: mailbox ? mailbox.status : null,
+    required: requiresOwnSender(user),
+    available: { google: providerConfigured(env, 'google'), microsoft: providerConfigured(env, 'microsoft') }
+  };
+}
+const CONNECT_EMAIL_MSG = 'Your company sends every email from its own people. Connect your email under My Account \u2192 Email (one click with Google or Outlook) and this will go out from your address.';
+
 async function handleInvoiceSend(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -4353,6 +4503,11 @@ escapeHtml(text) + '</div>';
 let result = null;
 let sentVia = 'platform';
 const mailbox = await mailboxForUser(env, user);
+// Own-sender companies never send from the clAIms address, not even with the
+// user's name on it: the user connects their mailbox first.
+if (!mailbox && !sender.ownDomain && requiresOwnSender(user)) {
+return json({ ok: false, code: 'connect_email', error: CONNECT_EMAIL_MSG, accountUrl: '/account' }, 409);
+}
 if (mailbox) {
 // Goes out through the user's own mailbox: genuinely from them, and a copy
 // lands in their Sent folder.
@@ -5395,7 +5550,8 @@ async function handleSubscriptionPage(request, env) {
       headers: { 'Location': new URL('/', request.url).toString() + '?login=1', 'Cache-Control': NO_STORE }
     });
   }
-  return injectHelpWidget(new Response(SUBSCRIPTION_PAGE_HTML, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
+  const subHtml = withTenantTheme(SUBSCRIPTION_PAGE_HTML, user);
+  return injectHelpWidget(new Response(subHtml, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
 
 async function handleVerifyEmail(request, env) {
@@ -6244,6 +6400,13 @@ integs +
 '<div class="msg" id="integmsg-'+i+'"></div>' +
 '<div class="note">Creating a key marks setup as in progress. Plug the key and webhook URL into their accounting system or middleware - the key is shown once.</div>' +
 '</div>' +
+'<div class="box"><h3>Branding &amp; email policy</h3>' +
+'<div class="note" style="margin:0 0 6px;">Header / sidebar colour and accent colour for this company\'s signed-in pages (hex). Leave blank for the clAIms brand.</div>' +
+'<div style="display:flex;gap:8px;align-items:center;"><input type="text" id="thn-'+i+'" placeholder="#374A5C navy" value="'+esc((c.theme&&c.theme.navy)||'')+'" style="flex:1;"><input type="text" id="tha-'+i+'" placeholder="#83B0D8 accent" value="'+esc((c.theme&&c.theme.accent)||'')+'" style="flex:1;"></div>' +
+'<label class="note" style="display:flex;gap:8px;align-items:center;margin:8px 0;"><input type="checkbox" id="own-'+i+'"'+(c.requireOwnSender?' checked':'')+'> Only send from users\' own email (connected Google/Outlook or verified domain); never from a clAIms address</label>' +
+'<button class="act" onclick="__saveBranding('+i+')">Save branding &amp; policy</button>' +
+'<div class="msg" id="brandmsg-'+i+'"></div>' +
+'</div>' +
 '<div class="box"><h3>Plan</h3>' +
 '<div class="note" style="margin:0 0 8px;">Current: <b>'+esc(c.plan||'none')+'</b> - '+c.userCount+' user'+(c.userCount===1?'':'s')+'. Changing the plan updates their Stripe subscription with proration, applies the new seat and integration limits instantly, and emails their admins.</div>' +
 '<select id="plan-'+i+'" style="width:100%;padding:8px;border:1px solid #E5E0D2;border-radius:6px;font-size:13px;">' +
@@ -6285,6 +6448,12 @@ if(!lines.length){ setMsg('depmsg-'+i,'Enter at least one department, one per li
 var pairs = []; var seen = {};
 for(var j=0;j<lines.length && pairs.length<16;j++){ var k = slugKey(lines[j]); if(!k||seen[k]) continue; seen[k]=1; pairs.push([k, lines[j].slice(0,40)]); }
 post('/api/admin/onboarding/config', { tenantId: c.tenantId, departments: pairs }, 'depmsg-'+i, function(){ setMsg('depmsg-'+i,'Saved - keys: '+pairs.map(function(p){ return p[0]; }).join(', '),true); reload(); });
+};
+window.__saveBranding = function(i){
+var c = DATA[i];
+var navy = document.getElementById('thn-'+i).value.trim(), accent = document.getElementById('tha-'+i).value.trim();
+var theme = (navy||accent) ? { navy: navy||undefined, accent: accent||undefined } : null;
+post('/api/admin/onboarding/config', { tenantId: c.tenantId, theme: theme, requireOwnSender: document.getElementById('own-'+i).checked }, 'brandmsg-'+i, function(){ setMsg('brandmsg-'+i,'Saved.',true); reload(); });
 };
 window.__setMode = function(i){
 var c = DATA[i]; var sel = document.getElementById('mode-'+i);
@@ -6369,7 +6538,7 @@ return !!(env.ADMIN_EXPORT_KEY && key === env.ADMIN_EXPORT_KEY);
 
 async function handleAdminOnboardingData(request, env) {
 if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
-const tenants = await pgSelect(env, 'tenants', 'select=id,slug,company_name,domain,status,integration_status,selected_plan,recommended_plan,company_size,city,state,created_at,offices,departments,integration_mode,current_crm,current_accounting,current_software_other,users!users_tenant_id_fkey(id,email,full_name,role,status)&order=id.asc');
+const tenants = await pgSelect(env, 'tenants', 'select=id,slug,company_name,domain,status,integration_status,selected_plan,recommended_plan,company_size,city,state,created_at,offices,departments,integration_mode,settings,current_crm,current_accounting,current_software_other,users!users_tenant_id_fkey(id,email,full_name,role,status)&order=id.asc');
 let integrationRows = [];
 try { integrationRows = (await pgSelect(env, 'integrations', 'select=id,tenant_id,provider,status,connected_at,last_synced_at&order=id.asc')) || []; } catch (e) {}
 const byTenant = {};
@@ -6404,6 +6573,8 @@ officeLabels: officeKeys.map(function (k) { return offices[k]; }),
 departments: resolveDepartments(t.departments),
 departmentsCustom: !!t.departments,
 integrationMode: selfServeIntegrationMode(t),
+theme: tenantTheme(t),
+requireOwnSender: requiresOwnSender(t),
 integrations: byTenant[t.id] || []
 };
 });
@@ -6433,6 +6604,23 @@ if (body.integrationMode !== undefined) {
 const m = String(body.integrationMode || '').trim().toLowerCase();
 if (m && !SELF_SERVE_INTEGRATION_MODES[m]) return json({ ok: false, error: 'Unknown integration mode' }, 400);
 patch.integration_mode = m || null;
+}
+if (body.theme !== undefined || body.requireOwnSender !== undefined) {
+const current = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=settings');
+const next = Object.assign({}, tenantSettingsOf(current || {}));
+if (body.theme !== undefined) {
+if (body.theme === null || body.theme === '') { delete next.theme; }
+else {
+const t = {};
+THEME_KEYS.forEach(function (k) { const c = safeHexColor(body.theme && body.theme[k]); if (c) t[k] = c; });
+if (!t.navy && !t.accent) return json({ ok: false, error: 'Theme needs at least a navy or accent colour (#RRGGBB)' }, 400);
+next.theme = t;
+}
+}
+if (body.requireOwnSender !== undefined) {
+if (body.requireOwnSender) next.requireOwnSender = true; else delete next.requireOwnSender;
+}
+patch.settings = Object.keys(next).length ? next : null;
 }
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
@@ -7029,6 +7217,7 @@ async function handleDashboard(request, env) {
   // it goes in <head>; the rest is appended (dashboard.html has no </body>).
   const REAL_FLAG = '<script>window.__CLMS_REAL=true;</script>';
   html = html.indexOf('<head>') !== -1 ? html.replace('<head>', '<head>' + REAL_FLAG) : REAL_FLAG + html;
+  html = withTenantTheme(html, user);
   html = html.indexOf('</body>') !== -1 ? html.replace('</body>', dashInject + '</body>') : html + dashInject;
   return injectHelpWidget(new Response(html, { headers: { 'Content-Type': 'text/html; charset=UTF-8', 'Cache-Control': NO_STORE } }), { skipDemoPopup: true });
 }
@@ -7058,6 +7247,9 @@ async function handleMe(request, env) {
     integrationMode: selfServeIntegrationMode(user),
     integrationProvider: selfServeIntegrationMode(user) ? SELF_SERVE_INTEGRATION_MODES[selfServeIntegrationMode(user)] : null,
     selfServeIntegrations: canSelfServeIntegrations(user),
+    theme: tenantTheme(user),
+    requireOwnSender: requiresOwnSender(user),
+    sender: await senderStatusFor(env, user),
     integrationConnected: await tenantHasConnectedIntegration(env, user.tenant_id),
     billing: await meBillingInfo(env, user)
   });
