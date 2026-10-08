@@ -1448,6 +1448,30 @@
   // Set when the company runs its own department list (e.g. operating
   // companies) instead of the three restoration pipelines.
   let TENANT_DEPTS_CUSTOM = false;
+  // What the department badge says next to an invoice. Companies that run
+  // their departments as operating companies (Revolve: "A1 Valet Trash") want
+  // the city on the same tag - "A1 Valet Trash - Dallas" - so the badge carries
+  // the office label and the separate office tag is dropped.
+  function deptLabel(inv){
+    const base = DEPARTMENT_LABELS[inv.department] || inv.department || '\u2014';
+    if (!TENANT_DEPTS_CUSTOM) return base;
+    const city = OFFICE_LABELS[inv.officeLocation];
+    return city ? (base + ' - ' + city) : base;
+  }
+  function deptBadgeHTML(inv, upper){
+    const txt = hEsc(deptLabel(inv));
+    return '<span class="badge dept">' + (upper ? txt.toUpperCase() : txt) + '</span>';
+  }
+  function officeBadgeHTML(inv, upper){
+    if (TENANT_DEPTS_CUSTOM) return '';
+    const txt = hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '');
+    return '<span class="badge office">' + (upper ? txt.toUpperCase() : txt) + '</span>';
+  }
+  function catBadgeHTML(inv, upper){
+    if (TENANT_DEPTS_CUSTOM) return '';
+    const txt = hEsc(CATEGORY_LABELS[inv.category] || inv.category || '');
+    return '<span class="badge cat">' + (upper ? txt.toUpperCase() : txt) + '</span>';
+  }
   const CUSTOM_DEPT_PALETTE = ['#1F3766','#4B2570','#7A4E0A','#1E5E4C','#8A2E2E','#2E6F8E','#5C5C1F','#6B3F6B','#2F4F2F','#8A5A1F','#3B3B8A','#8A3B5C','#2A6A6A','#6A4A2A','#4A6A2A','#5A2A6A'];
   // Placeholder scope-of-work summaries, standing in for what would actually be
   // parsed from the Estimate.pdf uploaded in Salesforce for each job.
@@ -3068,7 +3092,7 @@ var todoExpanded = false;
 function todoRowHTML(item, num, priority){
     const inv = item.inv;
     const cp = item.cp;
-    const tags = `<span class="badge dept">${DEPARTMENT_LABELS[inv.department]}</span><span class="badge cat">${CATEGORY_LABELS[inv.category]}</span>`;
+    const tags = deptBadgeHTML(inv, false) + catBadgeHTML(inv, false);
     let action;
     if(priority === 'high'){
       if(inv.escalated){
@@ -3157,10 +3181,10 @@ function todoRowHTML(item, num, priority){
           <div class="meta">${hEsc(inv.meta || '')} &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.invoiceNumber || '\u2014')}</span> &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.jobNumber || '')}</span></div>
           <div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>
           <div class="badge-row">
-            <span class="badge office">${OFFICE_LABELS[inv.officeLocation].toUpperCase()}</span>
+            ${officeBadgeHTML(inv, true)}
             <span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer].toUpperCase()}</span>
-            <span class="badge dept">${DEPARTMENT_LABELS[inv.department].toUpperCase()}</span>
-            <span class="badge cat">${CATEGORY_LABELS[inv.category].toUpperCase()}</span>
+            ${deptBadgeHTML(inv, true)}
+            ${catBadgeHTML(inv, true)}
             <span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus].toUpperCase()}</span>
             <span class="badge cw">WITH: ${CURRENTLY_WITH_LABELS[inv.currentlyWith].toUpperCase()}</span>
             ${dncBadgeHTML(inv)}${partialBadgeHTML(inv)}${escBadge}${warnBadge}${staleBadge}
@@ -3356,9 +3380,9 @@ saveState(); renderAll();
         <td style="font-family:var(--font-mono);">${inv.jobNumber}</td>
         <td>${fmtDate(inv.invoiceDate)}</td>
         <td>${acctLink(inv.id, inv.name)}${isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : ''}</td>
-        <td><span class="badge office">${OFFICE_LABELS[inv.officeLocation]}</span></td>
-        <td><span class="badge dept">${DEPARTMENT_LABELS[inv.department]}</span></td>
-        <td><span class="badge cat">${CATEGORY_LABELS[inv.category]}</span></td>
+        <td><span class="badge office">${hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '')}</span></td>
+        <td>${deptBadgeHTML(inv, false)}</td>
+        <td><span class="badge cat">${hEsc(CATEGORY_LABELS[inv.category] || inv.category || '')}</span></td>
         <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}</td>
         <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>${isPartiallyPaid(inv) ? ' <span class="badge partial">PARTIAL PAYMENT</span>' : ''}</td>
         <td><span class="badge cw">${CURRENTLY_WITH_LABELS[inv.currentlyWith]}</span></td>
@@ -4098,10 +4122,10 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
           <div class="meta">${hEsc(inv.meta || '')} &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.invoiceNumber || '\u2014')}</span> &middot; <span style="font-family:var(--font-mono);">${hEsc(inv.jobNumber || '')}</span></div>
           <div class="onsite-line" title="Last technician clock-in/out on this job"><span class="onsite-icon">&#128205;</span>Last on site: ${fmtDate(inv.lastOnSiteDate)}</div>
           <div class="badge-row">
-            <span class="badge office">${OFFICE_LABELS[inv.officeLocation].toUpperCase()}</span>
+            ${officeBadgeHTML(inv, true)}
             <span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer].toUpperCase()}</span>
-            <span class="badge dept">${DEPARTMENT_LABELS[inv.department].toUpperCase()}</span>
-            <span class="badge cat">${CATEGORY_LABELS[inv.category].toUpperCase()}</span>
+            ${deptBadgeHTML(inv, true)}
+            ${catBadgeHTML(inv, true)}
             <span class="badge escalated">ESCALATED</span>
 ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F5346;border-color:#BFE0D3;">NOTIFIED: ${inv.notifiedName.toUpperCase()}</span>` : ''}
           </div>
@@ -4215,7 +4239,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     if(!inv) return;
     document.getElementById('detail-title').textContent = `Manage \u2014 ${inv.name}`;
     const claimBit = inv.claimNumber ? ` \u00b7 Claim ${inv.claimNumber}` : '';
-    document.getElementById('detail-sub').textContent = `${OFFICE_LABELS[inv.officeLocation]} \u00b7 ${inv.jobNumber}${claimBit} \u00b7 ${DEPARTMENT_LABELS[inv.department]} \u2014 ${CATEGORY_LABELS[inv.category]} \u00b7 ${PAYER_LABELS[inv.payer]} \u00b7 ${inv.days} days since contact \u00b7 $${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}`;
+    document.getElementById('detail-sub').textContent = `${TENANT_DEPTS_CUSTOM ? deptLabel(inv) : OFFICE_LABELS[inv.officeLocation]} \u00b7 ${inv.jobNumber}${claimBit}${TENANT_DEPTS_CUSTOM ? '' : ' \u00b7 ' + DEPARTMENT_LABELS[inv.department] + ' \u2014 ' + CATEGORY_LABELS[inv.category]} \u00b7 ${PAYER_LABELS[inv.payer]} \u00b7 ${inv.days} days since contact \u00b7 $${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}`;
     document.getElementById('detail-status-badge').innerHTML = `<span class="badge sfstatus" style="font-size:12px;padding:5px 10px;"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>`;
     document.querySelectorAll('#currently-with-toggle .cw-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.val === inv.currentlyWith);
@@ -4274,7 +4298,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     if(!inv) return;
     currentHistoryId = id;
     document.getElementById('hist-title').textContent = 'Account History — ' + inv.name;
-    document.getElementById('hist-sub').textContent = [inv.invoiceNumber, OFFICE_LABELS[inv.officeLocation] || inv.officeLocation, DEPARTMENT_LABELS[inv.department], inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ');
+    document.getElementById('hist-sub').textContent = [inv.invoiceNumber, TENANT_DEPTS_CUSTOM ? null : (OFFICE_LABELS[inv.officeLocation] || inv.officeLocation), deptLabel(inv), inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ');
     document.getElementById('hist-summary').innerHTML = '';
     document.getElementById('hist-timeline').innerHTML = '<div class="hist-empty">Loading…</div>';
     ['hist-comms','hist-responses','hist-payments','hist-docs','hist-notes','hist-related'].forEach(function(k){ document.getElementById(k).innerHTML = ''; });
@@ -4426,7 +4450,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const name = (inv && inv.name) || 'this account';
     document.getElementById('msg-title').textContent = 'Messages sent — ' + name;
     document.getElementById('msg-sub').textContent = inv
-      ? [inv.invoiceNumber, OFFICE_LABELS[inv.officeLocation] || inv.officeLocation, DEPARTMENT_LABELS[inv.department], inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ')
+      ? [inv.invoiceNumber, TENANT_DEPTS_CUSTOM ? null : (OFFICE_LABELS[inv.officeLocation] || inv.officeLocation), deptLabel(inv), inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ')
       : '';
     document.getElementById('msg-current').innerHTML = '<div class="msg-card"><div class="msg-body empty">Loading…</div></div>';
     document.getElementById('msg-earlier').innerHTML = '';
