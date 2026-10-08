@@ -78,13 +78,36 @@ function normalizeConfigEntries(raw, maxEntries) {
 function resolveOffices(raw) {
   return normalizeConfigEntries(raw, 12) || OFFICE_LABELS;
 }
+// Departments: null -> the three restoration defaults; entries that only use
+// the default keys -> renames of those pipelines; anything else -> the
+// company's own ordered list (e.g. a holding company whose "departments" are
+// its operating companies), up to 16.
+const MAX_DEPARTMENTS = 16;
 function resolveDepartments(raw) {
-  const renames = normalizeConfigEntries(raw, 6) || {};
-  return {
-    mitigation: renames.mitigation || DEFAULT_DEPARTMENT_LABELS.mitigation,
-    contents: renames.contents || DEFAULT_DEPARTMENT_LABELS.contents,
-    reconstruction: renames.reconstruction || DEFAULT_DEPARTMENT_LABELS.reconstruction
-  };
+  const entries = normalizeConfigEntries(raw, MAX_DEPARTMENTS);
+  if (!entries) return Object.assign({}, DEFAULT_DEPARTMENT_LABELS);
+  const keys = Object.keys(entries);
+  const renameOnly = keys.every(function (k) { return !!DEFAULT_DEPARTMENT_LABELS[k]; });
+  if (renameOnly) {
+    return {
+      mitigation: entries.mitigation || DEFAULT_DEPARTMENT_LABELS.mitigation,
+      contents: entries.contents || DEFAULT_DEPARTMENT_LABELS.contents,
+      reconstruction: entries.reconstruction || DEFAULT_DEPARTMENT_LABELS.reconstruction
+    };
+  }
+  return entries;
+}
+// Companies whose admins connect their own accounting system from the
+// dashboard (tenants.integration_mode). 'quickbooks' shows a QuickBooks-only
+// setup card; null keeps the concierge flow where the clAIms team wires it.
+const SELF_SERVE_INTEGRATION_MODES = { quickbooks: 'QuickBooks Online' };
+function selfServeIntegrationMode(t) {
+  if (!t) return null;
+  const mode = String(t.tenant_integration_mode !== undefined ? t.tenant_integration_mode : t.integration_mode || '').trim().toLowerCase();
+  return SELF_SERVE_INTEGRATION_MODES[mode] ? mode : null;
+}
+function canSelfServeIntegrations(user) {
+  return !!user && (user.tenant_slug === 'base' || !!selfServeIntegrationMode(user));
 }
 async function tenantHasConnectedIntegration(env, tenantId) {
   try {
@@ -2211,7 +2234,7 @@ const token = cookies[SESSION_COOKIE];
 if (!token) return null;
 const row = await pgSelectOne(env, 'sessions',
 'token=' + pgEq(token) +
-'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments))'
+'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments,integration_mode))'
 );
 if (!row || !row.users) return null;
 if (new Date(row.expires_at) < new Date()) return null;
@@ -2235,6 +2258,7 @@ tenant_status: t.status,
 integration_status: t.integration_status,
 tenant_offices: t.offices,
 tenant_departments: t.departments,
+tenant_integration_mode: t.integration_mode || null,
 selected_plan: t.selected_plan,
 recommended_plan: t.recommended_plan,
 stripe_customer_id: t.stripe_customer_id,
@@ -3091,10 +3115,17 @@ async function handleIntegrationConnect(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-if (user.tenant_slug !== 'base') return json({ ok: false, code: 'concierge', error: CONCIERGE_INTEGRATION_MSG }, 403);
+if (!canSelfServeIntegrations(user)) return json({ ok: false, code: 'concierge', error: CONCIERGE_INTEGRATION_MSG }, 403);
 let body;
 try { body = await request.json(); } catch (e) { body = {}; }
-const provider = (body.provider || 'accounting').toString().slice(0, 60);
+const mode = selfServeIntegrationMode(user);
+// A QuickBooks-only company always connects the one provider; the company's
+// own QuickBooks credential travels with the row so the sync agent can pull
+// with nothing but the clAIms key.
+const provider = mode ? SELF_SERVE_INTEGRATION_MODES[mode] : (body.provider || 'accounting').toString().slice(0, 60);
+const credential = String(body.credential == null ? '' : body.credential).trim().slice(0, 500);
+const realmId = String(body.realmId == null ? '' : body.realmId).trim().slice(0, 80);
+if (mode && !credential) return json({ ok: false, error: 'Paste your ' + provider + ' API key to connect.' }, 400);
 const apiKey = randomToken();
 const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&provider=' + pgEq(provider) + '&select=id,status');
 const connLimits = planLimitsFor(user);
@@ -3104,19 +3135,55 @@ if (connectedCount >= connLimits.integrations) {
 return json({ ok: false, error: 'Your ' + connLimits.name + ' plan includes ' + connLimits.integrations + ' integration' + (connLimits.integrations === 1 ? '' : 's') + '. Disconnect one or upgrade your plan to connect more.', code: 'plan_limit' }, 403);
 }
 }
+const nowIso = new Date().toISOString();
+const rowPatch = { status: 'connected', api_key: apiKey, connected_at: nowIso };
+if (mode) rowPatch.config_json = JSON.stringify({ provider: mode, credential: credential, realmId: realmId || null, updatedAt: nowIso, updatedBy: user.email });
 if (existing) {
-await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), { status: 'connected', api_key: apiKey, connected_at: new Date().toISOString() });
+await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), rowPatch);
 } else {
-await pgInsert(env, 'integrations', { tenant_id: user.tenant_id, provider: provider, status: 'connected', api_key: apiKey, connected_at: new Date().toISOString() });
+await pgInsert(env, 'integrations', Object.assign({ tenant_id: user.tenant_id, provider: provider }, rowPatch));
 }
-return json({ ok: true, provider, apiKey, syncUrl: SITE_URL + '/api/integrations/accounting/sync' });
+if (mode) {
+try { await pgUpdate(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&or=(integration_status.is.null,integration_status.eq.not_started)', { integration_status: 'in_progress' }); } catch (e) {}
+}
+return json({ ok: true, provider, apiKey, syncUrl: SITE_URL + '/api/integrations/accounting/sync', sourceUrl: SITE_URL + '/api/integrations/source', mode: mode || null });
+}
+
+// What a sync agent needs to pull from the company's accounting system, in
+// exchange for the clAIms integration key alone: the credential the admin
+// pasted on the dashboard plus the vocabulary (offices, departments) to map
+// records into. Never served to a browser session - bearer key only.
+async function handleIntegrationSource(request, env) {
+const authHeader = request.headers.get('Authorization') || '';
+const match = authHeader.match(/^Bearer\s+(.+)$/i);
+if (!match) return json({ ok: false, error: 'Missing bearer token' }, 401);
+const integration = await pgSelectOne(env, 'integrations', 'api_key=' + pgEq(match[1].trim()) + '&status=' + pgEq('connected') + '&select=id,tenant_id,provider,config_json,last_synced_at');
+if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
+const hold = await integrationBillingHold(env, integration.tenant_id);
+if (hold) return hold;
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(integration.tenant_id) + '&select=id,company_name,offices,departments,integration_mode');
+let cfg = {};
+try { cfg = integration.config_json ? JSON.parse(integration.config_json) : {}; } catch (e) { cfg = {}; }
+if (!cfg || typeof cfg !== 'object') cfg = {};
+return json({
+ok: true,
+provider: integration.provider,
+mode: selfServeIntegrationMode(tenant) || null,
+company: tenant ? tenant.company_name : null,
+credential: cfg.credential || null,
+realmId: cfg.realmId || null,
+offices: resolveOffices(tenant ? tenant.offices : null),
+departments: resolveDepartments(tenant ? tenant.departments : null),
+syncUrl: SITE_URL + '/api/integrations/accounting/sync',
+lastSyncedAt: integration.last_synced_at || null
+});
 }
 
 async function handleIntegrationDisconnect(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-if (user.tenant_slug !== 'base') return json({ ok: false, code: 'concierge', error: CONCIERGE_INTEGRATION_MSG }, 403);
+if (!canSelfServeIntegrations(user)) return json({ ok: false, code: 'concierge', error: CONCIERGE_INTEGRATION_MSG }, 403);
 let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
@@ -6162,15 +6229,14 @@ return '<div class="co">' +
 '<button class="act" onclick="__saveOffices('+i+')">Save offices</button>' +
 '<div class="msg" id="offmsg-'+i+'"></div>' +
 '</div>' +
-'<div class="box"><h3>Department names</h3>' +
-'<input type="text" id="dm-'+i+'" value="'+esc(d.mitigation||'Mitigation')+'">' +
-'<input type="text" id="dc-'+i+'" value="'+esc(d.contents||'Contents')+'">' +
-'<input type="text" id="dr-'+i+'" value="'+esc(d.reconstruction||'Reconstruction')+'">' +
-'<div class="note">Renames the three standard pipelines (mitigation / contents / reconstruction) to whatever this company calls them.</div>' +
-'<button class="act" onclick="__saveDepts('+i+')">Save names</button>' +
+'<div class="box"><h3>Departments</h3>' +
+'<textarea id="dep-'+i+'">'+esc(Object.keys(d).map(function(k){ return d[k]; }).join(String.fromCharCode(10)))+'</textarea>' +
+'<div class="note">One department per line, in display order. Keep the three restoration pipelines, rename them, or list the company\'s own divisions (operating companies, service lines). '+(c.departmentsCustom?'Custom config saved.':'Currently on defaults.')+'</div>' +
+'<button class="act" onclick="__saveDepts('+i+')">Save departments</button>' +
 '<div class="msg" id="depmsg-'+i+'"></div>' +
 '</div>' +
 '<div class="box"><h3>Accounting integration</h3>' +
+'<div class="note" style="margin:0 0 8px;">Setup mode: <select id="mode-'+i+'" style="padding:4px 6px;border:1px solid #E5E0D2;border-radius:6px;font-size:12px;"><option value=""'+(c.integrationMode?'':' selected')+'>Concierge (clAIms team wires it)</option><option value="quickbooks"'+(c.integrationMode==='quickbooks'?' selected':'')+'>Self-serve: QuickBooks Online only</option></select> <button class="act ghost" style="margin:0;padding:4px 8px;" onclick="__setMode('+i+')">Apply</button><div class="msg" id="modemsg-'+i+'"></div></div>' +
 integs +
 '<input type="text" id="prov-'+i+'" placeholder="Provider, e.g. QuickBooks Online" style="margin-top:8px;">' +
 '<button class="act" onclick="__createInteg('+i+')">Create integration key</button>' +
@@ -6213,9 +6279,16 @@ for(var j=0;j<lines.length && pairs.length<12;j++){ var k = slugKey(lines[j]); i
 post('/api/admin/onboarding/config', { tenantId: c.tenantId, offices: pairs }, 'offmsg-'+i, function(){ setMsg('offmsg-'+i,'Saved - keys: '+pairs.map(function(p){ return p[0]; }).join(', '),true); reload(); });
 };
 window.__saveDepts = function(i){
-var c = DATA[i];
-var payload = { mitigation: document.getElementById('dm-'+i).value.trim()||'Mitigation', contents: document.getElementById('dc-'+i).value.trim()||'Contents', reconstruction: document.getElementById('dr-'+i).value.trim()||'Reconstruction' };
-post('/api/admin/onboarding/config', { tenantId: c.tenantId, departments: payload }, 'depmsg-'+i, function(){ setMsg('depmsg-'+i,'Saved.',true); reload(); });
+var c = DATA[i]; var ta = document.getElementById('dep-'+i);
+var lines = ta.value.split(String.fromCharCode(10)).map(function(x){ return x.trim(); }).filter(Boolean);
+if(!lines.length){ setMsg('depmsg-'+i,'Enter at least one department, one per line.',false); return; }
+var pairs = []; var seen = {};
+for(var j=0;j<lines.length && pairs.length<16;j++){ var k = slugKey(lines[j]); if(!k||seen[k]) continue; seen[k]=1; pairs.push([k, lines[j].slice(0,40)]); }
+post('/api/admin/onboarding/config', { tenantId: c.tenantId, departments: pairs }, 'depmsg-'+i, function(){ setMsg('depmsg-'+i,'Saved - keys: '+pairs.map(function(p){ return p[0]; }).join(', '),true); reload(); });
+};
+window.__setMode = function(i){
+var c = DATA[i]; var sel = document.getElementById('mode-'+i);
+post('/api/admin/onboarding/config', { tenantId: c.tenantId, integrationMode: sel.value }, 'modemsg-'+i, function(){ setMsg('modemsg-'+i,'Saved.',true); reload(); });
 };
 window.__createInteg = function(i){
 var c = DATA[i]; var prov = document.getElementById('prov-'+i).value.trim();
@@ -6296,7 +6369,7 @@ return !!(env.ADMIN_EXPORT_KEY && key === env.ADMIN_EXPORT_KEY);
 
 async function handleAdminOnboardingData(request, env) {
 if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
-const tenants = await pgSelect(env, 'tenants', 'select=id,slug,company_name,domain,status,integration_status,selected_plan,recommended_plan,company_size,city,state,created_at,offices,departments,current_crm,current_accounting,current_software_other,users!users_tenant_id_fkey(id,email,full_name,role,status)&order=id.asc');
+const tenants = await pgSelect(env, 'tenants', 'select=id,slug,company_name,domain,status,integration_status,selected_plan,recommended_plan,company_size,city,state,created_at,offices,departments,integration_mode,current_crm,current_accounting,current_software_other,users!users_tenant_id_fkey(id,email,full_name,role,status)&order=id.asc');
 let integrationRows = [];
 try { integrationRows = (await pgSelect(env, 'integrations', 'select=id,tenant_id,provider,status,connected_at,last_synced_at&order=id.asc')) || []; } catch (e) {}
 const byTenant = {};
@@ -6329,6 +6402,8 @@ officesCustom: !!t.offices,
 officeKeys: officeKeys,
 officeLabels: officeKeys.map(function (k) { return offices[k]; }),
 departments: resolveDepartments(t.departments),
+departmentsCustom: !!t.departments,
+integrationMode: selfServeIntegrationMode(t),
 integrations: byTenant[t.id] || []
 };
 });
@@ -6347,10 +6422,17 @@ const map = normalizeConfigEntries(body.offices, 12);
 patch.offices = map ? Object.keys(map).map(function (k) { return [k, map[k]]; }) : null;
 }
 if (body.departments !== undefined) {
-const d = normalizeConfigEntries(body.departments, 6) || {};
-const kept = {};
-['mitigation', 'contents', 'reconstruction'].forEach(function (k) { if (d[k]) kept[k] = d[k]; });
-patch.departments = Object.keys(kept).length ? kept : null;
+// Ordered [key,label] pairs; an empty list (or only the untouched defaults)
+// goes back to the standard three pipelines.
+const d = normalizeConfigEntries(body.departments, MAX_DEPARTMENTS) || {};
+const keys = Object.keys(d);
+const isDefault = keys.length === 3 && keys.every(function (k) { return DEFAULT_DEPARTMENT_LABELS[k] === d[k]; });
+patch.departments = (keys.length && !isDefault) ? keys.map(function (k) { return [k, d[k]]; }) : null;
+}
+if (body.integrationMode !== undefined) {
+const m = String(body.integrationMode || '').trim().toLowerCase();
+if (m && !SELF_SERVE_INTEGRATION_MODES[m]) return json({ ok: false, error: 'Unknown integration mode' }, 400);
+patch.integration_mode = m || null;
 }
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to update' }, 400);
 await pgUpdate(env, 'tenants', 'id=' + pgEq(tenantId), patch);
@@ -6973,6 +7055,9 @@ async function handleMe(request, env) {
     offices: resolveOffices(user.tenant_offices),
     departments: resolveDepartments(user.tenant_departments),
     officesConfigured: !!user.tenant_offices,
+    integrationMode: selfServeIntegrationMode(user),
+    integrationProvider: selfServeIntegrationMode(user) ? SELF_SERVE_INTEGRATION_MODES[selfServeIntegrationMode(user)] : null,
+    selfServeIntegrations: canSelfServeIntegrations(user),
     integrationConnected: await tenantHasConnectedIntegration(env, user.tenant_id),
     billing: await meBillingInfo(env, user)
   });
@@ -7222,6 +7307,9 @@ return handleBillingPortal(request, env);
 }
 if (url.pathname === '/api/change-password' && request.method === 'POST') {
 return handleChangePassword(request, env);
+}
+if (url.pathname === '/api/integrations/source' && request.method === 'GET') {
+return handleIntegrationSource(request, env);
 }
 if (url.pathname === '/api/integrations/accounting/sync' && request.method === 'POST') {
 return handleAccountingSync(request, env);
