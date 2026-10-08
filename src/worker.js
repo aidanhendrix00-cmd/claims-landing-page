@@ -124,12 +124,43 @@ function safeHexColor(v) {
   const s = String(v == null ? '' : v).trim();
   return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toUpperCase() : null;
 }
+// A co-brand logo shown beside the clAIms mark: a small data: PNG/SVG/WebP
+// (what the onboarding page uploads) or an https URL.
+const THEME_LOGO_MAX = 120000;
+function safeLogoSrc(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s || s.length > THEME_LOGO_MAX) return null;
+  if (/^data:image\/(png|svg\+xml|webp|jpeg);base64,[A-Za-z0-9+/=]+$/.test(s)) return s;
+  if (/^https:\/\/[^\s"'<>]+$/i.test(s)) return s;
+  return null;
+}
 function tenantTheme(t) {
   const theme = tenantSettingsOf(t).theme;
   if (!theme || typeof theme !== 'object') return null;
   const out = {};
   THEME_KEYS.forEach(function (k) { const c = safeHexColor(theme[k]); if (c) out[k] = c; });
-  return (out.navy || out.accent) ? out : null;
+  const logo = safeLogoSrc(theme.logo);
+  if (logo) { out.logo = logo; out.logoAlt = String(theme.logoAlt || '').replace(/[<>"]/g, '').slice(0, 80) || 'Company logo'; }
+  return (out.navy || out.accent || out.logo) ? out : null;
+}
+// Drops the company logo into the page header next to the clAIms mark
+// (dashboard .gh-title, account .acct-brand, subscription .sub-brand).
+function tenantLogoMarkup(theme) {
+  if (!theme || !theme.logo) return '';
+  const css = '<style id="tenant-logo-style">' +
+    '.gh-cobrand-sep{display:inline-block;width:1px;height:26px;background:rgba(255,255,255,.28);margin:0 4px 0 6px;}' +
+    '.gh-cobrand{height:30px;width:auto;max-width:200px;display:block;object-fit:contain;}' +
+    '.acct-brand .gh-cobrand,.sub-brand .gh-cobrand{display:inline-block;vertical-align:middle;height:26px;margin-left:12px;padding-left:12px;border-left:1px solid rgba(255,255,255,.28);max-width:180px;}' +
+    '@media (max-width:820px){.gh-cobrand{height:22px;max-width:120px;}.gh-cobrand-sep{height:20px;}}' +
+    '</style>';
+  const js = '<script>(function(){function place(){' +
+    'var src=' + JSON.stringify(theme.logo) + ',alt=' + JSON.stringify(theme.logoAlt || 'Company logo') + ';' +
+    'function img(){var i=document.createElement("img");i.className="gh-cobrand";i.src=src;i.alt=alt;i.decoding="async";return i;}' +
+    'var t=document.querySelector(".gh-title");' +
+    'if(t&&!t.querySelector(".gh-cobrand")){var logo=t.querySelector(".gh-logo");var sep=document.createElement("span");sep.className="gh-cobrand-sep";var i=img();if(logo&&logo.nextSibling){t.insertBefore(sep,logo.nextSibling);t.insertBefore(i,sep.nextSibling);}else{t.appendChild(sep);t.appendChild(i);}}' +
+    '["acct-brand","sub-brand"].forEach(function(c){var b=document.querySelector("."+c);if(b&&!b.querySelector(".gh-cobrand"))b.appendChild(img());});' +
+    '}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",place);else place();})();</script>';
+  return css + js;
 }
 // Companies that only ever email customers from their own people's addresses:
 // a user without a connected mailbox (or a verified sending domain) cannot
@@ -156,7 +187,7 @@ function readableOn(hex) {
 // account/subscription pages are restyled by selector. Served inline from the
 // page handlers so there is no flash of the default brand.
 function tenantThemeStyle(theme) {
-  if (!theme) return '';
+  if (!theme || !(theme.navy || theme.accent)) return '';
   const navy = theme.navy || '#171717';
   const accent = theme.accent || '#C29B57';
   const ink = theme.ink || mixHex(navy, '#000000', 0.2);
@@ -190,7 +221,8 @@ function tenantThemeStyle(theme) {
 // Drops the company's theme into a page's <head> (before </head> so it wins
 // over the page's own :root block).
 function withTenantTheme(html, user) {
-  const style = tenantThemeStyle(tenantTheme(user));
+  const theme = tenantTheme(user);
+  const style = tenantThemeStyle(theme) + tenantLogoMarkup(theme);
   if (!style) return html;
   if (html.indexOf('</head>') !== -1) return html.replace('</head>', style + '</head>');
   // dashboard.html has no </head>: land right after its main stylesheet.
@@ -6403,6 +6435,8 @@ integs +
 '<div class="box"><h3>Branding &amp; email policy</h3>' +
 '<div class="note" style="margin:0 0 6px;">Header / sidebar colour and accent colour for this company\'s signed-in pages (hex). Leave blank for the clAIms brand.</div>' +
 '<div style="display:flex;gap:8px;align-items:center;"><input type="text" id="thn-'+i+'" placeholder="#374A5C navy" value="'+esc((c.theme&&c.theme.navy)||'')+'" style="flex:1;"><input type="text" id="tha-'+i+'" placeholder="#83B0D8 accent" value="'+esc((c.theme&&c.theme.accent)||'')+'" style="flex:1;"></div>' +
+'<div class="note" style="margin:8px 0 4px;">Co-brand logo (shown beside the clAIms mark in the header; white or light artwork on a transparent PNG/SVG looks best, under 120 KB):</div>' +
+'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+(c.theme&&c.theme.logo?'<img src="'+esc(c.theme.logo)+'" alt="" style="height:28px;background:'+esc((c.theme&&c.theme.navy)||'#171717')+';padding:4px 8px;border-radius:6px;">':'<span class="note" style="margin:0;">none</span>')+'<input type="file" id="logo-'+i+'" accept="image/png,image/svg+xml,image/webp,image/jpeg" style="font-size:12px;">'+(c.theme&&c.theme.logo?' <button class="act ghost" style="margin:0;padding:4px 8px;" onclick="__saveBranding('+i+',true)">Remove logo</button>':'')+'</div>' +
 '<label class="note" style="display:flex;gap:8px;align-items:center;margin:8px 0;"><input type="checkbox" id="own-'+i+'"'+(c.requireOwnSender?' checked':'')+'> Only send from users\' own email (connected Google/Outlook or verified domain); never from a clAIms address</label>' +
 '<button class="act" onclick="__saveBranding('+i+')">Save branding &amp; policy</button>' +
 '<div class="msg" id="brandmsg-'+i+'"></div>' +
@@ -6449,11 +6483,18 @@ var pairs = []; var seen = {};
 for(var j=0;j<lines.length && pairs.length<16;j++){ var k = slugKey(lines[j]); if(!k||seen[k]) continue; seen[k]=1; pairs.push([k, lines[j].slice(0,40)]); }
 post('/api/admin/onboarding/config', { tenantId: c.tenantId, departments: pairs }, 'depmsg-'+i, function(){ setMsg('depmsg-'+i,'Saved - keys: '+pairs.map(function(p){ return p[0]; }).join(', '),true); reload(); });
 };
-window.__saveBranding = function(i){
+window.__saveBranding = function(i, removeLogo){
 var c = DATA[i];
 var navy = document.getElementById('thn-'+i).value.trim(), accent = document.getElementById('tha-'+i).value.trim();
-var theme = (navy||accent) ? { navy: navy||undefined, accent: accent||undefined } : null;
+var fileEl = document.getElementById('logo-'+i); var file = fileEl && fileEl.files && fileEl.files[0];
+function send(logo){
+var theme = { navy: navy||undefined, accent: accent||undefined };
+if (removeLogo) theme.logo = null; else if (logo) { theme.logo = logo; theme.logoAlt = (c.company||'') + ' logo'; }
+if (!navy && !accent && !logo && !(c.theme&&c.theme.logo)) theme = null;
 post('/api/admin/onboarding/config', { tenantId: c.tenantId, theme: theme, requireOwnSender: document.getElementById('own-'+i).checked }, 'brandmsg-'+i, function(){ setMsg('brandmsg-'+i,'Saved.',true); reload(); });
+}
+if (file && !removeLogo) { if (file.size > 120000) { setMsg('brandmsg-'+i,'Logo file is over 120 KB - export a smaller PNG/SVG.',false); return; } var rd = new FileReader(); rd.onload = function(){ send(String(rd.result)); }; rd.readAsDataURL(file); }
+else send(null);
 };
 window.__setMode = function(i){
 var c = DATA[i]; var sel = document.getElementById('mode-'+i);
@@ -6611,9 +6652,16 @@ const next = Object.assign({}, tenantSettingsOf(current || {}));
 if (body.theme !== undefined) {
 if (body.theme === null || body.theme === '') { delete next.theme; }
 else {
+const prev = (next.theme && typeof next.theme === 'object') ? next.theme : {};
 const t = {};
 THEME_KEYS.forEach(function (k) { const c = safeHexColor(body.theme && body.theme[k]); if (c) t[k] = c; });
-if (!t.navy && !t.accent) return json({ ok: false, error: 'Theme needs at least a navy or accent colour (#RRGGBB)' }, 400);
+if (body.theme.logo === undefined) { if (prev.logo) { t.logo = prev.logo; t.logoAlt = prev.logoAlt; } }
+else if (body.theme.logo) {
+const logo = safeLogoSrc(body.theme.logo);
+if (!logo) return json({ ok: false, error: 'Logo must be a PNG/SVG/WebP/JPEG under ' + Math.round(THEME_LOGO_MAX / 1000) + ' KB, or an https URL' }, 400);
+t.logo = logo; t.logoAlt = String(body.theme.logoAlt || '').replace(/[<>"]/g, '').slice(0, 80) || null;
+}
+if (!t.navy && !t.accent && !t.logo) return json({ ok: false, error: 'Theme needs a navy or accent colour (#RRGGBB) or a logo' }, 400);
 next.theme = t;
 }
 }
