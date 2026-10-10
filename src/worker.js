@@ -7105,6 +7105,12 @@ integs +
 '<div class="msg" id="integmsg-'+i+'"></div>' +
 '<div class="note">Creating a key marks setup as in progress. Plug the key and webhook URL into their accounting system or middleware - the key is shown once.</div>' +
 '</div>' +
+'<div class="box"><h3>Sign-in code</h3>' +
+'<div class="note">Every password login asks for a 6-digit code by email. Waive it for one user for a short window (e.g. a demo while their inbox is slow).</div>' +
+'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><input type="text" id="mfaemail-'+i+'" placeholder="user@company.com" style="margin:0;max-width:260px;"> <input type="number" id="mfamin-'+i+'" value="30" min="1" max="240" style="margin:0;width:70px;"> min ' +
+'<button class="act" onclick="__mfaSkip('+i+',\\'skip\\')">Skip code</button> <button class="act ghost" onclick="__mfaSkip('+i+',\\'clear\\')">Re-enable</button></div>' +
+'<div class="msg" id="mfamsg-'+i+'"></div>' +
+'</div>' +
 '<div class="box"><h3>Demo data</h3>' +
 '<div class="note">Seeds 10 invoices per department across the offices, plus 5 demo employees with a month of activity, so the workspace has something to show before the real books connect. Remove it any time; a production QuickBooks connection clears it automatically.</div>' +
 '<button class="act" onclick="__demo('+i+',\\'seed\\')">Seed demo data</button> <button class="act ghost" onclick="__demo('+i+',\\'remove\\')">Remove demo data</button>' +
@@ -7173,6 +7179,13 @@ post('/api/admin/onboarding/config', { tenantId: c.tenantId, theme: theme, requi
 }
 if (file && !removeLogo) { if (file.size > 120000) { setMsg('brandmsg-'+i,'Logo file is over 120 KB - export a smaller PNG/SVG.',false); return; } var rd = new FileReader(); rd.onload = function(){ send(String(rd.result)); }; rd.readAsDataURL(file); }
 else send(null);
+};
+window.__mfaSkip = function(i, action){
+var c = DATA[i]; var email = (document.getElementById('mfaemail-'+i).value||'').trim(); var minutes = parseInt(document.getElementById('mfamin-'+i).value, 10) || 30;
+if(!email){ setMsg('mfamsg-'+i,'Enter the user\\'s email first.',false); return; }
+post('/api/admin/onboarding/mfa-skip', { tenantId: c.tenantId, email: email, minutes: minutes, action: action }, 'mfamsg-'+i, function(d){
+setMsg('mfamsg-'+i, action==='clear' ? ('Sign-in code required again for '+d.user+'.') : ('Code waived for '+d.user+' for '+d.minutes+' min (until '+new Date(d.until).toLocaleTimeString()+'). Password alone signs them in.'), true);
+});
 };
 window.__demo = function(i, action){
 var c = DATA[i];
@@ -7929,9 +7942,35 @@ const gate = loginPaymentGate(tenant, user);
 if (gate) return json(gate, 403);
 
 // Second factor: a one-time code by email, unless this browser was trusted
-// within the last 30 days.
-if (!(await mfaTrusted(env, request, user.id))) return mfaStartChallenge(env, user);
+// within the last 30 days or the clAIms team waived the code for this user
+// for a short window (internal onboarding page).
+if (!(await mfaTrusted(env, request, user.id)) && !(await mfaSkipActive(env, user.id))) return mfaStartChallenge(env, user);
 return issueSession(env, user, null);
+}
+async function mfaSkipActive(env, userId) {
+try {
+const rows = await pgSelect(env, 'oauth_states', 'provider=' + pgEq('mfa_skip') + '&user_id=' + pgEq(userId) + '&select=expires_at');
+return (rows || []).some(function (r) { return new Date(r.expires_at).getTime() > Date.now(); });
+} catch (e) { return false; }
+}
+// Internal: waive the sign-in code for one user for a few minutes (e.g. when
+// their inbox is delayed during a demo). Key-gated; never exposed to tenants.
+async function handleAdminOnboardingMfaSkip(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+const email = String(body.email || '').trim().toLowerCase();
+let minutes = parseInt(body.minutes, 10); if (!isFinite(minutes) || minutes < 1) minutes = 30; if (minutes > 240) minutes = 240;
+if (!tenantId || !email) return json({ ok: false, error: 'Company and user email are required.' }, 400);
+const user = await pgSelectOne(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=ilike.' + encodeURIComponent(likeEscape(email)) + '&select=id,email,full_name');
+if (!user) return json({ ok: false, error: 'No user with that email in this company.' }, 404);
+try { await pgDelete(env, 'oauth_states', 'provider=' + pgEq('mfa_skip') + '&user_id=' + pgEq(user.id)); } catch (e) {}
+const until = new Date(Date.now() + minutes * 60000).toISOString();
+if (String(body.action) !== 'clear') {
+await pgInsert(env, 'oauth_states', { state: 'mfa-skip-' + user.id + '-' + randomToken(), user_id: user.id, provider: 'mfa_skip', redirect_to: '', expires_at: until });
+}
+return json({ ok: true, user: user.email, minutes: minutes, until: String(body.action) === 'clear' ? null : until });
 }
 
 /* ---------------------------------------------------------------------------
@@ -8414,6 +8453,9 @@ return handleAdminOnboardingPage();
 }
 if (url.pathname === '/api/admin/onboarding' && request.method === 'GET') {
 return handleAdminOnboardingData(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/mfa-skip' && request.method === 'POST') {
+return handleAdminOnboardingMfaSkip(request, env);
 }
 if (url.pathname === '/api/admin/onboarding/demo' && request.method === 'POST') {
 return handleAdminOnboardingDemo(request, env);
