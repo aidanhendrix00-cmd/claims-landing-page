@@ -7274,18 +7274,46 @@ return !!(env.ADMIN_EXPORT_KEY && key === env.ADMIN_EXPORT_KEY);
 const DEMO_EMAIL_DOMAIN = 'demo.claims-collection.net';
 const DEMO_EXTERNAL_PREFIX = 'demo-';
 const DEMO_CUSTOMERS = [
-['Cedar Ridge Apartments', 'pm', 'Marisol Vega', 'Property Manager'], ['Oak Hollow HOA', 'private', 'Dennis Ruiz', 'Board Treasurer'],
-['Riverside Medical Plaza', 'insurance', 'Tom Alcott', 'Adjuster'], ['Summit Ridge Office Tower', 'pm', 'Priya Natarajan', 'Property Manager'],
-['Vista Del Sol Apartments', 'pm', 'Luis Carranza', 'Property Manager'], ['Copperfield Retail Plaza', 'insurance', 'Angela Boone', 'Adjuster'],
-['Harper Family Residence', 'private', 'Dana Harper', 'Homeowner'], ['Meadowbrook Senior Living', 'pm', 'Keith Mahoney', 'Facilities Director'],
+['Cedar Ridge Apartments', 'pm', 'Marisol Vega', 'Community Manager'], ['The Reserve at Oak Hollow', 'pm', 'Dennis Ruiz', 'Property Manager'],
+['Lakeshore Commons', 'pm', 'Marcus Bell', 'Regional Manager'], ['Summit Ridge Townhomes', 'pm', 'Priya Natarajan', 'Property Manager'],
+['Vista Del Sol Apartments', 'pm', 'Luis Carranza', 'Property Manager'], ['Magnolia Place', 'pm', 'Jordan Pike', 'Community Manager'],
+['Heritage Hills HOA', 'private', 'Carla Mendes', 'Board Treasurer'], ['Meadowbrook Senior Living', 'pm', 'Keith Mahoney', 'Facilities Director'],
 ['Blue Harbor Property Group', 'pm', 'Renee Okafor', 'Regional Manager'], ['Alder Creek HOA', 'private', 'Sam Whitfield', 'HOA President'],
-['Pine Court Townhomes', 'pm', 'Erica Lindqvist', 'Community Manager'], ['Lakeshore Commons', 'pm', 'Marcus Bell', 'Property Manager'],
-['Canyon Creek Veterinary Clinic', 'private', 'Dr. Ana Solis', 'Owner'], ['Westgate Industrial Park', 'insurance', 'Brian Yoder', 'Adjuster'],
-['Saguaro Point Shopping Center', 'insurance', 'Nina Patel', 'Adjuster'], ['Magnolia Place Apartments', 'pm', 'Jordan Pike', 'Property Manager'],
-['Heritage Hills Condominiums', 'private', 'Carla Mendes', 'Board Secretary'], ['Northpark Logistics Center', 'pm', 'Owen Fitzgerald', 'Site Manager'],
-['Stonebridge Apartments', 'pm', 'Tessa Nguyen', 'Property Manager'], ['Elm Street Dental', 'private', 'Dr. Ray Kim', 'Owner']
+['Pine Court Townhomes', 'pm', 'Erica Lindqvist', 'Community Manager'], ['Stonebridge at Riverside', 'pm', 'Tessa Nguyen', 'Property Manager'],
+['Canyon Creek Flats', 'pm', 'Ana Solis', 'Assistant Manager'], ['Westgate Lofts', 'insurance', 'Brian Yoder', 'Adjuster'],
+['Saguaro Point Apartments', 'pm', 'Nina Patel', 'Community Manager'], ['The Avenue at Northpark', 'pm', 'Owen Fitzgerald', 'Property Manager'],
+['Elm Street Residences', 'pm', 'Ray Kim', 'Regional Manager'], ['Copperfield Crossing', 'insurance', 'Angela Boone', 'Adjuster'],
+['Harborview Condominiums', 'private', 'Dana Harper', 'Board Secretary'], ['Grand Parkway Apartments', 'pm', 'Tom Alcott', 'Property Manager']
 ];
-const DEMO_SERVICES = ['Monthly service - Unit 14B', 'Quarterly service - Building C', 'Service call - Suite 220', 'Monthly service - Floors 3-4', 'Emergency call-out - Rear bay', 'Monthly service - Common areas', 'Annual contract - Phase 2', 'Service call - Clubhouse', 'Monthly service - Garage levels', 'Make-ready - 6 units'];
+// What each Revolve business does and where, per revolveprop.com and its press
+// releases (cities marked below as assumed are placements, not statements).
+// Matched by name fragments against the workspace's department labels; any
+// business that matches nothing gets the generic services and all offices.
+const DEMO_BUSINESS_PROFILES = [
+{ match: ['a1 valet'], services: 'trash', cities: ['atlanta', 'nashville', 'charleston', 'durham', 'jacksonville'] },
+{ match: ['g&h', 'gh trash', 'g h trash'], services: 'trash', cities: ['dallas', 'austin', 'houston', 'atlanta'] },
+{ match: ['doorside'], services: 'trash', cities: ['charleston', 'durham', 'jacksonville', 'nashville'] },
+{ match: ['rent ready'], services: 'turns', cities: ['washington', 'stafford', 'seattle', 'portland'] },
+{ match: ['magic make'], services: 'turns', cities: ['austin'] },
+{ match: ['turn factory'], services: 'turns', cities: ['atlanta'] },
+{ match: ['total apartment'], services: 'turns', cities: ['dallas', 'atlanta', 'austin', 'houston'] },
+{ match: ['optimum'], services: 'turns', cities: ['houston', 'dallas', 'chicago'] },
+{ match: ['total cleaning'], services: 'cleaning', cities: ['chicago', 'dallas', 'houston'] },
+{ match: ['premium remodel'], services: 'renovation', cities: ['englewood', 'dallas', 'atlanta'] },
+{ match: ['advantage building'], services: 'porter', cities: ['englewood', 'washington', 'stafford'] }
+];
+const DEMO_SERVICES_BY_TYPE = {
+trash: ['Valet trash - monthly service, 240 doors', 'Valet trash + recycling - monthly service', 'Bulk haul - 3 pickups', 'Valet trash - monthly service, 312 doors', 'Compactor area cleanup', 'Valet trash - monthly service, 168 doors', 'Recycling program - quarterly', 'Bulk haul - move-out week', 'Valet trash - monthly service, 96 doors', 'Dumpster enclosure cleanup'],
+turns: ['Unit turn - Apt 204 (paint, clean, carpet)', 'Make-ready - 6 units, Building C', 'Unit turn - Apt 1108', 'Paint - 4 units, Phase 2', 'Make-ready - 3 units, Building A', 'Resurfacing - tubs & counters, 2 units', 'Unit turn - Apt 312 (full)', 'Make-ready - 8 units, Building D', 'Appliance install - 5 units', 'Unit turn - Apt 1501'],
+cleaning: ['Move-out clean - 5 units', 'Common area deep clean - Clubhouse', 'Housekeeping - weekly, Buildings A-C', 'Carpet clean - 4 units', 'Move-out clean - 3 units', 'Post-renovation clean - Phase 1', 'Housekeeping - weekly, leasing office', 'Garage pressure wash - Levels 1-2', 'Move-out clean - 8 units', 'Window clean - exterior, Building B'],
+renovation: ['Kitchen renovation - 4 units', 'Common area renovation - Clubhouse', 'Bath renovation - 6 units', 'Flooring replacement - Building B', 'Capital project - pool deck', 'Occupied unit renovation - 3 units', 'Exterior paint - Phase 1', 'Amenity upgrade - fitness center', 'Renovation - 2 model units', 'Balcony repairs - Building C'],
+porter: ['Porter staffing - monthly, 2 FTE', 'Housekeeping & porter - monthly', 'Grounds porter - monthly', 'Porter staffing - monthly, 1 FTE', 'Common area maintenance - monthly', 'Hallway & garage upkeep - monthly', 'Porter staffing - lease-up', 'Grounds & breezeways - monthly', 'Porter staffing - monthly, 3 FTE', 'Event setup & cleanup']
+};
+const DEMO_SERVICES = DEMO_SERVICES_BY_TYPE.turns;
+function demoProfileFor(deptLabel) {
+const key = String(deptLabel || '').toLowerCase().replace(/&amp;/g, '&');
+return DEMO_BUSINESS_PROFILES.find(function (p) { return p.match.some(function (m) { return key.indexOf(m) !== -1; }); }) || null;
+}
 const DEMO_EMPLOYEES = [
 ['Jordan Hale', 'manager'], ['Alexis Moreno', 'user'], ['Taylor Brooks', 'user'], ['Casey Nwosu', 'user'], ['Riley Thompson', 'manager']
 ];
@@ -7339,6 +7367,8 @@ let n = 0; let created = 0;
 const accountRows = []; const accountMeta = []; const perOffice = {};
 function addInvoice(dept, office, k) {
 const c = DEMO_CUSTOMERS[(n * 7 + k) % DEMO_CUSTOMERS.length];
+const profile = demoProfileFor(departments[dept]);
+const services = DEMO_SERVICES_BY_TYPE[profile ? profile.services : 'turns'] || DEMO_SERVICES;
 const days = [3, 9, 17, 26, 34, 48, 61, 75, 92, 118][k % 10];
 const amount = Math.round((350 + rnd() * 17800) * 100) / 100;
 const paidKind = k === 2 || k === 7 ? 'paid' : (k === 5 ? 'partial' : 'open');
@@ -7349,7 +7379,7 @@ const paidAt = paidKind === 'paid' ? new Date(invoicedAt.getTime() + (4 + Math.f
 accountMeta.push({ days: days, paidKind: paidKind, paidAt: paidAt, paidAmount: paidAmount, payer: c[1], customer: c[0], seq: created + 1 });
 accountRows.push({
 tenant_id: tenant.id, external_id: DEMO_EXTERNAL_PREFIX + tenant.id + '-' + (++created),
-office: office, customer_name: c[0], meta: DEMO_SERVICES[k], payer: c[1], contact: c[2] + ' (' + c[3] + ')',
+office: office, customer_name: c[0], meta: services[k % services.length], payer: c[1], contact: c[2] + ' (' + c[3] + ')',
 contact_email: demoContactEmail(c[2], c[0]), contact_info: c[2] + ' · ' + demoContactEmail(c[2], c[0]) + ' · (555) 01' + String(10 + k) + '-' + String(1000 + n * 37 + k * 11).slice(-4) + ' · ' + c[3],
 claim_number: c[1] === 'insurance' ? ('CLM-' + (240000 + n * 97 + k * 13)) : null,
 invoice_number: invoiceNumber, amount: amount, invoiced_at: invoicedAt.toISOString(),
@@ -7359,13 +7389,28 @@ note: 'Demo invoice — ' + departments[dept] + (office ? ' · ' + offices[offic
 });
 if (office) perOffice[office] = (perOffice[office] || 0) + 1;
 }
+// Each business's invoices land in the cities it serves (matched against the
+// workspace's office list); businesses with no match rotate through all offices.
+function officesFor(dept) {
+const profile = demoProfileFor(departments[dept]);
+if (!profile) return officeKeys;
+const matched = officeKeys.filter(function (ok) {
+const label = String(offices[ok] || ok).toLowerCase();
+return profile.cities.some(function (city) { return label.indexOf(city) !== -1 || ok.indexOf(city.replace(/\s+/g, '')) !== -1; });
+});
+return matched.length ? matched : officeKeys;
+}
 for (const dept of deptKeys) {
-for (let k = 0; k < 10; k++) addInvoice(dept, officeKeys[(n + k) % officeKeys.length] || null, k);
+const pool = officesFor(dept);
+for (let k = 0; k < 10; k++) addInvoice(dept, pool[(n + k) % pool.length] || null, k);
 n++;
 }
 for (const office of officeKeys) {
+// Top up with businesses that serve this city first, then any business.
+const serving = deptKeys.filter(function (d) { return officesFor(d).indexOf(office) !== -1; });
+const pool = serving.length ? serving : deptKeys;
 let k = 0;
-while ((perOffice[office] || 0) < 10 && k < 40) { addInvoice(deptKeys[(n + k) % deptKeys.length], office, k); k++; }
+while ((perOffice[office] || 0) < 10 && k < 40) { addInvoice(pool[(n + k) % pool.length], office, k); k++; }
 n++;
 }
 const inserted = await pgInsert(env, 'accounts', accountRows) || [];
