@@ -7332,14 +7332,14 @@ role: role, email_verified: true, status: 'active', full_name: name, office: off
 // Bulk inserts: one request per table keeps this well inside a single
 // invocation's outbound-request budget.
 const employees = (await pgInsert(env, 'users', userRows) || []).map(function (u) { return { id: u.id, full_name: u.full_name, role: u.role, office: u.office }; });
-// Ten invoices per department, spread across offices and the aging buckets.
+// Ten invoices per department (operating company), spread across offices and
+// the aging buckets; then every office is topped up so each city shows at
+// least ten as well.
 let n = 0; let created = 0;
-const accountRows = []; const accountMeta = [];
-for (const dept of deptKeys) {
-for (let k = 0; k < 10; k++) {
+const accountRows = []; const accountMeta = []; const perOffice = {};
+function addInvoice(dept, office, k) {
 const c = DEMO_CUSTOMERS[(n * 7 + k) % DEMO_CUSTOMERS.length];
-const office = officeKeys[(n + k) % officeKeys.length] || null;
-const days = [3, 9, 17, 26, 34, 48, 61, 75, 92, 118][k];
+const days = [3, 9, 17, 26, 34, 48, 61, 75, 92, 118][k % 10];
 const amount = Math.round((350 + rnd() * 17800) * 100) / 100;
 const paidKind = k === 2 || k === 7 ? 'paid' : (k === 5 ? 'partial' : 'open');
 const paidAmount = paidKind === 'paid' ? amount : (paidKind === 'partial' ? Math.round(amount * 0.4 * 100) / 100 : 0);
@@ -7357,7 +7357,15 @@ status: paidKind === 'paid' ? 'paid' : 'in_ar', paid_amount: paidAmount, paid_at
 department: dept, category: null, follow_up_count: paidKind === 'open' ? Math.min(3, Math.floor(days / 20)) : 1,
 note: 'Demo invoice — ' + departments[dept] + (office ? ' · ' + offices[office] : ''), escalated: days > 90 && paidKind === 'open', wa_sent: days > 30
 });
+if (office) perOffice[office] = (perOffice[office] || 0) + 1;
 }
+for (const dept of deptKeys) {
+for (let k = 0; k < 10; k++) addInvoice(dept, officeKeys[(n + k) % officeKeys.length] || null, k);
+n++;
+}
+for (const office of officeKeys) {
+let k = 0;
+while ((perOffice[office] || 0) < 10 && k < 40) { addInvoice(deptKeys[(n + k) % deptKeys.length], office, k); k++; }
 n++;
 }
 const inserted = await pgInsert(env, 'accounts', accountRows) || [];
