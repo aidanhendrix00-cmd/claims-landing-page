@@ -6491,6 +6491,7 @@ function allowedWhileLocked(pathname) {
 return pathname === '/api/me' ||
 pathname === '/api/logout' ||
 pathname === '/api/login' ||
+pathname === '/api/login/verify' ||
 pathname === '/api/billing-portal' ||
 pathname === '/api/subscription' ||
 pathname === '/api/subscription/reactivate' ||
@@ -7874,15 +7875,112 @@ const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + 
 const gate = loginPaymentGate(tenant, user);
 if (gate) return json(gate, 403);
 
+// Second factor: a one-time code by email, unless this browser was trusted
+// within the last 30 days.
+if (!(await mfaTrusted(env, request, user.id))) return mfaStartChallenge(env, user);
+return issueSession(env, user, null);
+}
+
+/* ---------------------------------------------------------------------------
+   Two-step sign-in (email one-time code)
+   After a correct password the user gets a six-digit code by email and must
+   enter it before a session is issued. Codes live 10 minutes, allow five
+   attempts, and are stored hashed. "Trust this browser" sets a signed cookie
+   (no database row) that skips the code on that browser for 30 days. Magic
+   links and password-reset links already prove control of the inbox, so they
+   are not challenged again.
+   --------------------------------------------------------------------------- */
+const MFA_CODE_TTL_SECONDS = 10 * 60;
+const MFA_MAX_ATTEMPTS = 5;
+const MFA_TRUST_COOKIE = 'clms_trust';
+const MFA_TRUST_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+async function sha256Hex(text) {
+const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text)));
+return toHex(buf);
+}
+async function mfaHmac(env, text) {
+const secret = String(env.TOKEN_ENCRYPTION_KEY || env.SUPABASE_SERVICE_KEY || '');
+const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+return toHex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(String(text))));
+}
+function mfaMaskEmail(email) {
+const parts = String(email || '').split('@');
+if (parts.length !== 2) return '';
+const name = parts[0];
+return (name.length <= 2 ? name[0] + '\u2022' : name.slice(0, 2) + '\u2022\u2022\u2022') + '@' + parts[1];
+}
+async function mfaTrusted(env, request, userId) {
+const raw = parseCookies(request)[MFA_TRUST_COOKIE];
+if (!raw) return false;
+const parts = String(raw).split('.');
+if (parts.length !== 3) return false;
+if (String(parts[0]) !== String(userId)) return false;
+const exp = parseInt(parts[1], 10);
+if (!isFinite(exp) || exp * 1000 < Date.now()) return false;
+const expected = await mfaHmac(env, parts[0] + '.' + parts[1]);
+if (expected.length !== parts[2].length) return false;
+let diff = 0;
+for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ parts[2].charCodeAt(i);
+return diff === 0;
+}
+async function mfaTrustCookie(env, userId) {
+const exp = Math.floor(Date.now() / 1000) + MFA_TRUST_TTL_SECONDS;
+const sig = await mfaHmac(env, String(userId) + '.' + exp);
+return MFA_TRUST_COOKIE + '=' + userId + '.' + exp + '.' + sig + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + MFA_TRUST_TTL_SECONDS;
+}
+async function issueSession(env, user, extraCookie) {
 const token = randomToken();
 const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString();
 await pgInsert(env, 'sessions', { token: token, user_id: user.id, expires_at: expiresAt });
-
-const cookie = SESSION_COOKIE + '=' + token + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS;
-return new Response(JSON.stringify({ ok: true, redirect: '/account' }), {
-status: 200,
-headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookie, 'Cache-Control': NO_STORE }
-});
+const headers = new Headers({ 'Content-Type': 'application/json', 'Cache-Control': NO_STORE });
+headers.append('Set-Cookie', SESSION_COOKIE + '=' + token + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=' + SESSION_TTL_SECONDS);
+if (extraCookie) headers.append('Set-Cookie', extraCookie);
+return new Response(JSON.stringify({ ok: true, redirect: '/account' }), { status: 200, headers: headers });
+}
+async function mfaStartChallenge(env, user) {
+const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
+const challenge = randomToken();
+try { await pgDelete(env, 'oauth_states', 'provider=' + pgEq('mfa') + '&user_id=' + pgEq(user.id)); } catch (e) {}
+await pgInsert(env, 'oauth_states', { state: 'mfa-' + challenge, user_id: user.id, provider: 'mfa',
+redirect_to: JSON.stringify({ h: await sha256Hex(code + ':' + challenge), a: 0 }),
+expires_at: new Date(Date.now() + MFA_CODE_TTL_SECONDS * 1000).toISOString() });
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+'<h2 style="margin:0 0 12px;">Your clAIms sign-in code</h2>' +
+'<p style="font-size:32px;letter-spacing:8px;font-weight:700;margin:16px 0;">' + code + '</p>' +
+'<p>Enter this code to finish signing in. It expires in 10 minutes.</p>' +
+'<p style="margin-top:20px;font-size:12px;color:#8a8a8a;">If you did not try to sign in, you can ignore this email; your password still protects your account, but consider changing it.</p>' +
+'</div>';
+await sendEmail(env, { to: user.email, subject: 'Your clAIms sign-in code: ' + code, html: html, kind: 'mfa_code', tenantId: user.tenant_id, userId: user.id });
+return json({ ok: true, mfa: true, challenge: challenge, sentTo: mfaMaskEmail(user.email) });
+}
+async function handleLoginVerify(request, env) {
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const challenge = String(body.challenge || '').trim();
+const code = String(body.code || '').replace(/\D/g, '');
+if (!challenge || code.length !== 6) return json({ ok: false, error: 'Enter the 6-digit code from your email.' }, 400);
+const st = await pgSelectOne(env, 'oauth_states', 'state=' + pgEq('mfa-' + challenge) + '&provider=' + pgEq('mfa') + '&select=*');
+if (!st) return json({ ok: false, error: 'That code is no longer valid. Please log in again.', restart: true }, 410);
+if (new Date(st.expires_at) < new Date()) {
+await pgDelete(env, 'oauth_states', 'state=' + pgEq(st.state));
+return json({ ok: false, error: 'That code has expired. Please log in again.', restart: true }, 410);
+}
+let rec = {}; try { rec = JSON.parse(st.redirect_to || '{}'); } catch (e) {}
+const ok = (await sha256Hex(code + ':' + challenge)) === rec.h;
+if (!ok) {
+const attempts = (rec.a || 0) + 1;
+if (attempts >= MFA_MAX_ATTEMPTS) {
+await pgDelete(env, 'oauth_states', 'state=' + pgEq(st.state));
+return json({ ok: false, error: 'Too many incorrect codes. Please log in again.', restart: true }, 429);
+}
+await pgUpdate(env, 'oauth_states', 'state=' + pgEq(st.state), { redirect_to: JSON.stringify({ h: rec.h, a: attempts }) });
+return json({ ok: false, error: 'That code is not right. ' + (MFA_MAX_ATTEMPTS - attempts) + ' attempt' + (MFA_MAX_ATTEMPTS - attempts === 1 ? '' : 's') + ' left.' }, 401);
+}
+await pgDelete(env, 'oauth_states', 'state=' + pgEq(st.state));
+const user = await pgSelectOne(env, 'users', 'id=' + pgEq(st.user_id) + '&select=*');
+if (!user) return json({ ok: false, error: 'Please log in again.', restart: true }, 410);
+return issueSession(env, user, body.trust ? await mfaTrustCookie(env, user.id) : null);
 }
 
 // Server-side proxy for AI drafting: the browser never holds an API key.
@@ -8227,6 +8325,9 @@ if (lockedCtx) return json(lockedApiBody(lockedCtx), 402);
 
 if (url.pathname === '/email-logo.png' && request.method === 'GET') {
 return new Response(emailLogoBytes(), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' } });
+}
+if (url.pathname === '/api/login/verify' && request.method === 'POST') {
+return handleLoginVerify(request, env);
 }
 if (url.pathname === '/api/login' && request.method === 'POST') {
 return handleLogin(request, env);
