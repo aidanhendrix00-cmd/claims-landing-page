@@ -3787,7 +3787,12 @@ await qboSleep(800 * Math.pow(2, attempt) + Math.floor(Math.random() * 300));
 return qboGet(env, conn, path, attempt + 1);
 }
 const text = await res.text();
-if (!res.ok) { const err = new Error('QBO_API status=' + res.status + ' ' + text.slice(0, 300)); err.status = res.status; err.body = text; throw err; }
+if (!res.ok) {
+// intuit_tid identifies the request on Intuit's side; keep it with every error for their support.
+const tid = res.headers.get('intuit_tid') || '';
+console.log('QBO_API_ERROR status=' + res.status + ' intuit_tid=' + tid + ' path=' + path.split('?')[0] + ' body=' + text.slice(0, 200).replace(/\s+/g, ' '));
+const err = new Error('QBO_API status=' + res.status + (tid ? ' intuit_tid=' + tid : '') + ' ' + text.slice(0, 300)); err.status = res.status; err.body = text; err.intuitTid = tid; throw err;
+}
 return text ? JSON.parse(text) : {};
 }
 async function qboQuery(env, conn, entity, where, start, max) {
