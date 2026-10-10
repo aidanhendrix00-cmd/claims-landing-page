@@ -890,18 +890,19 @@
 <div class="integration-card" id="qb-connect-card" data-qb-only="1" style="display:none;flex-direction:column;align-items:stretch;gap:0;">
 <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
 <div style="flex:1;min-width:240px;">
-<div class="name"><span class="dot-pending"></span> Connect QuickBooks Online</div>
-<div class="sub">Paste the API key from your QuickBooks account and clAIms takes it from there — your open invoices, customers and payments flow into every tab automatically and stay in sync. Nothing else to configure.</div>
-<div class="form-grid-2" style="margin-top:12px;max-width:560px;">
-<div class="form-row"><label for="qb-api-key">QuickBooks API key</label><input type="password" id="qb-api-key" autocomplete="off" placeholder="Paste your QuickBooks API key"></div>
-<div class="form-row"><label for="qb-realm-id">Company ID <span style="color:var(--slate);font-weight:400;">(optional)</span></label><input type="text" id="qb-realm-id" autocomplete="off" placeholder="QuickBooks Company / Realm ID"></div>
-</div>
-<div class="sub" style="margin-top:6px;">Find both in QuickBooks under <b>Settings &rarr; Apps</b> (or your developer keys page). Your key stays on your workspace and is used only to read invoices and payments.</div>
+<div class="name"><span class="dot-pending"></span> <span id="qb-card-title">Connect QuickBooks Online</span></div>
+<div class="sub" id="qb-card-sub">Sign in to QuickBooks and approve read-only access &mdash; about 30 seconds. clAIms then imports your open invoices, customers and payments into every tab and keeps them in step automatically. When a payment posts in QuickBooks, follow-ups for that invoice stop on their own.</div>
+<div class="sub" style="margin-top:8px;">clAIms only <b>reads</b> from QuickBooks &mdash; it never changes your books. You can disconnect any time.</div>
+<div class="sub" id="qb-card-note" style="margin-top:8px;display:none;"></div>
 </div>
 <div class="actions-col" style="align-self:flex-end;">
-<button class="btn-primary" id="qb-connect-btn" onclick="connectQuickBooks()">Connect QuickBooks</button>
+<button class="btn-primary" id="qb-connect-btn" onclick="connectQuickBooks()" style="background:#2CA01C;border-color:#2CA01C;">Connect to QuickBooks</button>
 </div>
 </div>
+</div>
+<div class="integration-card" id="qb-progress-card" style="display:none;flex-direction:column;align-items:stretch;border-color:var(--teal);">
+<div class="name"><span class="dot-live"></span> <span id="qb-progress-title">Importing from QuickBooks&hellip;</span></div>
+<div class="sub" id="qb-progress-sub" style="margin-top:4px;">Your open invoices are coming in now. You can keep working &mdash; they appear in every tab as they arrive.</div>
 </div>
 <div class="integration-card" data-base-admin-only="1">
 <div>
@@ -2079,9 +2080,9 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
     const live = (state.realIntegrations || []).some(function(i){ return i.status === 'connected'; });
     if (me && me.integrationMode === 'quickbooks') {
       if (!live) return me.role === 'admin'
-        ? 'No invoices yet. Connect QuickBooks Online under <a href="#" onclick="event.preventDefault();var n=document.querySelector(\'.nav-item[data-view=integrations]\');if(n)n.click();">Integrations</a> — one API key is all it takes — and your open invoices appear here automatically.'
+        ? 'No invoices yet. Connect QuickBooks Online under <a href="#" onclick="event.preventDefault();var n=document.querySelector(\'.nav-item[data-view=integrations]\');if(n)n.click();">Integrations</a> — one click and a QuickBooks sign-in — and your open invoices appear here automatically.'
         : 'No invoices yet. Once your admin connects QuickBooks Online, open invoices appear here automatically.';
-      return 'QuickBooks is connected — open invoices appear here after the first sync, then stay in step automatically.';
+      return (window.__qbStatus && window.__qbStatus.importing) ? 'QuickBooks is connected — your open invoices are importing now and will appear here in a moment.' : 'QuickBooks is connected — there are no open invoices in QuickBooks right now. New ones appear here automatically.';
     }
     return live ? 'No open invoices yet. New invoices from your accounting system appear here automatically.' : 'No invoices yet. Once your accounting system is connected, open invoices appear here automatically.';
   }
@@ -2100,6 +2101,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   await loadCurrentUser();
   await loadRealAccounts();
 await loadRealIntegrations();
+qbInit();
     if(!state.currentUser){
       renderTeam();
       document.querySelectorAll('[data-real-only]').forEach(function(el){ el.style.display = 'none'; });
@@ -6184,14 +6186,16 @@ wrap.innerHTML = list.map(integ => `
 <div>
 <div class="name"><span class="${integ.status === 'connected' ? 'dot-live' : 'dot-pending'}"></span> ${hEsc(integ.provider)} ${integ.status === 'connected' ? '<span class="badge">LIVE</span>' : '<span class="badge warn">DISCONNECTED</span>'}</div>
 <div class="sub">${integ.status === 'connected' ? 'Connected ' + fmtTimeAgo(integ.connected_at) : 'Disconnected'}</div>
-${integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Last synced ${integ.last_synced_at ? fmtTimeAgo(integ.last_synced_at) : (qbMode ? 'never \u2014 the first sync runs as soon as the sync agent is attached' : 'never \u2014 waiting for the first data push')}</div>` : ''}
+${integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Last synced ${integ.last_synced_at ? fmtTimeAgo(integ.last_synced_at) : (qbMode ? 'never \u2014 the first import is running now' : 'never \u2014 waiting for the first data push')}</div>` : ''}
 ${concierge && integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Managed by the clAIms team \u2014 request changes below.</div>` : ''}
 ${qbMode && integ.status !== 'connected' && me.role === 'admin' ? `<div class="sub" style="margin-top:2px;">Reconnect with the card below.</div>` : ''}
+${qbMode && integ.status === 'connected' && window.__qbStatus && window.__qbStatus.companyName ? `<div class="sub" style="margin-top:2px;">QuickBooks company: ${hEsc(window.__qbStatus.companyName)}${window.__qbStatus.sandbox ? ' (sandbox)' : ''}</div>` : ''}
+${qbMode && integ.status === 'connected' && window.__qbStatus && window.__qbStatus.lastError ? `<div class="sub" style="margin-top:2px;color:#8A1C13;">${hEsc(window.__qbStatus.lastError)}</div>` : ''}
 </div>
 <div class="actions-col">
 ${integ.status === 'connected'
 ? (concierge ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button>`
-: qbMode ? (me.role === 'admin' ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="showQuickBooksCard()">Update Key</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>` : '')
+: qbMode ? (me.role === 'admin' ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>` : '')
 : `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Regenerate Key</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>`)
 : (concierge ? `<span class="sub">We\u2019ll reconnect this for you</span>` : qbMode ? '' : `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Reconnect</button>`)}
 </div>
@@ -6207,45 +6211,72 @@ const key = document.getElementById('qb-api-key'); if (key) { key.value = ''; ke
 try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
 }
 
-// QuickBooks-only workspaces: the admin pastes the company's QuickBooks key
-// once; clAIms keeps it on the integration row and hands the sync agent a
-// clAIms key in return. The customer never sees a webhook or JSON schema.
-async function connectQuickBooks(){
-const keyEl = document.getElementById('qb-api-key');
-const realmEl = document.getElementById('qb-realm-id');
+// QuickBooks-only workspaces: one click hands off to Intuit's sign-in screen;
+// clAIms brings the admin back here and imports everything itself.
+function connectQuickBooks(){
+const me = (window.__me && window.__me.ok) ? window.__me : null;
+if (me && me.quickbooksOAuth === false) { showToast('The QuickBooks connection is being finalized \u2014 please try again shortly.'); return; }
 const btn = document.getElementById('qb-connect-btn');
-const credential = keyEl ? keyEl.value.trim() : '';
-const realmId = realmEl ? realmEl.value.trim() : '';
-if (!credential){ showToast('Paste your QuickBooks API key first.'); if (keyEl) keyEl.focus(); return; }
-if (credential.length < 8){ showToast('That key looks too short \u2014 copy the full API key from QuickBooks.'); return; }
-if (btn){ btn.disabled = true; btn.textContent = 'Connecting\u2026'; }
-try {
-const res = await fetch('/api/integrations/connect', {
-method: 'POST', credentials: 'include',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ provider: 'QuickBooks Online', credential: credential, realmId: realmId })
-});
-const data = await res.json().catch(function(){ return null; });
-if (!res.ok || !data || !data.ok){ showToast((data && data.error) || 'Unable to connect QuickBooks. Please try again.'); return; }
-if (keyEl) keyEl.value = '';
-const wrap = document.getElementById('real-integration-credentials');
-if (wrap) {
-wrap.innerHTML = `
-<div class="integration-card" style="border-color:var(--teal);flex-direction:column;align-items:stretch;">
-<div class="name" style="margin-bottom:6px;"><span class="dot-live"></span> QuickBooks Online connected</div>
-<div class="sub" style="margin-bottom:8px;">Your QuickBooks key is saved. From here on, invoices and payments sync into this dashboard automatically \u2014 the first sync runs as soon as the clAIms sync agent is attached to your workspace, and the connection card above shows the last sync time.</div>
-<details style="margin-top:4px;"><summary class="sub" style="cursor:pointer;">Technical details for your sync agent (shown once)</summary>
-<div class="field-map" style="margin:8px 0 6px;">Source URL (returns your QuickBooks credential + department map)<br><code style="user-select:all;">${hEsc(data.sourceUrl || '')}</code> <button class="btn-small" onclick="copyRiValue(this.previousElementSibling.textContent)">Copy</button></div>
-<div class="field-map" style="margin-bottom:6px;">Push URL<br><code style="user-select:all;">${hEsc(data.syncUrl)}</code> <button class="btn-small" onclick="copyRiValue(this.previousElementSibling.textContent)">Copy</button></div>
-<div class="field-map" style="margin-bottom:6px;">Authorization header<br><code style="user-select:all;">Bearer ${hEsc(data.apiKey)}</code> <button class="btn-small" onclick="copyRiValue(this.previousElementSibling.textContent)">Copy</button></div>
-<div class="sub">Only the clAIms team or the sync agent needs these. Connecting again with a new key replaces them.</div>
-</details>
-</div>`;
+if (btn){ btn.disabled = true; btn.textContent = 'Opening QuickBooks\u2026'; }
+window.location.href = '/api/quickbooks/connect';
 }
-showToast('QuickBooks connected.');
-loadRealIntegrations();
-} catch (err) { showToast('Unable to connect QuickBooks. Please try again.'); }
-finally { if (btn){ btn.disabled = false; btn.textContent = 'Connect QuickBooks'; } }
+
+// Live QuickBooks status: the import progress card, the reconnect prompt, and
+// the message shown when an admin comes back from Intuit's sign-in screen.
+let qbPollTimer = null;
+async function qbRefreshStatus(){
+const me = (window.__me && window.__me.ok) ? window.__me : null;
+if (!me || me.integrationMode !== 'quickbooks') return null;
+let st = null;
+try { const r = await fetch('/api/quickbooks/status', { credentials: 'include' }); st = r.ok ? await r.json() : null; } catch (e) { st = null; }
+if (!st || !st.ok) return null;
+const wasImporting = !!(window.__qbStatus && window.__qbStatus.importing);
+window.__qbStatus = st;
+const prog = document.getElementById('qb-progress-card');
+if (prog) {
+prog.style.display = st.importing ? '' : 'none';
+const sub = document.getElementById('qb-progress-sub');
+if (sub && st.importing) sub.textContent = (st.imported ? st.imported + ' open invoice' + (st.imported === 1 ? '' : 's') + ' imported so far. ' : '') + 'You can keep working \u2014 invoices appear in every tab as they arrive.';
+}
+const note = document.getElementById('qb-card-note');
+const title = document.getElementById('qb-card-title');
+if (note) {
+if (st.needsReconnect) { note.style.display = ''; note.style.color = '#8A1C13'; note.textContent = st.reconnectReason || 'QuickBooks stopped accepting the connection. Reconnect to resume syncing.'; if (title) title.textContent = 'Reconnect QuickBooks Online'; }
+else if (st.configured === false) { note.style.display = ''; note.style.color = ''; note.textContent = 'The QuickBooks connection is being finalized by the clAIms team and will be ready shortly.'; }
+else { note.style.display = 'none'; if (title) title.textContent = 'Connect QuickBooks Online'; }
+}
+const btn = document.getElementById('qb-connect-btn');
+if (btn){ btn.disabled = st.configured === false; btn.textContent = st.needsReconnect ? 'Reconnect QuickBooks' : 'Connect to QuickBooks'; }
+if (wasImporting && !st.importing) { loadRealIntegrations(); if (typeof loadRealAccounts === 'function') loadRealAccounts(); showToast('QuickBooks import finished \u2014 your open invoices are in.'); }
+else if (st.importing && typeof loadRealAccounts === 'function') { loadRealAccounts(); }
+clearTimeout(qbPollTimer);
+if (st.importing) qbPollTimer = setTimeout(qbRefreshStatus, 6000);
+return st;
+}
+async function qbInit(){
+const params = new URLSearchParams(window.location.search);
+const result = params.get('qbo');
+if (result) {
+const messages = {
+connected: 'QuickBooks connected \u2014 importing your open invoices now.',
+declined: 'QuickBooks connection was cancelled.',
+expired: 'That took a little too long \u2014 please click Connect to QuickBooks again.',
+token_failed: 'QuickBooks did not accept the sign-in. Please try connecting again.',
+realm_in_use: 'That QuickBooks company is already connected to another clAIms workspace.',
+plan_limit: 'Your plan\u2019s integration limit is reached. Disconnect one or upgrade to connect QuickBooks.',
+not_configured: 'The QuickBooks connection is being finalized \u2014 please try again shortly.',
+not_allowed: 'Only your company admin can connect QuickBooks.',
+disconnected: 'QuickBooks was disconnected from the QuickBooks side.',
+failed: 'Could not connect QuickBooks. Please try again.'
+};
+showToast(messages[result] || messages.failed);
+params.delete('qbo');
+const qs = params.toString();
+try { history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash); } catch (e) {}
+const nav = document.querySelector('.nav-item[data-view=integrations]'); if (nav) nav.click();
+}
+const st = await qbRefreshStatus();
+if (st) { loadRealIntegrations(); }
 }
 
 async function connectRealIntegration(){
