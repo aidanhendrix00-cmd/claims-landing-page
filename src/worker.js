@@ -4152,6 +4152,8 @@ let integrationId;
 if (existing) { await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), rowPatch); integrationId = existing.id; }
 else { const ins = await pgInsert(env, 'integrations', Object.assign({ tenant_id: owner.tenant_id, provider: QBO_PROVIDER }, rowPatch)); integrationId = ins && ins.id; }
 try { await pgUpdate(env, 'tenants', 'id=' + pgEq(owner.tenant_id), { integration_status: 'complete' }); } catch (e) {}
+// Real books arriving: clear any demo invoices/employees so nothing fake mixes in.
+if (!qboSandbox(env)) { try { await demoRemove(env, owner.tenant_id); } catch (e) { console.log('DEMO_REMOVE_FAILED ' + (e && e.message)); } }
 const conn = { id: integrationId, tenant_id: owner.tenant_id, status: 'connected', cfg: cfg, _access: tokens.access_token, _accessUntil: Date.now() + 3000000 };
 try {
 const info = await qboGet(env, conn, 'companyinfo/' + encodeURIComponent(realmId));
@@ -7097,6 +7099,11 @@ integs +
 '<div class="msg" id="integmsg-'+i+'"></div>' +
 '<div class="note">Creating a key marks setup as in progress. Plug the key and webhook URL into their accounting system or middleware - the key is shown once.</div>' +
 '</div>' +
+'<div class="box"><h3>Demo data</h3>' +
+'<div class="note">Seeds 10 invoices per department across the offices, plus 5 demo employees with a month of activity, so the workspace has something to show before the real books connect. Remove it any time; a production QuickBooks connection clears it automatically.</div>' +
+'<button class="act" onclick="__demo('+i+',\\'seed\\')">Seed demo data</button> <button class="act ghost" onclick="__demo('+i+',\\'remove\\')">Remove demo data</button>' +
+'<div class="msg" id="demomsg-'+i+'"></div>' +
+'</div>' +
 '<div class="box"><h3>Branding &amp; email policy</h3>' +
 '<div class="note" style="margin:0 0 6px;">Header / sidebar colour and accent colour for this company\\'s signed-in pages (hex). Leave blank for the clAIms brand.</div>' +
 '<div style="display:flex;gap:8px;align-items:center;"><input type="text" id="thn-'+i+'" placeholder="#374A5C navy" value="'+esc((c.theme&&c.theme.navy)||'')+'" style="flex:1;"><input type="text" id="tha-'+i+'" placeholder="#83B0D8 accent" value="'+esc((c.theme&&c.theme.accent)||'')+'" style="flex:1;"></div>' +
@@ -7160,6 +7167,14 @@ post('/api/admin/onboarding/config', { tenantId: c.tenantId, theme: theme, requi
 }
 if (file && !removeLogo) { if (file.size > 120000) { setMsg('brandmsg-'+i,'Logo file is over 120 KB - export a smaller PNG/SVG.',false); return; } var rd = new FileReader(); rd.onload = function(){ send(String(rd.result)); }; rd.readAsDataURL(file); }
 else send(null);
+};
+window.__demo = function(i, action){
+var c = DATA[i];
+if(action==='remove' && !confirm('Remove all demo invoices, demo employees and their activity from '+(c.company||'this company')+'?')) return;
+setMsg('demomsg-'+i, action==='seed'?'Seeding\u2026':'Removing\u2026', true);
+post('/api/admin/onboarding/demo', { tenantId: c.tenantId, action: action }, 'demomsg-'+i, function(d){
+setMsg('demomsg-'+i, action==='seed' ? ('Seeded '+d.accounts+' invoices across '+d.departments+' departments / '+d.offices+' offices, '+d.employees+' demo employees, '+d.activity+' activity entries.') : ('Removed '+d.accounts+' demo invoices and '+d.employees+' demo employees.'), true);
+});
 };
 window.__setMode = function(i){
 var c = DATA[i]; var sel = document.getElementById('mode-'+i);
@@ -7240,6 +7255,159 @@ function adminKeyOk(request, env) {
 const url = new URL(request.url);
 const key = url.searchParams.get('key') || '';
 return !!(env.ADMIN_EXPORT_KEY && key === env.ADMIN_EXPORT_KEY);
+}
+
+/* ---------------------------------------------------------------------------
+   Demo data for a company workspace (internal onboarding page)
+   Seeds 10 invoices per department (operating company), spread across the
+   company's offices, plus 5 demo employees with a month of realistic activity,
+   so a new workspace has something to show before the real books connect.
+   Everything is tagged so "Remove demo data" takes it all out again, and a
+   production QuickBooks connection clears it automatically.
+   --------------------------------------------------------------------------- */
+const DEMO_EMAIL_DOMAIN = 'demo.claims-collection.net';
+const DEMO_EXTERNAL_PREFIX = 'demo-';
+const DEMO_CUSTOMERS = [
+['Cedar Ridge Apartments', 'pm', 'Marisol Vega', 'Property Manager'], ['Oak Hollow HOA', 'private', 'Dennis Ruiz', 'Board Treasurer'],
+['Riverside Medical Plaza', 'insurance', 'Tom Alcott', 'Adjuster'], ['Summit Ridge Office Tower', 'pm', 'Priya Natarajan', 'Property Manager'],
+['Vista Del Sol Apartments', 'pm', 'Luis Carranza', 'Property Manager'], ['Copperfield Retail Plaza', 'insurance', 'Angela Boone', 'Adjuster'],
+['Harper Family Residence', 'private', 'Dana Harper', 'Homeowner'], ['Meadowbrook Senior Living', 'pm', 'Keith Mahoney', 'Facilities Director'],
+['Blue Harbor Property Group', 'pm', 'Renee Okafor', 'Regional Manager'], ['Alder Creek HOA', 'private', 'Sam Whitfield', 'HOA President'],
+['Pine Court Townhomes', 'pm', 'Erica Lindqvist', 'Community Manager'], ['Lakeshore Commons', 'pm', 'Marcus Bell', 'Property Manager'],
+['Canyon Creek Veterinary Clinic', 'private', 'Dr. Ana Solis', 'Owner'], ['Westgate Industrial Park', 'insurance', 'Brian Yoder', 'Adjuster'],
+['Saguaro Point Shopping Center', 'insurance', 'Nina Patel', 'Adjuster'], ['Magnolia Place Apartments', 'pm', 'Jordan Pike', 'Property Manager'],
+['Heritage Hills Condominiums', 'private', 'Carla Mendes', 'Board Secretary'], ['Northpark Logistics Center', 'pm', 'Owen Fitzgerald', 'Site Manager'],
+['Stonebridge Apartments', 'pm', 'Tessa Nguyen', 'Property Manager'], ['Elm Street Dental', 'private', 'Dr. Ray Kim', 'Owner']
+];
+const DEMO_SERVICES = ['Monthly service - Unit 14B', 'Quarterly service - Building C', 'Service call - Suite 220', 'Monthly service - Floors 3-4', 'Emergency call-out - Rear bay', 'Monthly service - Common areas', 'Annual contract - Phase 2', 'Service call - Clubhouse', 'Monthly service - Garage levels', 'Make-ready - 6 units'];
+const DEMO_EMPLOYEES = [
+['Jordan Hale', 'manager'], ['Alexis Moreno', 'user'], ['Taylor Brooks', 'user'], ['Casey Nwosu', 'user'], ['Riley Thompson', 'manager']
+];
+function demoRand(seed) { let x = seed % 2147483647; if (x <= 0) x += 2147483646; return function () { x = (x * 16807) % 2147483647; return (x - 1) / 2147483646; }; }
+function demoEmail(name) { return 'demo.' + name.toLowerCase().replace(/[^a-z]+/g, '.') + '@' + DEMO_EMAIL_DOMAIN; }
+function demoContactEmail(name, customer) { return name.toLowerCase().split(/\s+/)[0].replace(/[^a-z]/g, '') + '@' + customer.toLowerCase().replace(/[^a-z]+/g, '').slice(0, 14) + '.example.com'; }
+
+async function demoRemove(env, tenantId) {
+const users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=like.' + encodeURIComponent('*@' + DEMO_EMAIL_DOMAIN) + '&select=id') || [];
+const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(DEMO_EXTERNAL_PREFIX + '*') + '&select=id') || [];
+const acctIds = accounts.map(function (a) { return a.id; });
+const userIds = users.map(function (u) { return u.id; });
+for (const chunk of qboChunks(acctIds, 100)) {
+const inList = 'in.(' + chunk.join(',') + ')';
+for (const t of ['user_activity', 'account_activity', 'account_notes', 'invoice_payments', 'communications']) {
+try { await pgDelete(env, t, 'tenant_id=' + pgEq(tenantId) + '&account_id=' + inList); } catch (e) {}
+}
+}
+if (userIds.length) { try { await pgDelete(env, 'user_activity', 'tenant_id=' + pgEq(tenantId) + '&user_id=in.(' + userIds.join(',') + ')'); } catch (e) {} }
+try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(DEMO_EXTERNAL_PREFIX + '*')); } catch (e) {}
+if (acctIds.length) await pgDelete(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(DEMO_EXTERNAL_PREFIX + '*'));
+if (userIds.length) {
+try { await pgDelete(env, 'sessions', 'user_id=in.(' + userIds.join(',') + ')'); } catch (e) {}
+await pgDelete(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=like.' + encodeURIComponent('*@' + DEMO_EMAIL_DOMAIN));
+}
+return { accounts: acctIds.length, employees: userIds.length };
+}
+
+async function demoSeed(env, tenant) {
+await demoRemove(env, tenant.id);
+const rnd = demoRand(Number(tenant.id) * 7919 + 13);
+const offices = resolveOffices(tenant.offices); const officeKeys = Object.keys(offices);
+const departments = resolveDepartments(tenant.departments); const deptKeys = Object.keys(departments);
+const nowMs = Date.now();
+// Five demo employees across the offices (status 'active' so the Team tab and
+// Employees Activity list them; a random password hash so nobody can sign in).
+const userRows = [];
+for (let i = 0; i < DEMO_EMPLOYEES.length; i++) {
+const [name, role] = DEMO_EMPLOYEES[i];
+const salt = randomSalt();
+userRows.push({ tenant_id: tenant.id, email: demoEmail(name), password_hash: await hashPassword(randomToken(), salt), salt: salt,
+role: role, email_verified: true, status: 'active', full_name: name, office: officeKeys[i % officeKeys.length] || null });
+}
+// Bulk inserts: one request per table keeps this well inside a single
+// invocation's outbound-request budget.
+const employees = (await pgInsert(env, 'users', userRows) || []).map(function (u) { return { id: u.id, full_name: u.full_name, role: u.role, office: u.office }; });
+// Ten invoices per department, spread across offices and the aging buckets.
+let n = 0; let created = 0;
+const accountRows = []; const accountMeta = [];
+for (const dept of deptKeys) {
+for (let k = 0; k < 10; k++) {
+const c = DEMO_CUSTOMERS[(n * 7 + k) % DEMO_CUSTOMERS.length];
+const office = officeKeys[(n + k) % officeKeys.length] || null;
+const days = [3, 9, 17, 26, 34, 48, 61, 75, 92, 118][k];
+const amount = Math.round((350 + rnd() * 17800) * 100) / 100;
+const paidKind = k === 2 || k === 7 ? 'paid' : (k === 5 ? 'partial' : 'open');
+const paidAmount = paidKind === 'paid' ? amount : (paidKind === 'partial' ? Math.round(amount * 0.4 * 100) / 100 : 0);
+const invoicedAt = new Date(nowMs - days * 86400000);
+const invoiceNumber = 'DEMO-' + String(1040 + n * 10 + k);
+const paidAt = paidKind === 'paid' ? new Date(invoicedAt.getTime() + (4 + Math.floor(rnd() * 20)) * 86400000) : null;
+accountMeta.push({ days: days, paidKind: paidKind, paidAt: paidAt, paidAmount: paidAmount, payer: c[1], customer: c[0], seq: created + 1 });
+accountRows.push({
+tenant_id: tenant.id, external_id: DEMO_EXTERNAL_PREFIX + tenant.id + '-' + (++created),
+office: office, customer_name: c[0], meta: DEMO_SERVICES[k], payer: c[1], contact: c[2] + ' (' + c[3] + ')',
+contact_email: demoContactEmail(c[2], c[0]), contact_info: c[2] + ' · ' + demoContactEmail(c[2], c[0]) + ' · (555) 01' + String(10 + k) + '-' + String(1000 + n * 37 + k * 11).slice(-4) + ' · ' + c[3],
+claim_number: c[1] === 'insurance' ? ('CLM-' + (240000 + n * 97 + k * 13)) : null,
+invoice_number: invoiceNumber, amount: amount, invoiced_at: invoicedAt.toISOString(),
+status: paidKind === 'paid' ? 'paid' : 'in_ar', paid_amount: paidAmount, paid_at: paidAt ? paidAt.toISOString() : null,
+department: dept, category: null, follow_up_count: paidKind === 'open' ? Math.min(3, Math.floor(days / 20)) : 1,
+note: 'Demo invoice — ' + departments[dept] + (office ? ' · ' + offices[office] : ''), escalated: days > 90 && paidKind === 'open', wa_sent: days > 30
+});
+}
+n++;
+}
+const inserted = await pgInsert(env, 'accounts', accountRows) || [];
+const accounts = inserted.map(function (row, i) { return Object.assign({}, accountMeta[i] || {}, row); });
+const paymentRows = [];
+for (const a of accounts) {
+if (!(a.paidAmount > 0)) continue;
+paymentRows.push({ tenant_id: tenant.id, account_id: a.id, amount: a.paidAmount, method: a.payer === 'insurance' ? 'ACH' : 'Check',
+deposited_on: (a.paidAt || new Date(nowMs - 2 * 86400000)).toISOString().slice(0, 10), payer_name: a.customer, reference: 'DEMO' + String(5000 + a.seq),
+bank_name: null, memo: 'Demo payment', source: 'integration', external_id: DEMO_EXTERNAL_PREFIX + 'pay-' + tenant.id + '-' + a.seq });
+}
+if (paymentRows.length) { try { await pgInsert(env, 'invoice_payments', paymentRows); } catch (e) {} }
+// A month of activity: follow-ups, responses, payments, notes and escalations
+// by the demo employees, newest first on the Employees Activity tab.
+const templates = [
+['followup', 'Sent follow-up #{n} to {contact} for {customer} (invoice {inv}).'],
+['response', '{contact} replied: payment for {inv} is in this week\'s check run.'],
+['note', 'Called {contact} re: {inv} — left voicemail, will retry Thursday.'],
+['document', 'Uploaded signed work authorization for {customer}.'],
+['update', 'Updated point of contact for {customer} to {contact}.'],
+['payment', 'Recorded payment on {inv} for {customer}.'],
+['escalation', 'Escalated {inv} ({customer}) — {days} days outstanding, no response to two follow-ups.'],
+['demand', 'Sent demand letter for {inv} to {contact} at {customer}.']
+];
+const activityRows = [];
+for (let e = 0; e < employees.length; e++) {
+const emp = employees[e];
+const count = 9 + Math.floor(rnd() * 5);
+for (let j = 0; j < count; j++) {
+const a = accounts[Math.floor(rnd() * accounts.length)];
+if (!a) break;
+let t = templates[Math.floor(rnd() * templates.length)];
+if (t[0] === 'payment' && a.paidKind === 'open') t = templates[0];
+if (t[0] === 'escalation' && a.days < 60) t = templates[2];
+const contact = String(a.contact || '').replace(/\s*\(.*\)$/, '');
+const summary = t[1].replace('{n}', String(1 + Math.floor(rnd() * 3))).replace(/\{contact\}/g, contact).replace(/\{customer\}/g, a.customer_name).replace(/\{inv\}/g, a.invoice_number).replace('{days}', String(a.days));
+const at = new Date(nowMs - Math.floor(rnd() * 30) * 86400000 - Math.floor(rnd() * 32400000) - 28800000);
+activityRows.push({ tenant_id: tenant.id, user_id: emp.id, actor_name: emp.full_name, actor_role: emp.role, actor_office: emp.office,
+type: t[0], summary: summary, account_id: a.id, customer_name: a.customer_name, invoice_number: a.invoice_number, created_at: at.toISOString() });
+}
+}
+let logged = 0;
+if (activityRows.length) { try { logged = (await pgInsert(env, 'user_activity', activityRows) || []).length; } catch (e) {} }
+return { accounts: accounts.length, employees: employees.length, activity: logged, departments: deptKeys.length, offices: officeKeys.length };
+}
+
+async function handleAdminOnboardingDemo(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+if (!tenantId) return json({ ok: false, error: 'Missing tenantId' }, 400);
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,slug,company_name,offices,departments');
+if (!tenant) return json({ ok: false, error: 'Company not found' }, 404);
+if (String(body.action) === 'remove') return json(Object.assign({ ok: true, action: 'remove' }, await demoRemove(env, tenantId)));
+return json(Object.assign({ ok: true, action: 'seed' }, await demoSeed(env, tenant)));
 }
 
 async function handleAdminOnboardingData(request, env) {
@@ -8087,6 +8255,9 @@ return handleAdminOnboardingPage();
 }
 if (url.pathname === '/api/admin/onboarding' && request.method === 'GET') {
 return handleAdminOnboardingData(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/demo' && request.method === 'POST') {
+return handleAdminOnboardingDemo(request, env);
 }
 if (url.pathname === '/api/admin/onboarding/config' && request.method === 'POST') {
 return handleAdminOnboardingConfig(request, env);
