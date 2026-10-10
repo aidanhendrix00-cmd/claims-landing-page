@@ -3941,8 +3941,19 @@ try { await pgDelete(env, 'oauth_states', 'state=' + pgEq(state)); await pgInser
 async function qboReleaseLock(env, conn) {
 try { await pgDelete(env, 'oauth_states', 'state=' + pgEq('qbo-lock-' + conn.id)); } catch (e) {}
 }
-function qboStartImport(cfg) {
-return { import: { phase: 'open', start: 1, startedAt: new Date().toISOString(), imported: 0, reconcileAfter: 0 } };
+// How far back the first import reaches for paid invoices (and their
+// payments), so Collected and the monthly reports have history from day one.
+// Open invoices are always imported regardless of age.
+const QBO_HISTORY_MONTHS = 24;
+function qboHistoryCutoff(env) {
+const months = parseInt(env.QBO_HISTORY_MONTHS, 10);
+const d = new Date(); d.setUTCMonth(d.getUTCMonth() - (months > 0 ? months : QBO_HISTORY_MONTHS)); d.setUTCDate(1);
+return d.toISOString().slice(0, 10);
+}
+// withHistory: the connect-time import also pulls the last QBO_HISTORY_MONTHS
+// of paid invoices; the CDC fallback re-import only needs the open book.
+function qboStartImport(cfg, withHistory) {
+return { import: { phase: 'open', start: 1, startedAt: new Date().toISOString(), imported: 0, reconcileAfter: 0, history: !!withHistory } };
 }
 // One import step: a page of open invoices, then a reconcile pass over invoices
 // clAIms still has open that QuickBooks no longer lists as open.
@@ -3953,7 +3964,19 @@ if (imp.phase === 'open') {
 const invoices = await qboQuery(env, conn, 'Invoice', "Balance > '0'", imp.start, page);
 const n = await qboIngestInvoices(env, conn, invoices);
 imp.imported = (imp.imported || 0) + n;
-if (invoices.length < page) { imp.phase = 'reconcile'; imp.reconcileAfter = 0; } else { imp.start += page; }
+if (invoices.length < page) { imp.phase = imp.history ? 'history' : 'reconcile'; imp.start = 1; imp.reconcileAfter = 0; } else { imp.start += page; }
+await qboSaveConfig(env, conn, { import: imp, lastError: null });
+return;
+}
+if (imp.phase === 'history') {
+// Paid invoices back to the cutoff (open ones were already handled above).
+const since = imp.historySince || qboHistoryCutoff(env);
+const rows = await qboQuery(env, conn, 'Invoice', "TxnDate >= '" + since + "'", imp.start, page);
+const paid = rows.filter(function (inv) { return !(Number(inv.Balance) > 0); });
+const n = await qboIngestInvoices(env, conn, paid);
+imp.imported = (imp.imported || 0) + n;
+imp.historySince = since;
+if (rows.length < page) { imp.phase = 'reconcile'; imp.reconcileAfter = 0; } else { imp.start += page; }
 await qboSaveConfig(env, conn, { import: imp, lastError: null });
 return;
 }
@@ -4087,7 +4110,7 @@ const sameCompany = !!(prev.oauth && String(prev.realmId) === String(realmId) &&
 const cfg = Object.assign({ provider: 'quickbooks', oauth: true, realmId: String(realmId), environment: qboSandbox(env) ? 'sandbox' : 'production',
 connectedBy: owner.id, connectedByEmail: owner.email, connectedAt: nowIso, needsReconnect: false, lastError: null,
 cdcAt: sameCompany ? prev.cdcAt : null, lastFullSyncAt: sameCompany ? (prev.lastFullSyncAt || null) : null,
-import: sameCompany ? (prev.import || null) : { phase: 'open', start: 1, startedAt: nowIso, imported: 0, reconcileAfter: 0 } },
+import: sameCompany ? (prev.import || null) : qboStartImport(prev, true).import },
 await qboTokenFields(env, tokens));
 const rowPatch = { status: 'connected', api_key: randomToken(), connected_at: nowIso, config_json: JSON.stringify(cfg) };
 let integrationId;
