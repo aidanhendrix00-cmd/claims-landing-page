@@ -3319,6 +3319,8 @@ let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
 if (!id) return json({ ok: false, error: 'Missing id' }, 400);
+const qboConn = (await qboLoadConns(env, 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id)))[0];
+if (qboConn) { await qboDisconnect(env, qboConn); return json({ ok: true }); }
 await pgUpdate(env, 'integrations', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id), { status: 'disconnected' });
 return json({ ok: true });
 }
@@ -3425,18 +3427,9 @@ await pgUpdate(env, 'accounts', 'id=' + pgEq(accountId), patch);
 return paid;
 }
 
-async function handleAccountingSync(request, env) {
-const authHeader = request.headers.get('Authorization') || '';
-const match = authHeader.match(/^Bearer\s+(.+)$/i);
-if (!match) return json({ ok: false, error: 'Missing bearer token' }, 401);
-const apiKey = match[1].trim();
-const integration = await pgSelectOne(env, 'integrations', 'api_key=' + pgEq(apiKey) + '&status=' + pgEq('connected') + '&select=id,tenant_id');
-if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
-const syncHold = await integrationBillingHold(env, integration.tenant_id);
-if (syncHold) return syncHold;
-let body;
-try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
-const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
+// Writes accounting/CRM records into accounts (and their payments, notes, files
+// and activity). Shared by the push API and the native QuickBooks sync.
+async function ingestAccountingItems(env, integration, items) {
 const syncTenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(integration.tenant_id) + '&select=id,offices,integration_mode');
 let syncOffices = resolveOffices(syncTenant ? syncTenant.offices : null);
 // Self-serve companies (QuickBooks-only) are not pre-configured by us: a city
@@ -3591,6 +3584,24 @@ status: act.status ? String(act.status).slice(0,40) : null
 if (officesDirty && syncTenant) {
 try { await pgUpdate(env, 'tenants', 'id=' + pgEq(syncTenant.id), { offices: Object.keys(syncOffices).map(function (k) { return [k, syncOffices[k]]; }) }); } catch (e) {}
 }
+return { processed: processed, offices: syncOffices };
+}
+
+async function handleAccountingSync(request, env) {
+const authHeader = request.headers.get('Authorization') || '';
+const match = authHeader.match(/^Bearer\s+(.+)$/i);
+if (!match) return json({ ok: false, error: 'Missing bearer token' }, 401);
+const apiKey = match[1].trim();
+const integration = await pgSelectOne(env, 'integrations', 'api_key=' + pgEq(apiKey) + '&status=' + pgEq('connected') + '&select=id,tenant_id');
+if (!integration) return json({ ok: false, error: 'Invalid or inactive integration key' }, 401);
+const syncHold = await integrationBillingHold(env, integration.tenant_id);
+if (syncHold) return syncHold;
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid JSON body' }, 400); }
+const items = Array.isArray(body) ? body : (Array.isArray(body.accounts) ? body.accounts : [body]);
+const ingested = await ingestAccountingItems(env, integration, items);
+const processed = ingested.processed;
+const syncOffices = ingested.offices;
 // Every authenticated push from the external system counts as a sync.
 try { await pgUpdate(env, 'integrations', 'id=' + pgEq(integration.id), { last_synced_at: new Date().toISOString() }); } catch (e) {}
 return json({ ok: true, processed, offices: Object.keys(syncOffices) });
@@ -3610,12 +3621,553 @@ if (!id) return json({ ok: false, error: 'Missing integration id' }, 400);
 const integration = await pgSelectOne(env, 'integrations', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,provider,status');
 if (!integration) return json({ ok: false, error: 'Integration not found' }, 404);
 if (integration.status !== 'connected') return json({ ok: false, error: 'That integration is disconnected. Reconnect it first.' }, 400);
+// Native QuickBooks connection: actually pull from QuickBooks now.
+const qboConn = (await qboLoadConns(env, 'id=' + pgEq(integration.id)))[0];
+if (qboConn) {
+const run = await qboRunStep(env, qboConn, { budgetMs: 20000 });
+const fresh = (await qboLoadConns(env, 'id=' + pgEq(integration.id)))[0] || qboConn;
+if (fresh.cfg.needsReconnect) return json({ ok: false, error: fresh.cfg.lastError || 'QuickBooks needs to be reconnected.' }, 409);
+if (run.held) return json({ ok: false, error: 'Access on hold due to no payment.' }, 402);
+const qbAccounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id') || [];
+const stillImporting = !!(fresh.cfg.import && fresh.cfg.import.phase !== 'done');
+return json({ ok: true, provider: integration.provider, lastSyncedAt: fresh.last_synced_at, accountsInSync: qbAccounts.length,
+importing: stillImporting, busy: !!run.busy, message: stillImporting ? 'Still importing from QuickBooks \u2014 more invoices will keep appearing.' : null });
+}
 const lastSyncedAt = new Date().toISOString();
 await pgUpdate(env, 'integrations', 'id=' + pgEq(integration.id), { last_synced_at: lastSyncedAt });
 const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id') || [];
 return json({ ok: true, provider: integration.provider, lastSyncedAt: lastSyncedAt, accountsInSync: accounts.length });
 }
 
+
+/* ---------------------------------------------------------------------------
+   QuickBooks Online - native one-click connection
+   An admin clicks "Connect to QuickBooks", approves read-only access on
+   Intuit's own screen, and clAIms pulls open invoices, customers and payments
+   itself. Nothing is ever written back to the company's books.
+   - Tokens are sealed with the same envelope encryption as connected
+     mailboxes and live only in integrations.config_json, which no browser
+     route returns.
+   - Access tokens last ~1 hour and are refreshed automatically. Intuit rotates
+     refresh tokens, so the newest one is saved on every refresh.
+   - The first import runs in small steps (Worker subrequest limits), carried
+     forward by the dashboard's status poll and the hourly cron.
+   - After that, Intuit webhooks trigger a Change Data Capture pull within
+     minutes, "Sync Now" does the same on demand, and a nightly CDC sweep is
+     the safety net (it also keeps the refresh token alive).
+   - Requests run one at a time per company, with backoff on HTTP 429, so the
+     500 req/min per-company and 10-concurrent per-app limits are respected.
+   Secrets: QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_WEBHOOK_VERIFIER.
+   Var: QBO_ENV = "sandbox" (development keys) or "production" (live keys).
+   --------------------------------------------------------------------------- */
+const QBO_PROVIDER = SELF_SERVE_INTEGRATION_MODES.quickbooks;
+const QBO_AUTH_URL = 'https://appcenter.intuit.com/connect/oauth2';
+const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
+const QBO_REVOKE_URL = 'https://developer.api.intuit.com/v2/oauth2/tokens/revoke';
+const QBO_SCOPE = 'com.intuit.quickbooks.accounting';
+const QBO_MINOR_VERSION = '75';
+const QBO_EXTERNAL_PREFIX = 'qbo-';
+const QBO_PAYMENT_PREFIX = 'qbo-pay-';
+const QBO_CDC_MAX_DAYS = 29;            // Intuit keeps 30 days of change history
+const QBO_NIGHTLY_HOUR_CENTRAL = 3;     // nightly safety-net sweep, 3 AM Texas time
+function qboConfigured(env) { return !!(env.QBO_CLIENT_ID && env.QBO_CLIENT_SECRET); }
+function qboSandbox(env) { return String(env.QBO_ENV || 'sandbox').trim().toLowerCase() !== 'production'; }
+function qboApiBase(env) { return qboSandbox(env) ? 'https://sandbox-quickbooks.api.intuit.com' : 'https://quickbooks.api.intuit.com'; }
+function qboRedirectUri() { return SITE_URL + '/api/quickbooks/callback'; }
+function qboBasicAuth(env) { return 'Basic ' + btoa(String(env.QBO_CLIENT_ID).trim() + ':' + String(env.QBO_CLIENT_SECRET).trim()); }
+// Invoices handled per run. Each one costs a handful of database calls, so this
+// keeps a single Worker invocation comfortably under its subrequest cap.
+function qboPageSize(env) { const n = parseInt(env.QBO_PAGE_SIZE, 10); return n > 0 && n <= 200 ? n : 40; }
+function qboSleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+function qboChunks(list, size) { const out = []; for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size)); return out; }
+function qboQuote(id) { return "'" + String(id).replace(/[^0-9A-Za-z_-]/g, '') + "'"; }
+
+function qboParseConfig(raw) {
+let cfg = raw;
+if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch (e) { cfg = {}; } }
+if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch (e) { cfg = {}; } }
+return (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) ? cfg : {};
+}
+function qboConnFromRow(row) {
+const cfg = qboParseConfig(row.config_json);
+if (!cfg.oauth) return null;
+return { id: row.id, tenant_id: row.tenant_id, status: row.status, last_synced_at: row.last_synced_at, cfg: cfg };
+}
+async function qboLoadConns(env, query) {
+const rows = await pgSelect(env, 'integrations', query + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,tenant_id,status,last_synced_at,config_json');
+return (rows || []).map(qboConnFromRow).filter(Boolean);
+}
+// Read-merge-write so a token refresh and a progress update never erase each other.
+async function qboSaveConfig(env, conn, patch, rowPatch) {
+const row = await pgSelectOne(env, 'integrations', 'id=' + pgEq(conn.id) + '&select=config_json');
+const cfg = Object.assign(qboParseConfig(row && row.config_json), patch || {});
+await pgUpdate(env, 'integrations', 'id=' + pgEq(conn.id), Object.assign({ config_json: JSON.stringify(cfg) }, rowPatch || {}));
+conn.cfg = cfg;
+if (rowPatch && rowPatch.status) conn.status = rowPatch.status;
+return cfg;
+}
+
+/* ---- OAuth tokens ---- */
+async function qboTokenRequest(env, params) {
+const res = await fetch(QBO_TOKEN_URL, { method: 'POST',
+headers: { 'Authorization': qboBasicAuth(env), 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+body: new URLSearchParams(params).toString() });
+const text = await res.text();
+let data = null; try { data = JSON.parse(text); } catch (e) {}
+if (!res.ok || !data || !data.access_token) {
+const err = new Error('QBO_TOKEN_FAILED status=' + res.status + ' error=' + ((data && (data.error_description || data.error)) || text.slice(0, 200)));
+err.code = data && data.error;
+throw err;
+}
+return data;
+}
+async function qboTokenFields(env, t) {
+return {
+accessToken: await encryptSecret(env, t.access_token),
+// Intuit rotates refresh tokens: always keep the newest one it hands back.
+refreshToken: await encryptSecret(env, t.refresh_token),
+accessExpiresAt: new Date(Date.now() + (Number(t.expires_in) || 3600) * 1000).toISOString(),
+refreshExpiresAt: new Date(Date.now() + (Number(t.x_refresh_token_expires_in) || 8726400) * 1000).toISOString()
+};
+}
+async function qboMarkNeedsReconnect(env, conn, why) {
+await qboSaveConfig(env, conn, { needsReconnect: true, lastError: why }, { status: 'disconnected' });
+}
+async function qboAccessToken(env, conn) {
+if (conn._access && conn._accessUntil - Date.now() > 60000) return conn._access;
+const cfg = conn.cfg;
+if (cfg.accessToken && cfg.accessExpiresAt && new Date(cfg.accessExpiresAt).getTime() - Date.now() > 300000) {
+const current = await decryptSecret(env, cfg.accessToken);
+if (current) { conn._access = current; conn._accessUntil = new Date(cfg.accessExpiresAt).getTime(); return current; }
+}
+const usedRefresh = cfg.refreshToken;
+const refreshToken = await decryptSecret(env, usedRefresh);
+if (!refreshToken) {
+await qboMarkNeedsReconnect(env, conn, 'The saved QuickBooks connection could not be read. Reconnect QuickBooks under Integrations.');
+const e0 = new Error('QBO_NEEDS_RECONNECT'); e0.qboAuth = true; throw e0;
+}
+let t;
+try { t = await qboTokenRequest(env, { grant_type: 'refresh_token', refresh_token: refreshToken }); }
+catch (e) {
+if (e.code === 'invalid_grant') {
+// Another run may have rotated the token a moment ago - use the newer one if so.
+const latest = (await qboLoadConns(env, 'id=' + pgEq(conn.id)))[0];
+if (latest && latest.cfg.refreshToken && latest.cfg.refreshToken !== usedRefresh && !latest.cfg.needsReconnect) {
+conn.cfg = latest.cfg; conn._access = null;
+return qboAccessToken(env, conn);
+}
+await qboMarkNeedsReconnect(env, conn, 'QuickBooks access expired or was revoked. Reconnect QuickBooks under Integrations.');
+const e1 = new Error('QBO_NEEDS_RECONNECT'); e1.qboAuth = true; throw e1;
+}
+throw e;
+}
+await qboSaveConfig(env, conn, Object.assign(await qboTokenFields(env, t), { needsReconnect: false }));
+conn._access = t.access_token;
+conn._accessUntil = Date.now() + (Number(t.expires_in) || 3600) * 1000;
+return t.access_token;
+}
+
+/* ---- API calls (sequential, with retry and rate-limit backoff) ---- */
+async function qboGet(env, conn, path, attempt) {
+attempt = attempt || 0;
+const token = await qboAccessToken(env, conn);
+const url = qboApiBase(env) + '/v3/company/' + encodeURIComponent(conn.cfg.realmId) + '/' + path +
+(path.indexOf('?') === -1 ? '?' : '&') + 'minorversion=' + QBO_MINOR_VERSION;
+const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' } });
+if (res.status === 401 && attempt === 0) {
+conn._access = null; conn.cfg.accessExpiresAt = null; // force a refresh, then retry once
+return qboGet(env, conn, path, 1);
+}
+if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+await qboSleep(800 * Math.pow(2, attempt) + Math.floor(Math.random() * 300));
+return qboGet(env, conn, path, attempt + 1);
+}
+const text = await res.text();
+if (!res.ok) { const err = new Error('QBO_API status=' + res.status + ' ' + text.slice(0, 300)); err.status = res.status; err.body = text; throw err; }
+return text ? JSON.parse(text) : {};
+}
+async function qboQuery(env, conn, entity, where, start, max) {
+const q = 'select * from ' + entity + (where ? ' where ' + where : '') + ' orderby Id startposition ' + (start || 1) + ' maxresults ' + (max || 100);
+const data = await qboGet(env, conn, 'query?query=' + encodeURIComponent(q));
+return (data.QueryResponse && data.QueryResponse[entity]) || [];
+}
+async function qboFetchByIds(env, conn, entity, ids) {
+const out = [];
+const unique = Array.from(new Set((ids || []).map(String))).filter(Boolean);
+for (const chunk of qboChunks(unique, 30)) {
+const rows = await qboQuery(env, conn, entity, 'Id in (' + chunk.map(qboQuote).join(',') + ')', 1, 100);
+for (const r of rows) out.push(r);
+}
+return out;
+}
+
+/* ---- QuickBooks records -> the accounting ingest format ---- */
+function qboNorm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+function qboClaimNumber(inv) {
+const fields = (inv.CustomField || []).filter(function (f) { return f && f.StringValue && String(f.StringValue).trim(); });
+function pick(re) { const f = fields.find(function (x) { return re.test(String(x.Name || '')); }); return f ? String(f.StringValue).trim() : null; }
+return pick(/claim/i) || pick(/\bp\.?\s?o\b|purchase\s*order|work\s*order/i) || null;
+}
+// The company's departments may be its operating companies (Revolve). Match the
+// invoice's QuickBooks Location (API: Department) or Class to one of them.
+function qboDepartmentKey(inv, departments) {
+const lineClass = (inv.Line || []).map(function (l) { return l && l.SalesItemLineDetail && l.SalesItemLineDetail.ClassRef && l.SalesItemLineDetail.ClassRef.name; }).find(Boolean);
+const names = [inv.DepartmentRef && inv.DepartmentRef.name, inv.ClassRef && inv.ClassRef.name, lineClass].filter(Boolean);
+const keys = Object.keys(departments || {});
+for (const n of names) {
+const target = qboNorm(n);
+if (!target) continue;
+for (const k of keys) {
+const label = qboNorm(departments[k]);
+if (qboNorm(k) === target || label === target) return k;
+if (label && label.length >= 4 && (target.indexOf(label) === 0 || label.indexOf(target) === 0)) return k;
+}
+}
+return null;
+}
+function qboPaymentsForInvoice(inv, paymentsById) {
+const out = [];
+for (const link of (inv.LinkedTxn || [])) {
+if (!link || link.TxnType !== 'Payment') continue;
+const p = paymentsById[String(link.TxnId)];
+if (!p) continue;
+let amount = 0;
+for (const line of (p.Line || [])) {
+for (const lt of (line.LinkedTxn || [])) {
+if (lt && lt.TxnType === 'Invoice' && String(lt.TxnId) === String(inv.Id)) amount += Number(line.Amount) || 0;
+}
+}
+if (!(amount > 0)) continue;
+out.push({
+id: QBO_PAYMENT_PREFIX + p.Id + '-' + inv.Id,
+amount: round2(amount),
+date: p.TxnDate || null,
+method: (p.PaymentMethodRef && p.PaymentMethodRef.name) || 'QuickBooks',
+reference: p.PaymentRefNum || null,
+payerName: (p.CustomerRef && p.CustomerRef.name) || null,
+memo: 'Payment recorded in QuickBooks'
+});
+}
+return out;
+}
+function qboInvoiceToItem(inv, customer, departments, paymentsById) {
+const total = round2(inv.TotalAmt);
+const balance = round2(inv.Balance);
+const voided = total === 0 && /voided/i.test(String(inv.PrivateNote || ''));
+const addr = inv.BillAddr || inv.ShipAddr || (customer && (customer.BillAddr || customer.ShipAddr)) || {};
+const notes = [inv.PrivateNote, inv.CustomerMemo && inv.CustomerMemo.value].filter(function (v) { return v && String(v).trim(); }).join('\n\n');
+const person = customer ? ([customer.GivenName, customer.FamilyName].filter(Boolean).join(' ') || customer.DisplayName || null) : null;
+const payments = qboPaymentsForInvoice(inv, paymentsById || {});
+const fullyPaid = balance <= 0.005;
+let lastPaidOn = null;
+for (const p of payments) { if (p.date && (!lastPaidOn || p.date > lastPaidOn)) lastPaidOn = p.date; }
+const item = {
+externalId: QBO_EXTERNAL_PREFIX + inv.Id,
+customerName: (inv.CustomerRef && inv.CustomerRef.name) || (customer && customer.DisplayName) || 'QuickBooks customer',
+invoiceNumber: inv.DocNumber || null,
+amount: total,
+paidAmount: Math.max(0, round2(total - balance)),
+status: fullyPaid ? 'paid' : 'in_ar',
+invoicedAt: inv.TxnDate || null,
+contact: person,
+contactEmail: (inv.BillEmail && inv.BillEmail.Address) || (customer && customer.PrimaryEmailAddr && customer.PrimaryEmailAddr.Address) || null,
+contactPhone: (customer && customer.PrimaryPhone && customer.PrimaryPhone.FreeFormNumber) || null,
+claimNumber: qboClaimNumber(inv),
+office: addr.City || null,
+department: qboDepartmentKey(inv, departments),
+meta: inv.DueDate ? ('Due ' + inv.DueDate) : null,
+payments: payments
+};
+if (voided) item.note = 'Voided in QuickBooks' + (notes ? '\n\n' + notes : '');
+else if (notes) item.note = notes;
+if (fullyPaid && total > 0 && lastPaidOn) item.paidAt = lastPaidOn;
+return item;
+}
+// Pulls the customers and payments a batch of invoices refers to, then writes
+// everything through the same ingest the push API uses.
+async function qboIngestInvoices(env, conn, invoices) {
+if (!invoices.length) return 0;
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(conn.tenant_id) + '&select=departments');
+const departments = resolveDepartments(tenant ? tenant.departments : null);
+const customerIds = invoices.map(function (i) { return i.CustomerRef && i.CustomerRef.value; }).filter(Boolean);
+const paymentIds = [];
+for (const inv of invoices) for (const l of (inv.LinkedTxn || [])) if (l && l.TxnType === 'Payment') paymentIds.push(l.TxnId);
+const customersById = {};
+for (const c of await qboFetchByIds(env, conn, 'Customer', customerIds)) customersById[String(c.Id)] = c;
+const paymentsById = {};
+for (const p of await qboFetchByIds(env, conn, 'Payment', paymentIds)) paymentsById[String(p.Id)] = p;
+const items = invoices.map(function (inv) {
+return qboInvoiceToItem(inv, customersById[String(inv.CustomerRef && inv.CustomerRef.value)], departments, paymentsById);
+});
+const result = await ingestAccountingItems(env, { id: conn.id, tenant_id: conn.tenant_id }, items);
+return result.processed;
+}
+// An invoice deleted in QuickBooks: keep the record for history but take it
+// out of the queue so no follow-up goes out for it.
+async function qboMarkInvoicesDeleted(env, conn, invoiceIds) {
+for (const id of invoiceIds) {
+const acct = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=' + pgEq(QBO_EXTERNAL_PREFIX + id) + '&select=id,note');
+if (!acct) continue;
+await pgUpdate(env, 'accounts', 'id=' + pgEq(acct.id), { status: 'paid', amount: 0, paid_amount: 0,
+note: ('Deleted in QuickBooks' + (acct.note ? '\n\n' + acct.note : '')).slice(0, 4000), updated_at: new Date().toISOString() });
+}
+}
+// A payment deleted in QuickBooks: drop the mirrored payment rows; the invoices
+// it paid are re-read so their balance reopens.
+async function qboRemovePayments(env, conn, paymentIds) {
+const reopen = [];
+for (const pid of paymentIds) {
+const prefix = QBO_PAYMENT_PREFIX + pid + '-';
+const rows = await pgSelect(env, 'invoice_payments', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=like.' + encodeURIComponent(prefix + '*') + '&select=id,external_id');
+for (const r of rows) { reopen.push(String(r.external_id).slice(prefix.length)); }
+if (rows.length) await pgDelete(env, 'invoice_payments', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=like.' + encodeURIComponent(prefix + '*'));
+}
+return reopen;
+}
+
+/* ---- Sync engine ---- */
+// One run at a time per company: a short-lived row in oauth_states is the lock
+// (its primary key makes the insert atomic).
+async function qboAcquireLock(env, conn) {
+const state = 'qbo-lock-' + conn.id;
+const row = { state: state, user_id: conn.cfg.connectedBy, provider: 'qbo_lock', redirect_to: '', expires_at: new Date(Date.now() + 120000).toISOString() };
+try { await pgInsert(env, 'oauth_states', row); return true; }
+catch (e) {
+const held = await pgSelectOne(env, 'oauth_states', 'state=' + pgEq(state) + '&select=expires_at');
+if (held && new Date(held.expires_at).getTime() > Date.now()) return false;
+try { await pgDelete(env, 'oauth_states', 'state=' + pgEq(state)); await pgInsert(env, 'oauth_states', row); return true; } catch (e2) { return false; }
+}
+}
+async function qboReleaseLock(env, conn) {
+try { await pgDelete(env, 'oauth_states', 'state=' + pgEq('qbo-lock-' + conn.id)); } catch (e) {}
+}
+function qboStartImport(cfg) {
+return { import: { phase: 'open', start: 1, startedAt: new Date().toISOString(), imported: 0, reconcileAfter: 0 } };
+}
+// One import step: a page of open invoices, then a reconcile pass over invoices
+// clAIms still has open that QuickBooks no longer lists as open.
+async function qboImportStep(env, conn) {
+const page = qboPageSize(env);
+const imp = Object.assign({}, conn.cfg.import);
+if (imp.phase === 'open') {
+const invoices = await qboQuery(env, conn, 'Invoice', "Balance > '0'", imp.start, page);
+const n = await qboIngestInvoices(env, conn, invoices);
+imp.imported = (imp.imported || 0) + n;
+if (invoices.length < page) { imp.phase = 'reconcile'; imp.reconcileAfter = 0; } else { imp.start += page; }
+await qboSaveConfig(env, conn, { import: imp, lastError: null });
+return;
+}
+if (imp.phase === 'reconcile') {
+const stale = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=like.' + encodeURIComponent(QBO_EXTERNAL_PREFIX + '*') +
+'&status=neq.paid&updated_at=lt.' + encodeURIComponent(imp.startedAt) + '&id=gt.' + (imp.reconcileAfter || 0) + '&select=id,external_id&order=id.asc&limit=' + page);
+if (stale.length) {
+const ids = stale.map(function (a) { return String(a.external_id).slice(QBO_EXTERNAL_PREFIX.length); });
+const found = await qboFetchByIds(env, conn, 'Invoice', ids);
+await qboIngestInvoices(env, conn, found);
+const foundIds = {}; for (const f of found) foundIds[String(f.Id)] = true;
+await qboMarkInvoicesDeleted(env, conn, ids.filter(function (id) { return !foundIds[id]; }));
+imp.reconcileAfter = stale[stale.length - 1].id;
+}
+if (stale.length < page) {
+imp.phase = 'done';
+await qboSaveConfig(env, conn, { import: imp, cdcAt: imp.startedAt, lastFullSyncAt: new Date().toISOString(), lastError: null }, { last_synced_at: new Date().toISOString() });
+return;
+}
+await qboSaveConfig(env, conn, { import: imp });
+}
+}
+// Everything that changed since the last pull, in one call.
+async function qboCdcStep(env, conn) {
+const startedAt = new Date().toISOString();
+const since = conn.cfg.cdcAt ? new Date(conn.cfg.cdcAt) : null;
+if (!since || Date.now() - since.getTime() > QBO_CDC_MAX_DAYS * 86400000) {
+await qboSaveConfig(env, conn, qboStartImport(conn.cfg));
+return qboImportStep(env, conn);
+}
+// Two minutes of overlap so nothing slips between runs; re-reading is harmless.
+const changedSince = new Date(since.getTime() - 120000).toISOString();
+const data = await qboGet(env, conn, 'cdc?entities=Invoice,Payment&changedSince=' + encodeURIComponent(changedSince));
+const groups = (data.CDCResponse && data.CDCResponse[0] && data.CDCResponse[0].QueryResponse) || [];
+const liveInvoices = {}; const deletedInvoices = []; const livePayments = []; const deletedPayments = [];
+for (const g of groups) {
+for (const inv of (g.Invoice || [])) { if (inv.status === 'Deleted') deletedInvoices.push(String(inv.Id)); else liveInvoices[String(inv.Id)] = inv; }
+for (const p of (g.Payment || [])) { if (p.status === 'Deleted') deletedPayments.push(String(p.Id)); else livePayments.push(p); }
+}
+const toRead = {};
+for (const p of livePayments) for (const line of (p.Line || [])) for (const lt of (line.LinkedTxn || [])) {
+if (lt && lt.TxnType === 'Invoice' && !liveInvoices[String(lt.TxnId)]) toRead[String(lt.TxnId)] = true;
+}
+for (const id of await qboRemovePayments(env, conn, deletedPayments)) { if (!liveInvoices[id]) toRead[id] = true; }
+const count = Object.keys(liveInvoices).length + Object.keys(toRead).length;
+// A burst bigger than one run can carry (a bulk edit, a long outage) is
+// handled by re-importing the open book in steps instead.
+if (count > qboPageSize(env)) {
+await qboSaveConfig(env, conn, qboStartImport(conn.cfg));
+return qboImportStep(env, conn);
+}
+const invoices = Object.keys(liveInvoices).map(function (k) { return liveInvoices[k]; });
+const fetched = await qboFetchByIds(env, conn, 'Invoice', Object.keys(toRead));
+await qboIngestInvoices(env, conn, invoices.concat(fetched));
+await qboMarkInvoicesDeleted(env, conn, deletedInvoices);
+await qboSaveConfig(env, conn, { cdcAt: startedAt, lastError: null }, { last_synced_at: new Date().toISOString() });
+}
+// Run whatever this connection needs next. Safe to call from anywhere: it
+// skips quietly when another run holds the lock or the company is on hold.
+async function qboRunStep(env, conn, opts) {
+opts = opts || {};
+if (!conn || conn.status !== 'connected' || conn.cfg.needsReconnect || !qboConfigured(env)) return { ran: false };
+const hold = await integrationBillingHold(env, conn.tenant_id);
+if (hold) return { ran: false, held: true };
+if (!(await qboAcquireLock(env, conn))) return { ran: false, busy: true };
+try {
+const importing = conn.cfg.import && conn.cfg.import.phase !== 'done';
+if (importing) {
+// Sync Now / cron keep stepping until the run's time budget is spent.
+const until = Date.now() + (opts.budgetMs || 0);
+do { await qboImportStep(env, conn); } while (conn.cfg.import.phase !== 'done' && Date.now() < until);
+} else if (opts.cdc !== false) {
+await qboCdcStep(env, conn);
+}
+return { ran: true };
+} catch (e) {
+if (!e.qboAuth) {
+console.log('QBO_SYNC_FAILED integration=' + conn.id + ' ' + (e && e.message));
+try { await qboSaveConfig(env, conn, { lastError: 'Last sync hit a problem talking to QuickBooks; it will retry automatically.' }); } catch (e2) {}
+}
+return { ran: false, error: true };
+} finally {
+await qboReleaseLock(env, conn);
+}
+}
+
+/* ---- Routes ---- */
+async function handleQuickBooksConnect(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return redirectTo('/?login=1');
+if (user.role !== 'admin' || !canSelfServeIntegrations(user)) return redirectTo('/dashboard?qbo=not_allowed');
+if (!qboConfigured(env)) return redirectTo('/dashboard?qbo=not_configured');
+if (!(await importMasterKey(env))) return redirectTo('/dashboard?qbo=not_configured');
+const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,status');
+const limits = planLimitsFor(user);
+if (user.tenant_slug !== 'base' && limits.integrations != null && (!existing || existing.status !== 'connected')) {
+if ((await countIntegrationsConnected(env, user.tenant_id)) >= limits.integrations) return redirectTo('/dashboard?qbo=plan_limit');
+}
+const state = randomToken();
+await pgInsert(env, 'oauth_states', { state: state, user_id: user.id, provider: 'quickbooks', redirect_to: '/dashboard',
+expires_at: new Date(Date.now() + 900000).toISOString() });
+const params = new URLSearchParams({ client_id: String(env.QBO_CLIENT_ID).trim(), response_type: 'code', scope: QBO_SCOPE,
+redirect_uri: qboRedirectUri(), state: state });
+return redirectTo(QBO_AUTH_URL + '?' + params.toString());
+}
+
+async function handleQuickBooksCallback(request, env, ctx) {
+const url = new URL(request.url);
+if (url.searchParams.get('error')) return redirectTo('/dashboard?qbo=declined');
+const code = url.searchParams.get('code'); const state = url.searchParams.get('state'); const realmId = url.searchParams.get('realmId');
+if (!code || !state || !realmId) return redirectTo('/dashboard?qbo=failed');
+const st = await pgSelectOne(env, 'oauth_states', 'state=' + pgEq(state) + '&provider=' + pgEq('quickbooks') + '&select=*');
+if (!st) return redirectTo('/dashboard?qbo=failed');
+await pgDelete(env, 'oauth_states', 'state=' + pgEq(state));
+if (new Date(st.expires_at) < new Date()) return redirectTo('/dashboard?qbo=expired');
+const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(st.user_id) + '&select=id,tenant_id,email,role');
+if (!owner || owner.role !== 'admin') return redirectTo('/dashboard?qbo=failed');
+// One QuickBooks company feeds one clAIms workspace.
+const others = await qboLoadConns(env, 'tenant_id=neq.' + encodeURIComponent(owner.tenant_id) + '&status=' + pgEq('connected'));
+if (others.some(function (c) { return String(c.cfg.realmId) === String(realmId); })) return redirectTo('/dashboard?qbo=realm_in_use');
+let tokens;
+try { tokens = await qboTokenRequest(env, { grant_type: 'authorization_code', code: code, redirect_uri: qboRedirectUri() }); }
+catch (e) {
+console.log('QBO_TOKEN_EXCHANGE_FAILED ' + (e && e.message) + ' redirect_uri=' + qboRedirectUri() + ' client_id_tail=' + String(env.QBO_CLIENT_ID || '').slice(-6) + ' sandbox=' + qboSandbox(env));
+return redirectTo('/dashboard?qbo=token_failed');
+}
+const nowIso = new Date().toISOString();
+const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(owner.tenant_id) + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,config_json');
+const prev = existing ? qboParseConfig(existing.config_json) : {};
+const sameCompany = !!(prev.oauth && String(prev.realmId) === String(realmId) && prev.cdcAt);
+const cfg = Object.assign({ provider: 'quickbooks', oauth: true, realmId: String(realmId), environment: qboSandbox(env) ? 'sandbox' : 'production',
+connectedBy: owner.id, connectedByEmail: owner.email, connectedAt: nowIso, needsReconnect: false, lastError: null,
+cdcAt: sameCompany ? prev.cdcAt : null, lastFullSyncAt: sameCompany ? (prev.lastFullSyncAt || null) : null,
+import: sameCompany ? (prev.import || null) : { phase: 'open', start: 1, startedAt: nowIso, imported: 0, reconcileAfter: 0 } },
+await qboTokenFields(env, tokens));
+const rowPatch = { status: 'connected', api_key: randomToken(), connected_at: nowIso, config_json: JSON.stringify(cfg) };
+let integrationId;
+if (existing) { await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), rowPatch); integrationId = existing.id; }
+else { const ins = await pgInsert(env, 'integrations', Object.assign({ tenant_id: owner.tenant_id, provider: QBO_PROVIDER }, rowPatch)); integrationId = ins && ins.id; }
+try { await pgUpdate(env, 'tenants', 'id=' + pgEq(owner.tenant_id), { integration_status: 'complete' }); } catch (e) {}
+const conn = { id: integrationId, tenant_id: owner.tenant_id, status: 'connected', cfg: cfg, _access: tokens.access_token, _accessUntil: Date.now() + 3000000 };
+try {
+const info = await qboGet(env, conn, 'companyinfo/' + encodeURIComponent(realmId));
+const name = info && info.CompanyInfo && info.CompanyInfo.CompanyName;
+if (name) await qboSaveConfig(env, conn, { companyName: String(name).slice(0, 160) });
+} catch (e) { console.log('QBO_COMPANYINFO_FAILED ' + (e && e.message)); }
+// First import starts right away; the dashboard's status poll carries it on.
+if (ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { budgetMs: 20000 }));
+return redirectTo('/dashboard?qbo=connected');
+}
+
+async function handleQuickBooksStatus(request, env, ctx) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const conn = (await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id)))[0] || null;
+const cfg = conn ? conn.cfg : {};
+const connected = !!(conn && conn.status === 'connected' && !cfg.needsReconnect);
+const importing = !!(connected && cfg.import && cfg.import.phase !== 'done');
+// Viewing the dashboard nudges an unfinished first import forward.
+if (importing && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { budgetMs: 15000 }));
+const out = { ok: true, configured: qboConfigured(env), sandbox: qboSandbox(env), connected: connected,
+needsReconnect: !!(conn && cfg.needsReconnect), companyName: cfg.companyName || null,
+importing: importing, imported: (cfg.import && cfg.import.imported) || 0,
+lastSyncedAt: conn ? conn.last_synced_at : null, lastError: connected ? (cfg.lastError || null) : null,
+canManage: user.role === 'admin' && canSelfServeIntegrations(user) };
+if (out.canManage && conn && cfg.needsReconnect) out.reconnectReason = cfg.lastError || null;
+return json(out);
+}
+
+// Intuit's change notifications. Verified with the webhook verifier token,
+// answered immediately, and turned into a CDC pull for each company named.
+async function handleQuickBooksWebhook(request, env, ctx) {
+const raw = await request.text();
+const verifier = String(env.QBO_WEBHOOK_VERIFIER || '').trim();
+if (!verifier) return new Response('webhooks not configured', { status: 503 });
+const signature = request.headers.get('intuit-signature') || '';
+const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(verifier), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+const expected = bytesToB64(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(raw)));
+let diff = expected.length === signature.length ? 0 : 1;
+for (let i = 0; i < Math.min(expected.length, signature.length); i++) diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+if (diff !== 0) return new Response('invalid signature', { status: 401 });
+let body; try { body = JSON.parse(raw); } catch (e) { return new Response('bad payload', { status: 400 }); }
+const realms = {};
+if (Array.isArray(body)) { for (const ev of body) if (ev && ev.intuitaccountid) realms[String(ev.intuitaccountid)] = true; } // CloudEvents format
+else { for (const n of (body.eventNotifications || [])) if (n && n.realmId) realms[String(n.realmId)] = true; } // classic format
+const work = (async function () {
+const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
+for (const conn of conns) { if (realms[String(conn.cfg.realmId)]) await qboRunStep(env, conn); }
+})();
+if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
+return new Response('ok', { status: 200 });
+}
+
+async function qboDisconnect(env, conn) {
+const cfg = conn.cfg;
+const token = await decryptSecret(env, cfg.refreshToken);
+if (token && qboConfigured(env)) {
+try { await fetch(QBO_REVOKE_URL, { method: 'POST', headers: { 'Authorization': qboBasicAuth(env), 'Accept': 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token }) }); }
+catch (e) { console.log('QBO_REVOKE_FAILED ' + (e && e.message)); }
+}
+await qboSaveConfig(env, conn, { accessToken: null, refreshToken: null, accessExpiresAt: null, refreshExpiresAt: null, needsReconnect: false, lastError: null }, { status: 'disconnected' });
+}
+
+// Hourly cron: carry unfinished first imports forward every hour, and once a
+// night pull every company's changes (which also keeps refresh tokens alive).
+async function runQuickBooksSweep(env, centralHour) {
+if (!qboConfigured(env)) return;
+const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
+for (const conn of conns) {
+const importing = conn.cfg.import && conn.cfg.import.phase !== 'done';
+if (importing) await qboRunStep(env, conn, { budgetMs: 20000 });
+else if (centralHour === QBO_NIGHTLY_HOUR_CENTRAL) await qboRunStep(env, conn);
+}
+}
 
 /* ---------------------------------------------------------------------------
    Documents
@@ -7350,6 +7902,7 @@ async function handleMe(request, env) {
     integrationMode: selfServeIntegrationMode(user),
     integrationProvider: selfServeIntegrationMode(user) ? SELF_SERVE_INTEGRATION_MODES[selfServeIntegrationMode(user)] : null,
     selfServeIntegrations: canSelfServeIntegrations(user),
+    quickbooksOAuth: qboConfigured(env),
     theme: tenantTheme(user),
     requireOwnSender: requiresOwnSender(user),
     sender: await senderStatusFor(env, user),
@@ -7533,6 +8086,10 @@ return handleSendingDomainCreate(request, env);
 if (url.pathname === '/api/sending-domain/verify' && request.method === 'POST') {
 return handleSendingDomainVerify(request, env);
 }
+if (url.pathname === '/api/quickbooks/connect' && request.method === 'GET') { return handleQuickBooksConnect(request, env); }
+if (url.pathname === '/api/quickbooks/callback' && request.method === 'GET') { return handleQuickBooksCallback(request, env, ctx); }
+if (url.pathname === '/api/quickbooks/status' && request.method === 'GET') { return handleQuickBooksStatus(request, env, ctx); }
+if (url.pathname === '/api/quickbooks/webhook' && request.method === 'POST') { return handleQuickBooksWebhook(request, env, ctx); }
 if (url.pathname === '/api/mailbox' && request.method === 'GET') { return handleMailboxStatus(request, env); }
 if (url.pathname === '/api/mailbox/connect' && request.method === 'GET') { return handleMailboxConnect(request, env); }
 if (url.pathname === '/api/mailbox/callback' && request.method === 'GET') { return handleMailboxCallback(request, env); }
@@ -7702,6 +8259,8 @@ ctx.waitUntil(runWeeklyUsersReport(env));
 // Follow-up cadence runs every hour; each tenant's own quiet hours and
 // weekly send cap decide whether anything actually goes out.
 ctx.waitUntil(runCadenceSweep(env));
+// QuickBooks: finish first imports, plus the nightly change sweep.
+ctx.waitUntil(runQuickBooksSweep(env, hour));
 }
 };
 
