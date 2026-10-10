@@ -3624,7 +3624,7 @@ if (integration.status !== 'connected') return json({ ok: false, error: 'That in
 // Native QuickBooks connection: actually pull from QuickBooks now.
 const qboConn = (await qboLoadConns(env, 'id=' + pgEq(integration.id)))[0];
 if (qboConn) {
-const run = await qboRunStep(env, qboConn, { budgetMs: 20000 });
+const run = await qboRunStep(env, qboConn, {});
 const fresh = (await qboLoadConns(env, 'id=' + pgEq(integration.id)))[0] || qboConn;
 if (fresh.cfg.needsReconnect) return json({ ok: false, error: fresh.cfg.lastError || 'QuickBooks needs to be reconnected.' }, 409);
 if (run.held) return json({ ok: false, error: 'Access on hold due to no payment.' }, 402);
@@ -3678,9 +3678,10 @@ function qboSandbox(env) { return String(env.QBO_ENV || 'sandbox').trim().toLowe
 function qboApiBase(env) { return qboSandbox(env) ? 'https://sandbox-quickbooks.api.intuit.com' : 'https://quickbooks.api.intuit.com'; }
 function qboRedirectUri() { return SITE_URL + '/api/quickbooks/callback'; }
 function qboBasicAuth(env) { return 'Basic ' + btoa(qboSecret(env, 'CLIENT_ID') + ':' + qboSecret(env, 'CLIENT_SECRET')); }
-// Invoices handled per run. Each one costs a handful of database calls, so this
-// keeps a single Worker invocation comfortably under its subrequest cap.
-function qboPageSize(env) { const n = parseInt(env.QBO_PAGE_SIZE, 10); return n > 0 && n <= 200 ? n : 40; }
+// Invoices handled per run. Each one costs several database calls and a Worker
+// invocation on the free plan allows 50 outbound requests in total, so steps
+// stay small and chain themselves (see qboContinue) until the import is done.
+function qboPageSize(env) { const n = parseInt(env.QBO_PAGE_SIZE, 10); return n > 0 && n <= 200 ? n : 8; }
 function qboSleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 function qboChunks(list, size) { const out = []; for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size)); return out; }
 function qboQuote(id) { return "'" + String(id).replace(/[^0-9A-Za-z_-]/g, '') + "'"; }
@@ -4055,12 +4056,12 @@ if (!(await qboAcquireLock(env, conn))) return { ran: false, busy: true };
 try {
 const importing = conn.cfg.import && conn.cfg.import.phase !== 'done';
 if (importing) {
-// Sync Now / cron keep stepping until the run's time budget is spent.
-const until = Date.now() + (opts.budgetMs || 0);
-do { await qboImportStep(env, conn); } while (conn.cfg.import.phase !== 'done' && Date.now() < until);
+await qboImportStep(env, conn);
 } else if (opts.cdc !== false) {
 await qboCdcStep(env, conn);
 }
+// More to do? Hand the next step to a fresh invocation (its own request budget).
+if (conn.cfg.import && conn.cfg.import.phase !== 'done' && opts.chain !== false) qboContinue(env, conn, opts.ctx);
 return { ran: true };
 } catch (e) {
 if (!e.qboAuth) {
@@ -4071,6 +4072,30 @@ return { ran: false, error: true };
 } finally {
 await qboReleaseLock(env, conn);
 }
+}
+
+// Self-chaining: after a step, call our own /api/quickbooks/continue so the next
+// step runs in a new Worker invocation. The integration's api_key is the bearer.
+function qboContinue(env, conn, ctx) {
+const run = (async function () {
+try {
+const row = await pgSelectOne(env, 'integrations', 'id=' + pgEq(conn.id) + '&select=api_key');
+if (!row || !row.api_key) return;
+await fetch(SITE_URL + '/api/quickbooks/continue', { method: 'POST', headers: { 'Authorization': 'Bearer ' + row.api_key, 'Content-Type': 'application/json' }, body: '{}' });
+} catch (e) { console.log('QBO_CONTINUE_FAILED ' + (e && e.message)); }
+})();
+if (ctx && ctx.waitUntil) ctx.waitUntil(run);
+return run;
+}
+async function handleQuickBooksContinue(request, env, ctx) {
+const authHeader = request.headers.get('Authorization') || '';
+const match = authHeader.match(/^Bearer\s+(.+)$/i);
+if (!match) return json({ ok: false }, 401);
+const conn = (await qboLoadConns(env, 'api_key=' + pgEq(match[1].trim())))[0];
+if (!conn) return json({ ok: false }, 401);
+const work = qboRunStep(env, conn, { ctx: ctx });
+if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
+return json({ ok: true });
 }
 
 /* ---- Routes ---- */
@@ -4134,7 +4159,7 @@ const name = info && info.CompanyInfo && info.CompanyInfo.CompanyName;
 if (name) await qboSaveConfig(env, conn, { companyName: String(name).slice(0, 160) });
 } catch (e) { console.log('QBO_COMPANYINFO_FAILED ' + (e && e.message)); }
 // First import starts right away; the dashboard's status poll carries it on.
-if (ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { budgetMs: 20000 }));
+if (ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
 return redirectTo('/dashboard?qbo=connected');
 }
 
@@ -4146,7 +4171,7 @@ const cfg = conn ? conn.cfg : {};
 const connected = !!(conn && conn.status === 'connected' && !cfg.needsReconnect);
 const importing = !!(connected && cfg.import && cfg.import.phase !== 'done');
 // Viewing the dashboard nudges an unfinished first import forward.
-if (importing && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { budgetMs: 15000 }));
+if (importing && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
 const out = { ok: true, configured: qboConfigured(env), sandbox: qboSandbox(env), connected: connected,
 needsReconnect: !!(conn && cfg.needsReconnect), companyName: cfg.companyName || null,
 importing: importing, imported: (cfg.import && cfg.import.imported) || 0,
@@ -4174,7 +4199,7 @@ if (Array.isArray(body)) { for (const ev of body) if (ev && ev.intuitaccountid) 
 else { for (const n of (body.eventNotifications || [])) if (n && n.realmId) realms[String(n.realmId)] = true; } // classic format
 const work = (async function () {
 const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
-for (const conn of conns) { if (realms[String(conn.cfg.realmId)]) await qboRunStep(env, conn); }
+for (const conn of conns) { if (realms[String(conn.cfg.realmId)]) await qboRunStep(env, conn, { ctx: ctx }); }
 })();
 if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
 return new Response('ok', { status: 200 });
@@ -4197,8 +4222,8 @@ if (!qboConfigured(env)) return;
 const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
 for (const conn of conns) {
 const importing = conn.cfg.import && conn.cfg.import.phase !== 'done';
-if (importing) await qboRunStep(env, conn, { budgetMs: 20000 });
-else if (centralHour === QBO_NIGHTLY_HOUR_CENTRAL) await qboRunStep(env, conn);
+if (importing) await qboRunStep(env, conn, {});
+else if (centralHour === QBO_NIGHTLY_HOUR_CENTRAL) await qboRunStep(env, conn, {});
 }
 }
 
@@ -8123,6 +8148,7 @@ if (url.pathname === '/api/quickbooks/connect' && request.method === 'GET') { re
 if (url.pathname === '/api/quickbooks/callback' && request.method === 'GET') { return handleQuickBooksCallback(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/status' && request.method === 'GET') { return handleQuickBooksStatus(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/webhook' && request.method === 'POST') { return handleQuickBooksWebhook(request, env, ctx); }
+if (url.pathname === '/api/quickbooks/continue' && request.method === 'POST') { return handleQuickBooksContinue(request, env, ctx); }
 if (url.pathname === '/api/mailbox' && request.method === 'GET') { return handleMailboxStatus(request, env); }
 if (url.pathname === '/api/mailbox/connect' && request.method === 'GET') { return handleMailboxConnect(request, env); }
 if (url.pathname === '/api/mailbox/callback' && request.method === 'GET') { return handleMailboxCallback(request, env); }
