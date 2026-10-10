@@ -7,7 +7,9 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "SUPABASE_URL": "https://ievwycehuzhurxkcczra.supabase.co"
+    "SUPABASE_URL": "https://ievwycehuzhurxkcczra.supabase.co",
+    // QuickBooks: "sandbox" while using Intuit development keys; "production" once Intuit issues live keys
+    "QBO_ENV": "sandbox"
   },
   "triggers": {
     "crons": [
