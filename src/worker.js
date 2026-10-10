@@ -7105,6 +7105,12 @@ integs +
 '<div class="msg" id="integmsg-'+i+'"></div>' +
 '<div class="note">Creating a key marks setup as in progress. Plug the key and webhook URL into their accounting system or middleware - the key is shown once.</div>' +
 '</div>' +
+'<div class="box"><h3>Sign-in code</h3>' +
+'<div class="note">Every password login asks for a 6-digit code by email. Waive it for one user for a short window (e.g. a demo while their inbox is slow).</div>' +
+'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><input type="text" id="mfaemail-'+i+'" placeholder="user@company.com" style="margin:0;max-width:260px;"> <input type="number" id="mfamin-'+i+'" value="30" min="1" max="240" style="margin:0;width:70px;"> min ' +
+'<button class="act" onclick="__mfaSkip('+i+',\\'skip\\')">Skip code</button> <button class="act ghost" onclick="__mfaSkip('+i+',\\'clear\\')">Re-enable</button></div>' +
+'<div class="msg" id="mfamsg-'+i+'"></div>' +
+'</div>' +
 '<div class="box"><h3>Demo data</h3>' +
 '<div class="note">Seeds 10 invoices per department across the offices, plus 5 demo employees with a month of activity, so the workspace has something to show before the real books connect. Remove it any time; a production QuickBooks connection clears it automatically.</div>' +
 '<button class="act" onclick="__demo('+i+',\\'seed\\')">Seed demo data</button> <button class="act ghost" onclick="__demo('+i+',\\'remove\\')">Remove demo data</button>' +
@@ -7173,6 +7179,13 @@ post('/api/admin/onboarding/config', { tenantId: c.tenantId, theme: theme, requi
 }
 if (file && !removeLogo) { if (file.size > 120000) { setMsg('brandmsg-'+i,'Logo file is over 120 KB - export a smaller PNG/SVG.',false); return; } var rd = new FileReader(); rd.onload = function(){ send(String(rd.result)); }; rd.readAsDataURL(file); }
 else send(null);
+};
+window.__mfaSkip = function(i, action){
+var c = DATA[i]; var email = (document.getElementById('mfaemail-'+i).value||'').trim(); var minutes = parseInt(document.getElementById('mfamin-'+i).value, 10) || 30;
+if(!email){ setMsg('mfamsg-'+i,'Enter the user\\'s email first.',false); return; }
+post('/api/admin/onboarding/mfa-skip', { tenantId: c.tenantId, email: email, minutes: minutes, action: action }, 'mfamsg-'+i, function(d){
+setMsg('mfamsg-'+i, action==='clear' ? ('Sign-in code required again for '+d.user+'.') : ('Code waived for '+d.user+' for '+d.minutes+' min (until '+new Date(d.until).toLocaleTimeString()+'). Password alone signs them in.'), true);
+});
 };
 window.__demo = function(i, action){
 var c = DATA[i];
@@ -7274,18 +7287,46 @@ return !!(env.ADMIN_EXPORT_KEY && key === env.ADMIN_EXPORT_KEY);
 const DEMO_EMAIL_DOMAIN = 'demo.claims-collection.net';
 const DEMO_EXTERNAL_PREFIX = 'demo-';
 const DEMO_CUSTOMERS = [
-['Cedar Ridge Apartments', 'pm', 'Marisol Vega', 'Property Manager'], ['Oak Hollow HOA', 'private', 'Dennis Ruiz', 'Board Treasurer'],
-['Riverside Medical Plaza', 'insurance', 'Tom Alcott', 'Adjuster'], ['Summit Ridge Office Tower', 'pm', 'Priya Natarajan', 'Property Manager'],
-['Vista Del Sol Apartments', 'pm', 'Luis Carranza', 'Property Manager'], ['Copperfield Retail Plaza', 'insurance', 'Angela Boone', 'Adjuster'],
-['Harper Family Residence', 'private', 'Dana Harper', 'Homeowner'], ['Meadowbrook Senior Living', 'pm', 'Keith Mahoney', 'Facilities Director'],
+['Cedar Ridge Apartments', 'pm', 'Marisol Vega', 'Community Manager'], ['The Reserve at Oak Hollow', 'pm', 'Dennis Ruiz', 'Property Manager'],
+['Lakeshore Commons', 'pm', 'Marcus Bell', 'Regional Manager'], ['Summit Ridge Townhomes', 'pm', 'Priya Natarajan', 'Property Manager'],
+['Vista Del Sol Apartments', 'pm', 'Luis Carranza', 'Property Manager'], ['Magnolia Place', 'pm', 'Jordan Pike', 'Community Manager'],
+['Heritage Hills HOA', 'private', 'Carla Mendes', 'Board Treasurer'], ['Meadowbrook Senior Living', 'pm', 'Keith Mahoney', 'Facilities Director'],
 ['Blue Harbor Property Group', 'pm', 'Renee Okafor', 'Regional Manager'], ['Alder Creek HOA', 'private', 'Sam Whitfield', 'HOA President'],
-['Pine Court Townhomes', 'pm', 'Erica Lindqvist', 'Community Manager'], ['Lakeshore Commons', 'pm', 'Marcus Bell', 'Property Manager'],
-['Canyon Creek Veterinary Clinic', 'private', 'Dr. Ana Solis', 'Owner'], ['Westgate Industrial Park', 'insurance', 'Brian Yoder', 'Adjuster'],
-['Saguaro Point Shopping Center', 'insurance', 'Nina Patel', 'Adjuster'], ['Magnolia Place Apartments', 'pm', 'Jordan Pike', 'Property Manager'],
-['Heritage Hills Condominiums', 'private', 'Carla Mendes', 'Board Secretary'], ['Northpark Logistics Center', 'pm', 'Owen Fitzgerald', 'Site Manager'],
-['Stonebridge Apartments', 'pm', 'Tessa Nguyen', 'Property Manager'], ['Elm Street Dental', 'private', 'Dr. Ray Kim', 'Owner']
+['Pine Court Townhomes', 'pm', 'Erica Lindqvist', 'Community Manager'], ['Stonebridge at Riverside', 'pm', 'Tessa Nguyen', 'Property Manager'],
+['Canyon Creek Flats', 'pm', 'Ana Solis', 'Assistant Manager'], ['Westgate Lofts', 'insurance', 'Brian Yoder', 'Adjuster'],
+['Saguaro Point Apartments', 'pm', 'Nina Patel', 'Community Manager'], ['The Avenue at Northpark', 'pm', 'Owen Fitzgerald', 'Property Manager'],
+['Elm Street Residences', 'pm', 'Ray Kim', 'Regional Manager'], ['Copperfield Crossing', 'insurance', 'Angela Boone', 'Adjuster'],
+['Harborview Condominiums', 'private', 'Dana Harper', 'Board Secretary'], ['Grand Parkway Apartments', 'pm', 'Tom Alcott', 'Property Manager']
 ];
-const DEMO_SERVICES = ['Monthly service - Unit 14B', 'Quarterly service - Building C', 'Service call - Suite 220', 'Monthly service - Floors 3-4', 'Emergency call-out - Rear bay', 'Monthly service - Common areas', 'Annual contract - Phase 2', 'Service call - Clubhouse', 'Monthly service - Garage levels', 'Make-ready - 6 units'];
+// What each Revolve business does and where, per revolveprop.com and its press
+// releases (cities marked below as assumed are placements, not statements).
+// Matched by name fragments against the workspace's department labels; any
+// business that matches nothing gets the generic services and all offices.
+const DEMO_BUSINESS_PROFILES = [
+{ match: ['a1 valet'], services: 'trash', cities: ['atlanta', 'nashville', 'charleston', 'durham', 'jacksonville'] },
+{ match: ['g&h', 'gh trash', 'g h trash'], services: 'trash', cities: ['dallas', 'austin', 'houston', 'atlanta'] },
+{ match: ['doorside'], services: 'trash', cities: ['charleston', 'durham', 'jacksonville', 'nashville'] },
+{ match: ['rent ready'], services: 'turns', cities: ['washington', 'stafford', 'seattle', 'portland'] },
+{ match: ['magic make'], services: 'turns', cities: ['austin'] },
+{ match: ['turn factory'], services: 'turns', cities: ['atlanta'] },
+{ match: ['total apartment'], services: 'turns', cities: ['dallas', 'atlanta', 'austin', 'houston'] },
+{ match: ['optimum'], services: 'turns', cities: ['houston', 'dallas', 'chicago'] },
+{ match: ['total cleaning'], services: 'cleaning', cities: ['chicago', 'dallas', 'houston'] },
+{ match: ['premium remodel'], services: 'renovation', cities: ['englewood', 'dallas', 'atlanta'] },
+{ match: ['advantage building'], services: 'porter', cities: ['englewood', 'washington', 'stafford'] }
+];
+const DEMO_SERVICES_BY_TYPE = {
+trash: ['Valet trash - monthly service, 240 doors', 'Valet trash + recycling - monthly service', 'Bulk haul - 3 pickups', 'Valet trash - monthly service, 312 doors', 'Compactor area cleanup', 'Valet trash - monthly service, 168 doors', 'Recycling program - quarterly', 'Bulk haul - move-out week', 'Valet trash - monthly service, 96 doors', 'Dumpster enclosure cleanup'],
+turns: ['Unit turn - Apt 204 (paint, clean, carpet)', 'Make-ready - 6 units, Building C', 'Unit turn - Apt 1108', 'Paint - 4 units, Phase 2', 'Make-ready - 3 units, Building A', 'Resurfacing - tubs & counters, 2 units', 'Unit turn - Apt 312 (full)', 'Make-ready - 8 units, Building D', 'Appliance install - 5 units', 'Unit turn - Apt 1501'],
+cleaning: ['Move-out clean - 5 units', 'Common area deep clean - Clubhouse', 'Housekeeping - weekly, Buildings A-C', 'Carpet clean - 4 units', 'Move-out clean - 3 units', 'Post-renovation clean - Phase 1', 'Housekeeping - weekly, leasing office', 'Garage pressure wash - Levels 1-2', 'Move-out clean - 8 units', 'Window clean - exterior, Building B'],
+renovation: ['Kitchen renovation - 4 units', 'Common area renovation - Clubhouse', 'Bath renovation - 6 units', 'Flooring replacement - Building B', 'Capital project - pool deck', 'Occupied unit renovation - 3 units', 'Exterior paint - Phase 1', 'Amenity upgrade - fitness center', 'Renovation - 2 model units', 'Balcony repairs - Building C'],
+porter: ['Porter staffing - monthly, 2 FTE', 'Housekeeping & porter - monthly', 'Grounds porter - monthly', 'Porter staffing - monthly, 1 FTE', 'Common area maintenance - monthly', 'Hallway & garage upkeep - monthly', 'Porter staffing - lease-up', 'Grounds & breezeways - monthly', 'Porter staffing - monthly, 3 FTE', 'Event setup & cleanup']
+};
+const DEMO_SERVICES = DEMO_SERVICES_BY_TYPE.turns;
+function demoProfileFor(deptLabel) {
+const key = String(deptLabel || '').toLowerCase().replace(/&amp;/g, '&');
+return DEMO_BUSINESS_PROFILES.find(function (p) { return p.match.some(function (m) { return key.indexOf(m) !== -1; }); }) || null;
+}
 const DEMO_EMPLOYEES = [
 ['Jordan Hale', 'manager'], ['Alexis Moreno', 'user'], ['Taylor Brooks', 'user'], ['Casey Nwosu', 'user'], ['Riley Thompson', 'manager']
 ];
@@ -7339,6 +7380,8 @@ let n = 0; let created = 0;
 const accountRows = []; const accountMeta = []; const perOffice = {};
 function addInvoice(dept, office, k) {
 const c = DEMO_CUSTOMERS[(n * 7 + k) % DEMO_CUSTOMERS.length];
+const profile = demoProfileFor(departments[dept]);
+const services = DEMO_SERVICES_BY_TYPE[profile ? profile.services : 'turns'] || DEMO_SERVICES;
 const days = [3, 9, 17, 26, 34, 48, 61, 75, 92, 118][k % 10];
 const amount = Math.round((350 + rnd() * 17800) * 100) / 100;
 const paidKind = k === 2 || k === 7 ? 'paid' : (k === 5 ? 'partial' : 'open');
@@ -7349,7 +7392,7 @@ const paidAt = paidKind === 'paid' ? new Date(invoicedAt.getTime() + (4 + Math.f
 accountMeta.push({ days: days, paidKind: paidKind, paidAt: paidAt, paidAmount: paidAmount, payer: c[1], customer: c[0], seq: created + 1 });
 accountRows.push({
 tenant_id: tenant.id, external_id: DEMO_EXTERNAL_PREFIX + tenant.id + '-' + (++created),
-office: office, customer_name: c[0], meta: DEMO_SERVICES[k], payer: c[1], contact: c[2] + ' (' + c[3] + ')',
+office: office, customer_name: c[0], meta: services[k % services.length], payer: c[1], contact: c[2] + ' (' + c[3] + ')',
 contact_email: demoContactEmail(c[2], c[0]), contact_info: c[2] + ' · ' + demoContactEmail(c[2], c[0]) + ' · (555) 01' + String(10 + k) + '-' + String(1000 + n * 37 + k * 11).slice(-4) + ' · ' + c[3],
 claim_number: c[1] === 'insurance' ? ('CLM-' + (240000 + n * 97 + k * 13)) : null,
 invoice_number: invoiceNumber, amount: amount, invoiced_at: invoicedAt.toISOString(),
@@ -7359,13 +7402,28 @@ note: 'Demo invoice — ' + departments[dept] + (office ? ' · ' + offices[offic
 });
 if (office) perOffice[office] = (perOffice[office] || 0) + 1;
 }
+// Each business's invoices land in the cities it serves (matched against the
+// workspace's office list); businesses with no match rotate through all offices.
+function officesFor(dept) {
+const profile = demoProfileFor(departments[dept]);
+if (!profile) return officeKeys;
+const matched = officeKeys.filter(function (ok) {
+const label = String(offices[ok] || ok).toLowerCase();
+return profile.cities.some(function (city) { return label.indexOf(city) !== -1 || ok.indexOf(city.replace(/\s+/g, '')) !== -1; });
+});
+return matched.length ? matched : officeKeys;
+}
 for (const dept of deptKeys) {
-for (let k = 0; k < 10; k++) addInvoice(dept, officeKeys[(n + k) % officeKeys.length] || null, k);
+const pool = officesFor(dept);
+for (let k = 0; k < 10; k++) addInvoice(dept, pool[(n + k) % pool.length] || null, k);
 n++;
 }
 for (const office of officeKeys) {
+// Top up with businesses that serve this city first, then any business.
+const serving = deptKeys.filter(function (d) { return officesFor(d).indexOf(office) !== -1; });
+const pool = serving.length ? serving : deptKeys;
 let k = 0;
-while ((perOffice[office] || 0) < 10 && k < 40) { addInvoice(deptKeys[(n + k) % deptKeys.length], office, k); k++; }
+while ((perOffice[office] || 0) < 10 && k < 40) { addInvoice(pool[(n + k) % pool.length], office, k); k++; }
 n++;
 }
 const inserted = await pgInsert(env, 'accounts', accountRows) || [];
@@ -7884,9 +7942,35 @@ const gate = loginPaymentGate(tenant, user);
 if (gate) return json(gate, 403);
 
 // Second factor: a one-time code by email, unless this browser was trusted
-// within the last 30 days.
-if (!(await mfaTrusted(env, request, user.id))) return mfaStartChallenge(env, user);
+// within the last 30 days or the clAIms team waived the code for this user
+// for a short window (internal onboarding page).
+if (!(await mfaTrusted(env, request, user.id)) && !(await mfaSkipActive(env, user.id))) return mfaStartChallenge(env, user);
 return issueSession(env, user, null);
+}
+async function mfaSkipActive(env, userId) {
+try {
+const rows = await pgSelect(env, 'oauth_states', 'provider=' + pgEq('mfa_skip') + '&user_id=' + pgEq(userId) + '&select=expires_at');
+return (rows || []).some(function (r) { return new Date(r.expires_at).getTime() > Date.now(); });
+} catch (e) { return false; }
+}
+// Internal: waive the sign-in code for one user for a few minutes (e.g. when
+// their inbox is delayed during a demo). Key-gated; never exposed to tenants.
+async function handleAdminOnboardingMfaSkip(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+const email = String(body.email || '').trim().toLowerCase();
+let minutes = parseInt(body.minutes, 10); if (!isFinite(minutes) || minutes < 1) minutes = 30; if (minutes > 240) minutes = 240;
+if (!tenantId || !email) return json({ ok: false, error: 'Company and user email are required.' }, 400);
+const user = await pgSelectOne(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=ilike.' + encodeURIComponent(likeEscape(email)) + '&select=id,email,full_name');
+if (!user) return json({ ok: false, error: 'No user with that email in this company.' }, 404);
+try { await pgDelete(env, 'oauth_states', 'provider=' + pgEq('mfa_skip') + '&user_id=' + pgEq(user.id)); } catch (e) {}
+const until = new Date(Date.now() + minutes * 60000).toISOString();
+if (String(body.action) !== 'clear') {
+await pgInsert(env, 'oauth_states', { state: 'mfa-skip-' + user.id + '-' + randomToken(), user_id: user.id, provider: 'mfa_skip', redirect_to: '', expires_at: until });
+}
+return json({ ok: true, user: user.email, minutes: minutes, until: String(body.action) === 'clear' ? null : until });
 }
 
 /* ---------------------------------------------------------------------------
@@ -8369,6 +8453,9 @@ return handleAdminOnboardingPage();
 }
 if (url.pathname === '/api/admin/onboarding' && request.method === 'GET') {
 return handleAdminOnboardingData(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/mfa-skip' && request.method === 'POST') {
+return handleAdminOnboardingMfaSkip(request, env);
 }
 if (url.pathname === '/api/admin/onboarding/demo' && request.method === 'POST') {
 return handleAdminOnboardingDemo(request, env);
