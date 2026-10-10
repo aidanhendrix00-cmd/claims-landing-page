@@ -519,6 +519,9 @@
   .queue .card:nth-child(5),.todo-row:nth-child(5){animation-delay:140ms} .queue .card:nth-child(6),.todo-row:nth-child(6){animation-delay:175ms}
   .queue .card:nth-child(7){animation-delay:210ms} .queue .card:nth-child(8){animation-delay:245ms} .queue .card:nth-child(n+9){animation-delay:280ms}
   table.log tbody tr,table.sheet tbody tr,table.aging tbody tr{animation:rowIn .3s var(--ease-out) both;}
+  /* Background refreshes re-render in place: no entrance animations, no jump. */
+  body.quiet-render .view.active,body.quiet-render .queue .card,body.quiet-render .todo-row,
+  body.quiet-render table.log tbody tr,body.quiet-render table.sheet tbody tr,body.quiet-render table.aging tbody tr{animation:none !important;}
 
   /* Cards and rows respond to the hand */
   .card{transition:transform .25s var(--ease-out),box-shadow .25s var(--ease-out),border-color .2s ease;box-shadow:var(--shadow-soft);}
@@ -756,10 +759,10 @@
 
     <!-- ===================== REPORT VIEW ===================== -->
     <section class="view" id="view-report">
-      <div class="topbar"><div><h1>Aging Report</h1><p>Outstanding receivables by age bucket and payer type &#8212; and every account that still carries a balance, by office and department</p></div></div>
+      <div class="topbar"><div><h1>Aging Report</h1><p>Outstanding receivables by age bucket and by office / business &#8212; and every account that still carries a balance, by office and department</p></div></div>
       <div class="report-grid">
         <div class="report-card"><h3>By Age Bucket</h3><div id="report-age"></div></div>
-        <div class="report-card"><h3>By Payer Type</h3><div id="report-payer"></div></div>
+        <div class="report-card"><h3>By Office / Business</h3><div id="report-payer"></div></div>
       </div>
       <div class="aging-summary" id="aging-summary"></div>
       <div id="report-accounts"></div>
@@ -2462,6 +2465,18 @@ window.__previewTenantConfig = function(cfg){
   if (typeof renderAll === 'function') renderAll();
 };
 
+let __quietRenders = 0;
+// Re-renders triggered by a background refresh keep every element still:
+// entrance animations only play on the first paint and on tab changes.
+function quietRender(fn){
+  document.body.classList.add('quiet-render');
+  __quietRenders++;
+  try { fn(); } finally {
+    const n = __quietRenders;
+    setTimeout(function(){ if (__quietRenders === n) document.body.classList.remove('quiet-render'); }, 400);
+  }
+}
+let __accountsLoadedOnce = false;
 async function loadRealAccounts(){
     try {
       const res = await fetch('/api/accounts', { credentials: 'include' });
@@ -2699,7 +2714,8 @@ async function loadRealAccounts(){
         .sort(function(a, b){ return String(b.receivedTs || '') < String(a.receivedTs || '') ? -1 : (String(b.receivedTs || '') > String(a.receivedTs || '') ? 1 : 0); });
       state.paymentsLog = paymentsLog;
       if (typeof saveState === 'function') saveState();
-      if (typeof renderAll === 'function') renderAll();
+      if (typeof renderAll === 'function') { if (__accountsLoadedOnce) quietRender(renderAll); else renderAll(); }
+      __accountsLoadedOnce = true;
     } catch (err) {
       console.error('loadRealAccounts failed', err);
       if (window.__CLMS_REAL) showLoadFailure("We couldn't load your accounts just now. Check your connection and try again.");
@@ -3571,11 +3587,19 @@ saveState(); renderAll();
       const pct = (amt/totalAmt*100).toFixed(0);
       return `<div class="bar-row"><div class="bl">${b.label}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${b.color};"></div></div><div class="bar-val">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>`;
     }).join('');
-    const payerColors = { insurance: '#2E4D8C', pm: 'var(--teal)', private: '#6B3FA0' };
-    document.getElementById('report-payer').innerHTML = Object.keys(PAYER_LABELS).map(p => {
-      const amt = all.filter(i => i.payer === p).reduce((s,i) => s + balanceDue(i), 0);
+    // Balance by office / business: each department (operating company) at each
+    // city, largest balance first, so the biggest exposure is at the top.
+    const groupColors = ['#2E4D8C', 'var(--teal)', '#6B3FA0', 'var(--amber)', 'var(--rust)', '#3A7D5C', '#8C5A2E', '#4B6A88'];
+    const groups = {};
+    all.forEach(i => {
+      const key = deptLabel(i) || (OFFICE_LABELS[i.officeLocation] || i.officeLocation || 'Unassigned');
+      groups[key] = (groups[key] || 0) + balanceDue(i);
+    });
+    const groupKeys = Object.keys(groups).sort((a,b) => groups[b] - groups[a]);
+    document.getElementById('report-payer').innerHTML = (groupKeys.length ? groupKeys : ['No open balances']).map((g, idx) => {
+      const amt = groups[g] || 0;
       const pct = (amt/totalAmt*100).toFixed(0);
-      return `<div class="bar-row"><div class="bl">${PAYER_LABELS[p]}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${payerColors[p]};"></div></div><div class="bar-val">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>`;
+      return `<div class="bar-row"><div class="bl">${hEsc(g)}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${groupColors[idx % groupColors.length]};"></div></div><div class="bar-val">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div></div>`;
     }).join('');
 
     // ---- Every open-balance account, grouped by office then department ----
