@@ -7026,7 +7026,7 @@ return '<div class="co">' +
 '</div>' +
 '<div class="box"><h3>Departments</h3>' +
 '<textarea id="dep-'+i+'">'+esc(Object.keys(d).map(function(k){ return d[k]; }).join(String.fromCharCode(10)))+'</textarea>' +
-'<div class="note">One department per line, in display order. Keep the three restoration pipelines, rename them, or list the company\'s own divisions (operating companies, service lines). '+(c.departmentsCustom?'Custom config saved.':'Currently on defaults.')+'</div>' +
+'<div class="note">One department per line, in display order. Keep the three restoration pipelines, rename them, or list the company\\'s own divisions (operating companies, service lines). '+(c.departmentsCustom?'Custom config saved.':'Currently on defaults.')+'</div>' +
 '<button class="act" onclick="__saveDepts('+i+')">Save departments</button>' +
 '<div class="msg" id="depmsg-'+i+'"></div>' +
 '</div>' +
@@ -7040,11 +7040,11 @@ integs +
 '<div class="note">Creating a key marks setup as in progress. Plug the key and webhook URL into their accounting system or middleware - the key is shown once.</div>' +
 '</div>' +
 '<div class="box"><h3>Branding &amp; email policy</h3>' +
-'<div class="note" style="margin:0 0 6px;">Header / sidebar colour and accent colour for this company\'s signed-in pages (hex). Leave blank for the clAIms brand.</div>' +
+'<div class="note" style="margin:0 0 6px;">Header / sidebar colour and accent colour for this company\\'s signed-in pages (hex). Leave blank for the clAIms brand.</div>' +
 '<div style="display:flex;gap:8px;align-items:center;"><input type="text" id="thn-'+i+'" placeholder="#374A5C navy" value="'+esc((c.theme&&c.theme.navy)||'')+'" style="flex:1;"><input type="text" id="tha-'+i+'" placeholder="#83B0D8 accent" value="'+esc((c.theme&&c.theme.accent)||'')+'" style="flex:1;"></div>' +
 '<div class="note" style="margin:8px 0 4px;">Co-brand logo (shown beside the clAIms mark in the header; white or light artwork on a transparent PNG/SVG looks best, under 120 KB):</div>' +
 '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+(c.theme&&c.theme.logo?'<img src="'+esc(c.theme.logo)+'" alt="" style="height:28px;background:'+esc((c.theme&&c.theme.navy)||'#171717')+';padding:4px 8px;border-radius:6px;">':'<span class="note" style="margin:0;">none</span>')+'<input type="file" id="logo-'+i+'" accept="image/png,image/svg+xml,image/webp,image/jpeg" style="font-size:12px;">'+(c.theme&&c.theme.logo?' <button class="act ghost" style="margin:0;padding:4px 8px;" onclick="__saveBranding('+i+',true)">Remove logo</button>':'')+'</div>' +
-'<label class="note" style="display:flex;gap:8px;align-items:center;margin:8px 0;"><input type="checkbox" id="own-'+i+'"'+(c.requireOwnSender?' checked':'')+'> Only send from users\' own email (connected Google/Outlook or verified domain); never from a clAIms address</label>' +
+'<label class="note" style="display:flex;gap:8px;align-items:center;margin:8px 0;"><input type="checkbox" id="own-'+i+'"'+(c.requireOwnSender?' checked':'')+'> Only send from users\\' own email (connected Google/Outlook or verified domain); never from a clAIms address</label>' +
 '<button class="act" onclick="__saveBranding('+i+')">Save branding &amp; policy</button>' +
 '<div class="msg" id="brandmsg-'+i+'"></div>' +
 '</div>' +
