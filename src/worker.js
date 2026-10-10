@@ -3670,11 +3670,14 @@ const QBO_EXTERNAL_PREFIX = 'qbo-';
 const QBO_PAYMENT_PREFIX = 'qbo-pay-';
 const QBO_CDC_MAX_DAYS = 29;            // Intuit keeps 30 days of change history
 const QBO_NIGHTLY_HOUR_CENTRAL = 3;     // nightly safety-net sweep, 3 AM Texas time
-function qboConfigured(env) { return !!(env.QBO_CLIENT_ID && env.QBO_CLIENT_SECRET); }
+// Intuit app credentials. Accepts QBO_CLIENT_ID / QBO_CLIENT_SECRET /
+// QBO_WEBHOOK_VERIFIER, or the QBO_REV_INT_* spelling they were saved under.
+function qboSecret(env, name) { return String(env['QBO_' + name] || env['QBO_REV_INT_' + name] || '').trim(); }
+function qboConfigured(env) { return !!(qboSecret(env, 'CLIENT_ID') && qboSecret(env, 'CLIENT_SECRET')); }
 function qboSandbox(env) { return String(env.QBO_ENV || 'sandbox').trim().toLowerCase() !== 'production'; }
 function qboApiBase(env) { return qboSandbox(env) ? 'https://sandbox-quickbooks.api.intuit.com' : 'https://quickbooks.api.intuit.com'; }
 function qboRedirectUri() { return SITE_URL + '/api/quickbooks/callback'; }
-function qboBasicAuth(env) { return 'Basic ' + btoa(String(env.QBO_CLIENT_ID).trim() + ':' + String(env.QBO_CLIENT_SECRET).trim()); }
+function qboBasicAuth(env) { return 'Basic ' + btoa(qboSecret(env, 'CLIENT_ID') + ':' + qboSecret(env, 'CLIENT_SECRET')); }
 // Invoices handled per run. Each one costs a handful of database calls, so this
 // keeps a single Worker invocation comfortably under its subrequest cap.
 function qboPageSize(env) { const n = parseInt(env.QBO_PAGE_SIZE, 10); return n > 0 && n <= 200 ? n : 40; }
@@ -4009,12 +4012,19 @@ return qboImportStep(env, conn);
 }
 // Two minutes of overlap so nothing slips between runs; re-reading is harmless.
 const changedSince = new Date(since.getTime() - 120000).toISOString();
-const data = await qboGet(env, conn, 'cdc?entities=Invoice,Payment&changedSince=' + encodeURIComponent(changedSince));
+const data = await qboGet(env, conn, 'cdc?entities=Invoice,Payment,Customer&changedSince=' + encodeURIComponent(changedSince));
 const groups = (data.CDCResponse && data.CDCResponse[0] && data.CDCResponse[0].QueryResponse) || [];
-const liveInvoices = {}; const deletedInvoices = []; const livePayments = []; const deletedPayments = [];
+const liveInvoices = {}; const deletedInvoices = []; const livePayments = []; const deletedPayments = []; const changedCustomers = [];
 for (const g of groups) {
 for (const inv of (g.Invoice || [])) { if (inv.status === 'Deleted') deletedInvoices.push(String(inv.Id)); else liveInvoices[String(inv.Id)] = inv; }
 for (const p of (g.Payment || [])) { if (p.status === 'Deleted') deletedPayments.push(String(p.Id)); else livePayments.push(p); }
+for (const c of (g.Customer || [])) { if (c.status !== 'Deleted') changedCustomers.push(String(c.Id)); }
+}
+// A customer whose contact details changed: re-read their open invoices so the
+// point of contact on the dashboard follows the edit.
+for (const cid of changedCustomers.slice(0, 20)) {
+const open = await qboQuery(env, conn, 'Invoice', "CustomerRef = " + qboQuote(cid) + " AND Balance > '0'", 1, 100);
+for (const inv of open) if (!liveInvoices[String(inv.Id)]) liveInvoices[String(inv.Id)] = inv;
 }
 const toRead = {};
 for (const p of livePayments) for (const line of (p.Line || [])) for (const lt of (line.LinkedTxn || [])) {
@@ -4078,7 +4088,7 @@ if ((await countIntegrationsConnected(env, user.tenant_id)) >= limits.integratio
 const state = randomToken();
 await pgInsert(env, 'oauth_states', { state: state, user_id: user.id, provider: 'quickbooks', redirect_to: '/dashboard',
 expires_at: new Date(Date.now() + 900000).toISOString() });
-const params = new URLSearchParams({ client_id: String(env.QBO_CLIENT_ID).trim(), response_type: 'code', scope: QBO_SCOPE,
+const params = new URLSearchParams({ client_id: qboSecret(env, 'CLIENT_ID'), response_type: 'code', scope: QBO_SCOPE,
 redirect_uri: qboRedirectUri(), state: state });
 return redirectTo(QBO_AUTH_URL + '?' + params.toString());
 }
@@ -4100,7 +4110,7 @@ if (others.some(function (c) { return String(c.cfg.realmId) === String(realmId);
 let tokens;
 try { tokens = await qboTokenRequest(env, { grant_type: 'authorization_code', code: code, redirect_uri: qboRedirectUri() }); }
 catch (e) {
-console.log('QBO_TOKEN_EXCHANGE_FAILED ' + (e && e.message) + ' redirect_uri=' + qboRedirectUri() + ' client_id_tail=' + String(env.QBO_CLIENT_ID || '').slice(-6) + ' sandbox=' + qboSandbox(env));
+console.log('QBO_TOKEN_EXCHANGE_FAILED ' + (e && e.message) + ' redirect_uri=' + qboRedirectUri() + ' client_id_tail=' + qboSecret(env, 'CLIENT_ID').slice(-6) + ' sandbox=' + qboSandbox(env));
 return redirectTo('/dashboard?qbo=token_failed');
 }
 const nowIso = new Date().toISOString();
@@ -4150,7 +4160,7 @@ return json(out);
 // answered immediately, and turned into a CDC pull for each company named.
 async function handleQuickBooksWebhook(request, env, ctx) {
 const raw = await request.text();
-const verifier = String(env.QBO_WEBHOOK_VERIFIER || '').trim();
+const verifier = qboSecret(env, 'WEBHOOK_VERIFIER');
 if (!verifier) return new Response('webhooks not configured', { status: 503 });
 const signature = request.headers.get('intuit-signature') || '';
 const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(verifier), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
