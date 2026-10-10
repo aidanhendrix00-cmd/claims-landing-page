@@ -8119,6 +8119,49 @@ return json({ ok: true, text: text, model: model });
 } catch (e) { console.error('ai-draft exception', model, String(e)); return json({ ok: false, error: 'AI request failed' }, 502); }
 }
 
+// A reply received from the customer: the team pastes (or an inbound-email hook
+// posts) the email text; the model condenses it into a one- or two-sentence
+// Response Summary, the raw email is kept as a note, and the account flips to
+// "replied". Without an API key the summary is the opening of the email.
+async function summarizeReplyText(env, text, account) {
+const raw = String(text || '').replace(/\r/g, '').trim();
+const fallback = raw.replace(/\s+/g, ' ').slice(0, 220) + (raw.length > 220 ? '\u2026' : '');
+const apiKey = anthropicKey(env);
+if (!apiKey) return { summary: fallback, model: null };
+const prompt = 'You summarize customer replies for an accounts-receivable team. Invoice: ' + (account.invoice_number || ('INV-' + (10000 + account.id))) +
+' for ' + (account.customer_name || 'the customer') + ', balance ' + String(Number(account.amount || 0) - Number(account.paid_amount || 0)) + '.\n' +
+'Write ONE or TWO plain sentences (max 45 words) stating what the sender said and any commitment, amount, date, or request. No preamble, no quotes, no bullet points, no "the customer says". If the email is a bounce or out-of-office, say so.\n\nEMAIL:\n' + raw.slice(0, 6000);
+try {
+const res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST',
+headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+body: JSON.stringify({ model: AI_MODEL, max_tokens: 160, messages: [{ role: 'user', content: prompt }] }) });
+const data = await res.json();
+const out = res.ok ? (data.content || []).map(function (b) { return b.type === 'text' ? b.text : ''; }).join(' ').replace(/\s+/g, ' ').trim() : '';
+return { summary: (out || fallback).slice(0, 600), model: out ? AI_MODEL : null };
+} catch (e) { return { summary: fallback, model: null }; }
+}
+async function handleInvoiceReply(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const account = await accountForUser(env, user, body.accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const text = String(body.emailText || '').trim();
+if (text.length < 5) return json({ ok: false, error: 'Paste the email you received first.' }, 400);
+const from = String(body.from || '').trim().slice(0, 160);
+const receivedAt = body.receivedAt ? new Date(body.receivedAt) : new Date();
+const when = isNaN(receivedAt.getTime()) ? new Date() : receivedAt;
+const result = await summarizeReplyText(env, text, account);
+await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), { response_summary: result.summary, responded: 'replied', last_contact: when.toISOString().slice(0, 10), updated_at: new Date().toISOString() });
+try {
+await pgInsert(env, 'account_notes', { occurred_at: when.toISOString(), tenant_id: user.tenant_id, account_id: account.id,
+body: ('Reply received' + (from ? ' from ' + from : '') + ':\n\n' + text).slice(0, 4000), author_name: user.full_name || user.email || 'Team member', source: 'reply' });
+} catch (e) {}
+await logUserActivity(env, user, account, 'response', 'Reply logged' + (from ? ' from ' + from : '') + ': ' + result.summary);
+return json({ ok: true, summary: result.summary, responded: 'replied', lastContact: when.toISOString().slice(0, 10), ai: !!result.model });
+}
+
 // Admin-only health check for AI drafting: reports whether the key is set,
 // whether it looks like an Anthropic key, and what Anthropic actually says
 // when we send it a one-word request. Never returns the key itself.
@@ -8482,6 +8525,9 @@ return handleAdminAiStatus(request, env);
 }
 if (url.pathname === '/api/integrations/request' && request.method === 'POST') {
 return handleIntegrationRequest(request, env);
+}
+if (url.pathname === '/api/invoices/reply' && request.method === 'POST') {
+return handleInvoiceReply(request, env);
 }
 if (url.pathname === '/api/invoices/update' && request.method === 'POST') {
 return handleInvoiceUpdate(request, env);
