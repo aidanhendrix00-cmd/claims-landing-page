@@ -4009,12 +4009,19 @@ return qboImportStep(env, conn);
 }
 // Two minutes of overlap so nothing slips between runs; re-reading is harmless.
 const changedSince = new Date(since.getTime() - 120000).toISOString();
-const data = await qboGet(env, conn, 'cdc?entities=Invoice,Payment&changedSince=' + encodeURIComponent(changedSince));
+const data = await qboGet(env, conn, 'cdc?entities=Invoice,Payment,Customer&changedSince=' + encodeURIComponent(changedSince));
 const groups = (data.CDCResponse && data.CDCResponse[0] && data.CDCResponse[0].QueryResponse) || [];
-const liveInvoices = {}; const deletedInvoices = []; const livePayments = []; const deletedPayments = [];
+const liveInvoices = {}; const deletedInvoices = []; const livePayments = []; const deletedPayments = []; const changedCustomers = [];
 for (const g of groups) {
 for (const inv of (g.Invoice || [])) { if (inv.status === 'Deleted') deletedInvoices.push(String(inv.Id)); else liveInvoices[String(inv.Id)] = inv; }
 for (const p of (g.Payment || [])) { if (p.status === 'Deleted') deletedPayments.push(String(p.Id)); else livePayments.push(p); }
+for (const c of (g.Customer || [])) { if (c.status !== 'Deleted') changedCustomers.push(String(c.Id)); }
+}
+// A customer whose contact details changed: re-read their open invoices so the
+// point of contact on the dashboard follows the edit.
+for (const cid of changedCustomers.slice(0, 20)) {
+const open = await qboQuery(env, conn, 'Invoice', "CustomerRef = " + qboQuote(cid) + " AND Balance > '0'", 1, 100);
+for (const inv of open) if (!liveInvoices[String(inv.Id)]) liveInvoices[String(inv.Id)] = inv;
 }
 const toRead = {};
 for (const p of livePayments) for (const line of (p.Line || [])) for (const lt of (line.LinkedTxn || [])) {
