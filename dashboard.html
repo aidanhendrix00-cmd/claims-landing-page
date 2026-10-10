@@ -296,6 +296,8 @@
   .sheet td.tracker-text textarea:focus{outline:2px solid var(--teal);outline-offset:1px;background:#fff;}
   .sheet td.qb-notes{font-size:12px;line-height:1.35;color:var(--ink);white-space:normal;vertical-align:top;}
   .sheet td.qb-notes .clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-height:52px;}
+  .form-actions{display:flex;align-items:center;gap:12px;margin-top:12px;}
+  .sheet td.resp-cell .reply-btn{display:block;margin-top:4px;font-size:10.5px;padding:2px 7px;}
   #sender-banner{position:sticky;top:0;z-index:940;background:#FFF4E5;color:#7A4B00;border-bottom:1px solid #F2C879;padding:10px 18px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
   #sender-banner .btn-small{background:#171717;color:#fff;border-color:#171717;}
   #sender-banner .btn-small.ghost{background:transparent;color:#7A4B00;border-color:#E0B96A;}
@@ -1062,6 +1064,15 @@
 </div>
 
 <!-- ===================== ADD INVOICE DRAWER ===================== -->
+<div class="overlay" id="overlay-reply">
+  <div class="drawer" style="max-width:560px;">
+    <div class="drawer-head"><h3>Log a reply</h3><button class="close" onclick="closeReplyBox()">Close ×</button></div>
+    <div class="drawer-sub" id="reply-sub">Paste the email the customer sent. clAIms writes the Response Summary from it, keeps the full email on the account, and marks it Replied.</div>
+    <div class="form-row"><label>From <span style="font-weight:400;color:var(--slate);">(optional)</span></label><input id="reply-from" placeholder="e.g. Marisol Vega, Cedar Ridge"></div>
+    <div class="form-row"><label>Email received</label><textarea id="reply-text" rows="9" placeholder="Paste the reply here…"></textarea></div>
+    <div class="form-actions"><button class="btn-primary" id="reply-save" onclick="submitReplyBox()">Summarize &amp; save</button> <span class="sub" id="reply-msg"></span></div>
+  </div>
+</div>
 <div class="overlay" id="overlay-add">
   <div class="drawer">
     <div class="drawer-head"><h3>Add Invoice</h3><button class="close" onclick="closeAddInvoice()">Close ×</button></div>
@@ -1118,7 +1129,7 @@
       <h4>Collections Tracker</h4>
       <div class="hist-grid" id="detail-tracker-facts"></div>
       <div class="form-row" style="margin-top:10px;"><label>Point of contact <span style="font-weight:400;color:var(--slate);">(pulled from QuickBooks; edit freely)</span></label><textarea id="detail-contact-info" rows="2" placeholder="Name, email, phone, role…" onchange="setTrackerText(currentDetailId, 'contactInfo', this.value)"></textarea></div>
-      <div class="form-row"><label>Response summary</label><textarea id="detail-response-summary" rows="2" placeholder="What the customer said…" onchange="setTrackerText(currentDetailId, 'responseSummary', this.value)"></textarea></div>
+      <div class="form-row"><label>Response summary <span style="font-weight:400;color:var(--slate);">(AI summary of the reply received)</span></label><textarea id="detail-response-summary" rows="2" placeholder="No reply logged yet" readonly style="background:var(--paper);"></textarea><button class="btn-small" style="margin-top:6px;" onclick="openReplyBox(currentDetailId)">Log a reply&hellip;</button></div>
     </div>
 
     <div class="drawer-section" style="margin-top:0;padding-top:0;border-top:none;">
@@ -3385,7 +3396,7 @@ saveState(); renderAll();
   // Tracker columns for companies whose departments are operating companies
   // (QuickBooks-only workspaces): the ledger a collections desk actually works
   // from, with the free-text columns editable in place.
-  const TRACKER_COLS = ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?', 'Response Summary', 'QuickBooks Notes', 'Last Follow-Up', 'Projected Collection', 'Payment Type', 'Sent to Collections'];
+  const TRACKER_COLS = ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?', 'Response Summary', 'Notes', 'Last Follow-Up', 'Projected Collection', 'Payment Type', 'Sent to Collections'];
   function lastFollowUpHTML(inv){
     if (!inv.lastFollowUpAt) return '<span style="color:var(--slate-soft);">\u2014</span>';
     const kind = { followup: 'Follow-up', demand: 'Demand letter', demand_letter: 'Demand letter', noil: 'NOIL', first_contact: 'First contact' }[inv.lastFollowUpKind] || (inv.lastFollowUpKind ? hEsc(inv.lastFollowUpKind) : 'Follow-up');
@@ -3416,8 +3427,8 @@ saveState(); renderAll();
         <td class="tracker-text"><textarea rows="2" placeholder="Name, email, phone\u2026" onchange="setTrackerText(${inv.id}, 'contactInfo', this.value)">${hEsc(inv.contactInfo || '')}</textarea></td>
         <td>${inv.lastContact ? fmtDate(inv.lastContact) : '\u2014'}</td>
         <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span></td>
-        <td class="tracker-text"><textarea rows="2" placeholder="What they said\u2026" onchange="setTrackerText(${inv.id}, 'responseSummary', this.value)">${hEsc(inv.responseSummary || '')}</textarea></td>
-        <td class="tracker-text qb-notes" title="${hEsc(inv.note || '')}">${inv.note ? '<div class="clamp">' + hEsc(inv.note) + '</div>' : '<span style="color:var(--slate-soft);">\u2014</span>'}</td>
+        <td class="tracker-text qb-notes resp-cell" title="${hEsc(inv.responseSummary || '')}">${inv.responseSummary ? '<div class="clamp">' + hEsc(inv.responseSummary) + '</div>' : '<span style="color:var(--slate-soft);">No reply yet</span>'}<button class="btn-small reply-btn" onclick="openReplyBox(${inv.id})" title="Paste the email you received \u2014 clAIms summarizes it here">${inv.responseSummary ? 'Log another reply' : 'Log reply'}</button></td>
+        <td class="tracker-text"><textarea rows="2" placeholder="Notes\u2026" onchange="setTrackerText(${inv.id}, 'note', this.value)">${hEsc(inv.note || '')}</textarea></td>
         <td>${lastFollowUpHTML(inv)}</td>
         <td><input type="date" value="${hEsc(inv.projectedPaymentDate || '')}" onchange="setProjectedDate(${inv.id}, this.value)"/>${paymentDateOutsideWindow(inv.projectedPaymentDate) ? ' <span class="pd-flag" title="Outside the 3-week window (This Week through Following Week)">*</span>' : ''}</td>
         <td>
@@ -3441,7 +3452,7 @@ saveState(); renderAll();
     inv[field] = next;
     if (field === 'responseSummary' && next && (!inv.responded || inv.responded === 'none' || inv.responded === 'sent')) { inv.responded = 'replied'; persistInvoice(inv, ['responseSummary', 'responded']); }
     else persistInvoice(inv, [field]);
-    addActivity(inv, field === 'contactInfo' ? 'Point of contact updated (Accounts Receivable).' : 'Response summary updated (Accounts Receivable).', 'manual', field === 'contactInfo' ? 'update' : 'response');
+    addActivity(inv, field === 'contactInfo' ? 'Point of contact updated (Accounts Receivable).' : (field === 'note' ? 'Notes updated (Accounts Receivable).' : 'Response summary updated (Accounts Receivable).'), 'manual', field === 'responseSummary' ? 'response' : 'update');
     saveState();
     // Re-render everything except the sheet so the textarea keeps focus order.
     renderNavCounts(); renderQueue();
@@ -4276,6 +4287,43 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('overlay-add').classList.add('open');
   }
   function closeAddInvoice(){ document.getElementById('overlay-add').classList.remove('open'); }
+  // Response Summary is written by the model from the reply itself, never typed.
+  let replyBoxId = null;
+  function openReplyBox(id){
+    const inv = findInv(id); if(!inv) return;
+    replyBoxId = id;
+    document.getElementById('reply-sub').textContent = 'Paste the email ' + (inv.name || 'the customer') + ' sent about ' + (inv.invoiceNumber || 'this invoice') + '. clAIms writes the Response Summary from it, keeps the full email on the account, and marks it Replied.';
+    document.getElementById('reply-from').value = ''; document.getElementById('reply-text').value = ''; document.getElementById('reply-msg').textContent = '';
+    document.getElementById('overlay-reply').classList.add('open');
+    setTimeout(function(){ document.getElementById('reply-text').focus(); }, 50);
+  }
+  function closeReplyBox(){ document.getElementById('overlay-reply').classList.remove('open'); replyBoxId = null; }
+  async function submitReplyBox(){
+    const inv = findInv(replyBoxId); if(!inv) return;
+    const text = (document.getElementById('reply-text').value || '').trim();
+    const from = (document.getElementById('reply-from').value || '').trim();
+    const msg = document.getElementById('reply-msg'); const btn = document.getElementById('reply-save');
+    if (text.length < 5) { msg.textContent = 'Paste the email first.'; return; }
+    btn.disabled = true; msg.textContent = 'Summarizing\u2026';
+    try {
+      let summary = text.replace(/\s+/g, ' ').slice(0, 220);
+      if (isRemoteInvoice(inv)) {
+        const res = await fetch('/api/invoices/reply', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: inv.id, emailText: text, from: from }) });
+        const d = await res.json().catch(function(){ return null; });
+        if (!res.ok || !d || !d.ok) { msg.textContent = (d && d.error) || 'Could not save that reply.'; btn.disabled = false; return; }
+        summary = d.summary; inv.lastContact = d.lastContact || inv.lastContact;
+      }
+      inv.responseSummary = summary; inv.responded = 'replied';
+      const now = new Date();
+      state.responsesLog.unshift({ invoiceId: inv.id, invoiceName: inv.name, amount: inv.amount, receivedAt: fmtDate(now), receivedTs: now.toISOString(), inResponseTo: 'Follow-Up', summary: summary, jobStatus: inv.jobStatus, source: 'manual' });
+      addActivity(inv, 'Reply logged' + (from ? ' from ' + from : '') + ': "' + summary + '"', 'manual', 'response');
+      saveState(); renderAll();
+      const d2 = document.getElementById('detail-response-summary'); if (d2 && currentDetailId === inv.id) d2.value = summary;
+      closeReplyBox();
+      showToast('Reply logged \u2014 Response Summary updated for ' + inv.name);
+    } catch (e) { msg.textContent = 'Could not save that reply.'; }
+    btn.disabled = false;
+  }
 
   // Never hand out an id an existing invoice already uses: findInv() returns the
   // first match, so a collision would quietly point payments, drafts and edits
@@ -4395,7 +4443,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
           kv('Last follow-up', inv.lastFollowUpAt ? (fmtDate(String(inv.lastFollowUpAt).slice(0,10)) + (inv.lastFollowUpBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.lastFollowUpBy) + '</div>' : '')) : 'None yet', !inv.lastFollowUpAt) +
           kv('Projected collection', inv.projectedPaymentDate ? fmtDate(inv.projectedPaymentDate) : 'Not set', !inv.projectedPaymentDate) +
           kv('Payment type', hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType || 'Not set'), !inv.paymentType) +
-          kv('QuickBooks notes', inv.note ? hEsc(inv.note).replace(/\n/g, '<br>') : 'None', !inv.note);
+          kv('Notes', inv.note ? hEsc(inv.note).replace(/\n/g, '<br>') : 'None', !inv.note);
         document.getElementById('detail-contact-info').value = inv.contactInfo || '';
         document.getElementById('detail-response-summary').value = inv.responseSummary || '';
       }
@@ -4830,7 +4878,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         tile('Point of contact', a.contactInfo ? hEsc(a.contactInfo).replace(/\n/g, '<br>') : 'Not on file', a.contactInfo ? '' : 'muted') +
         tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(a.lastFollowUpBy) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted') +
         tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted') +
-        tile('QuickBooks notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted') +
+        tile('Notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted') +
         tile('Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted')
       ) : '') +
       tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted') +
