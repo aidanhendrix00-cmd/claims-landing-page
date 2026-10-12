@@ -7560,8 +7560,8 @@ responded: replied ? 'replied' : (k % 2 ? 'opened' : 'sent'),
 response_summary: replied ? DEMO_REPLIES[(k + followups) % DEMO_REPLIES.length] : null
 };
 }
-function demoCommsRows(tenant, accounts, nowMs) {
-const rows = [];
+function demoCommsRows(tenant, accounts, nowMs, employees) {
+const rows = []; const activity = [];
 for (const a of accounts) {
 const n = parseInt(a.follow_up_count, 10) || 0;
 if (!n) continue;
@@ -7581,9 +7581,17 @@ kind: (auto ? 'cadence_' : 'manual_') + (demand ? 'demand' : 'followup'), recipi
 recipient_email: a.contact_email || null, subject: subject,
 status: i === n ? (a.responded === 'replied' ? 'replied' : (a.responded === 'opened' ? 'opened' : 'sent')) : 'opened',
 body: body, error: null, sent_at: at.toISOString() });
+// A manual send is a person's action: log it for that employee at the same
+// moment, which is also how the Comms Log learns whose name to show.
+if (!auto && employees && employees.length) {
+const emp = employees[(a.seq + i) % employees.length];
+activity.push({ tenant_id: tenant.id, user_id: emp.id, actor_name: emp.full_name, actor_role: emp.role, actor_office: emp.office,
+type: demand ? 'demand' : 'followup', summary: (demand ? 'Sent demand letter for ' : 'Sent follow-up #' + i + ' to ' + contact + ' for ') + a.customer_name + ' (invoice ' + a.invoice_number + ').',
+account_id: a.id, customer_name: a.customer_name, invoice_number: a.invoice_number, created_at: at.toISOString() });
 }
 }
-return rows;
+}
+return { rows: rows, activity: activity };
 }
 async function demoSeed(env, tenant) {
 await demoRemove(env, tenant.id);
@@ -7669,8 +7677,8 @@ if (paymentRows.length) { try { await pgInsert(env, 'invoice_payments', paymentR
 // Every follow-up the invoices carry exists as a sent message, so the Comms
 // Log, Response Received and "See messages sent" are populated too.
 let commsLogged = 0;
-const commsRows = demoCommsRows(tenant, accounts, nowMs);
-if (commsRows.length) { try { commsLogged = (await pgInsert(env, 'invoice_comms', commsRows) || []).length; } catch (e) { console.log('DEMO_COMMS_FAILED ' + (e && e.message)); } }
+const demoComms = demoCommsRows(tenant, accounts, nowMs, employees);
+if (demoComms.rows.length) { try { commsLogged = (await pgInsert(env, 'invoice_comms', demoComms.rows) || []).length; } catch (e) { console.log('DEMO_COMMS_FAILED ' + (e && e.message)); } }
 // A month of activity: follow-ups, responses, payments, notes and escalations
 // by the demo employees, newest first on the Employees Activity tab.
 const templates = [
@@ -7701,7 +7709,8 @@ type: t[0], summary: summary, account_id: a.id, customer_name: a.customer_name, 
 }
 }
 let logged = 0;
-if (activityRows.length) { try { logged = (await pgInsert(env, 'user_activity', activityRows) || []).length; } catch (e) {} }
+const allActivity = activityRows.concat(demoComms.activity);
+if (allActivity.length) { try { logged = (await pgInsert(env, 'user_activity', allActivity) || []).length; } catch (e) { console.log('DEMO_ACTIVITY_FAILED ' + (e && e.message)); } }
 return { accounts: accounts.length, employees: employees.length, activity: logged, comms: commsLogged, departments: deptKeys.length, offices: officeKeys.length };
 }
 
