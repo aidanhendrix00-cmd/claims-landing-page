@@ -133,6 +133,7 @@
   .chip.active{background:var(--ink);border-color:var(--ink);color:#fff;}
   .search{font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);width:170px;color:var(--ink);appearance:none;-webkit-appearance:none;}
   .search::-webkit-search-decoration,.search::-webkit-search-cancel-button{-webkit-appearance:none;}
+  .sent-by{color:var(--slate);font-size:11.5px;font-weight:500;white-space:nowrap;}
   .search:focus{outline:none;border-color:var(--slate-soft);}
   select.sort{font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--font-body);}
 
@@ -252,6 +253,16 @@
   .report-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
   .report-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;}
   .report-card h3{font-family:var(--font-display);font-size:13.5px;margin:0 0 14px;}
+  .report-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .report-card-head h3{margin:0 0 14px;}
+  .report-card-tools{display:flex;gap:4px;margin:0 0 14px;}
+  .rc-btn{width:24px;height:24px;border:1px solid var(--line);background:var(--panel);border-radius:6px;color:var(--slate);font-size:13px;line-height:1;cursor:pointer;padding:0;}
+  .rc-btn:hover{border-color:var(--ink);color:var(--ink);}
+  .rc-btn.active{background:var(--ink);border-color:var(--ink);color:#fff;}
+  .report-card.is-min .report-body{display:none;}
+  .report-card.is-min h3,.report-card.is-min .report-card-tools{margin-bottom:0;}
+  .report-card.is-max{grid-column:1 / -1;}
+  .report-card .report-body.capped{max-height:260px;overflow-y:auto;padding-right:4px;}
   .bar-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
   .bar-row .bl{width:110px;font-size:11.5px;color:var(--slate);flex-shrink:0;}
   .bar-track{flex:1;height:9px;border-radius:5px;background:#EEF1EF;overflow:hidden;}
@@ -333,6 +344,10 @@
   .collected-year-total{font-family:var(--font-mono);font-weight:700;font-size:15px;color:var(--teal);}
   .collected-month-block{margin-bottom:20px;}
   .collected-month-block:last-child{margin-bottom:0;}
+  .collected-filter{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 0 16px;padding:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;font-size:12.5px;color:var(--slate);}
+  .collected-filter label{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+  .collected-filter select,.collected-filter input{font-family:inherit;font-size:12.5px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);}
+  .collected-filter-note{font-weight:500;}
   .collected-month-head{font-family:var(--font-display);font-size:12.5px;font-weight:600;color:var(--slate);margin-bottom:8px;display:flex;justify-content:space-between;}
   .collected-month-total{font-family:var(--font-mono);color:var(--ink);}
   table.sheet input[type="checkbox"]{width:15px;height:15px;}
@@ -766,7 +781,7 @@
       <div class="topbar"><div><h1>Aging Report</h1><p>Outstanding receivables by age bucket and by office / business &#8212; and every account that still carries a balance, by office and department</p></div></div>
       <div class="report-grid">
         <div class="report-card"><h3>By Age Bucket</h3><div id="report-age"></div></div>
-        <div class="report-card"><h3>By Office / Business</h3><div id="report-payer"></div></div>
+        <div class="report-card" id="report-payer-card"><div class="report-card-head"><h3>By Office / Business</h3><div class="report-card-tools"><button type="button" class="rc-btn" id="report-payer-min" title="Minimize" aria-label="Minimize" onclick="reportBoxSize('report-payer', 'min')">&#8211;</button><button type="button" class="rc-btn" id="report-payer-max" title="Maximize" aria-label="Maximize" onclick="reportBoxSize('report-payer', 'max')">&#9633;</button></div></div><div id="report-payer" class="report-body"></div></div>
       </div>
       <div class="aging-summary" id="aging-summary"></div>
       <div id="report-accounts"></div>
@@ -804,7 +819,14 @@
 
     <!-- ===================== COLLECTED (ALL-TIME) VIEW ===================== -->
     <section class="view" id="view-collected">
-      <div class="topbar"><div><h1>Collected</h1><p>All-time payments received, organized by year and month &#8212; filterable by office and department via the sidebar</p></div></div>
+      <div class="topbar"><div><h1>Collected</h1><p>Payments received, newest month first &#8212; narrow to a month or a date range here, and by office and department via the sidebar</p></div></div>
+      <div class="collected-filter" id="collected-filter">
+        <label>Period <select id="collected-period" onchange="setCollectedPeriod(this.value)"><option value="all">All time</option></select></label>
+        <label>From <input type="date" id="collected-from" onchange="setCollectedRange()"></label>
+        <label>To <input type="date" id="collected-to" onchange="setCollectedRange()"></label>
+        <button type="button" class="btn-small" id="collected-clear" onclick="clearCollectedFilter()" style="display:none;">Clear</button>
+        <span class="collected-filter-note" id="collected-filter-note"></span>
+      </div>
       <div class="kpis" id="collected-all-kpis"></div>
       <div id="collected-all-body"></div>
     </section>
@@ -2529,11 +2551,18 @@ function quietRender(fn){
 let __accountsLoadedOnce = false;
 let __accountsFingerprint = null;
 let __accountsLoading = null;
+let __accountsReloadQueued = false;
 function loadRealAccounts(){
   // Overlapping refresh triggers (the 30-second timer, the change probe, the
-  // QuickBooks import poll) share one in-flight load instead of stacking.
-  if (__accountsLoading) return __accountsLoading;
-  __accountsLoading = loadRealAccountsNow().finally(function(){ __accountsLoading = null; });
+  // QuickBooks import poll) share one in-flight load instead of stacking -
+  // but a call made while one is running (typically right after a send, a
+  // payment or a note was saved) always gets a fresh fetch afterwards, so it
+  // never ends up with data that was read before that write.
+  if (__accountsLoading) { __accountsReloadQueued = true; return __accountsLoading; }
+  __accountsLoading = loadRealAccountsNow().finally(function(){
+    __accountsLoading = null;
+    if (__accountsReloadQueued) { __accountsReloadQueued = false; loadRealAccounts(); }
+  });
   return __accountsLoading;
 }
 async function loadRealAccountsNow(){
@@ -2841,6 +2870,7 @@ async function loadRealAccountsNow(){
         draftType: c.label || 'Follow-up',
         status: c.status || 'sent',
         source: c.source === 'automation' ? 'automation' : 'manual',
+        sentBy: c.sentBy || null,
         recipient: who,
         subject: c.subject || null,
         preview: c.preview || '',
@@ -2962,6 +2992,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
      ============================================================ */
   function findInv(id){ return state.invoices.find(i=>i.id===id); }
   function addActivity(inv, text, source, kind){
+    if(typeof historyInvalidate === 'function') historyInvalidate(inv && inv.id);
     // Manual notes are persisted and queued for the CRM; automation notes are
     // already written server-side, so pushing them again would duplicate.
     // `kind` tells the server what the note records for the Employees Activity
@@ -3617,6 +3648,46 @@ saveState(); renderAll();
     addActivity(inv, `${labels[field]} marked ${verb} (manual edit via Accounts Receivable).`, 'manual', 'update');
     saveState(); renderAll();
   }
+  // QuickBooks workspaces: Work Authorization is a yes/no the team ticks, not a
+  // date pulled in from the books. Ticking it records today's date behind the
+  // scenes (so reports and the timeline still have one); unticking clears it.
+  function waSignedTile(inv){
+    const signed = !!(inv && inv.waSignedDate);
+    return '<div class="hist-kv" id="hist-wa-tile"><div class="k">Work Authorization signed</div>' +
+      '<div class="v' + (signed ? '' : ' muted') + '"><label class="wf-box" style="margin:0;">' +
+      '<input type="checkbox"' + (signed ? ' checked' : '') + ' onchange="setWaSigned(' + inv.id + ', this.checked)"> ' +
+      (signed ? 'Signed' + (inv.waSignedDate ? ' <span style="font-weight:400;color:var(--slate-soft);">' + hEsc(fmtDate(inv.waSignedDate)) + '</span>' : '') : 'Not signed') +
+      '</label></div></div>';
+  }
+  function setWaSigned(id, checked){
+    const inv = findInv(id);
+    if(!inv) return;
+    setSignatureDate(id, 'waSignedDate', checked ? isoDate(new Date()) : '');
+    const tile = document.getElementById('hist-wa-tile');
+    if(tile){ const tmp = document.createElement('div'); tmp.innerHTML = waSignedTile(inv); tile.replaceWith(tmp.firstChild); }
+  }
+  // Aging report boxes can be minimized (header only), maximized (full width,
+  // every row) or left at the default (scrolls past ~8 rows). Remembered per
+  // browser so the customer's choice sticks between visits.
+  function reportBoxSize(id, mode){
+    let cur = 'default';
+    try { cur = localStorage.getItem('clms.box.' + id) || 'default'; } catch(e){}
+    const next = cur === mode ? 'default' : mode;   // same button again = back to default
+    try { localStorage.setItem('clms.box.' + id, next); } catch(e){}
+    applyReportBoxSize(id);
+  }
+  function applyReportBoxSize(id){
+    const card = document.getElementById(id + '-card'); const body = document.getElementById(id);
+    if(!card || !body) return;
+    let mode = 'default';
+    try { mode = localStorage.getItem('clms.box.' + id) || 'default'; } catch(e){}
+    card.classList.toggle('is-min', mode === 'min');
+    card.classList.toggle('is-max', mode === 'max');
+    body.classList.toggle('capped', mode === 'default');
+    const bMin = document.getElementById(id + '-min'), bMax = document.getElementById(id + '-max');
+    if(bMin){ bMin.classList.toggle('active', mode === 'min'); bMin.title = mode === 'min' ? 'Restore' : 'Minimize'; }
+    if(bMax){ bMax.classList.toggle('active', mode === 'max'); bMax.title = mode === 'max' ? 'Restore' : 'Maximize'; }
+  }
   function setSignatureDate(id, field, val){
     const inv = findInv(id);
     if(!inv) return;
@@ -3681,6 +3752,7 @@ saveState(); renderAll();
       groups[key] = (groups[key] || 0) + balanceDue(i);
     });
     const groupKeys = Object.keys(groups).sort((a,b) => groups[b] - groups[a]);
+    applyReportBoxSize('report-payer');
     document.getElementById('report-payer').innerHTML = (groupKeys.length ? groupKeys : ['No open balances']).map((g, idx) => {
       const amt = groups[g] || 0;
       const pct = (amt/totalAmt*100).toFixed(0);
@@ -3909,9 +3981,57 @@ saveState(); renderAll();
     return String(m).replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
   }
 
+  // Collected tab period filter: a month picked from the list, or a From / To
+  // date range typed in. Kept per browser so it survives a reload.
+  let collectedFilter = { period: 'all', from: '', to: '' };
+  try { const saved = JSON.parse(localStorage.getItem('clms.collected.filter') || 'null'); if(saved && typeof saved === 'object') collectedFilter = Object.assign(collectedFilter, saved); } catch(e){}
+  function saveCollectedFilter(){ try { localStorage.setItem('clms.collected.filter', JSON.stringify(collectedFilter)); } catch(e){} }
+  function setCollectedPeriod(v){ collectedFilter = { period: v || 'all', from: '', to: '' }; saveCollectedFilter(); renderCollectedAll(); }
+  function setCollectedRange(){
+    const f = (document.getElementById('collected-from') || {}).value || '';
+    const t = (document.getElementById('collected-to') || {}).value || '';
+    collectedFilter = { period: (f || t) ? 'range' : 'all', from: f, to: t }; saveCollectedFilter(); renderCollectedAll();
+  }
+  function clearCollectedFilter(){ collectedFilter = { period: 'all', from: '', to: '' }; saveCollectedFilter(); renderCollectedAll(); }
+  function collectedWindow(){
+    const f = collectedFilter;
+    if(f.period === 'range'){ return { from: f.from || null, to: f.to || null }; }
+    const m = /^(\d{4})-(\d{2})$/.exec(f.period || '');
+    if(m){ const y = Number(m[1]), mo = Number(m[2]) - 1; const last = new Date(y, mo + 1, 0).getDate(); return { from: m[1] + '-' + m[2] + '-01', to: m[1] + '-' + m[2] + '-' + String(last).padStart(2, '0') }; }
+    return { from: null, to: null };
+  }
+  function paymentInCollectedWindow(p){
+    const w = collectedWindow();
+    const d = String(p.paidDate || '').slice(0, 10);
+    if(w.from && d < w.from) return false;
+    if(w.to && d > w.to) return false;
+    return true;
+  }
   function renderCollectedAll(){
-    const payments = state.paymentsLog.filter(paymentPassesFilters);
+    const allPayments = state.paymentsLog.filter(paymentPassesFilters);
+    // Month list: every month that has a payment, newest first, plus the current month.
+    const monthNamesShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const nowD = new Date();
+    const monthSet = {}; monthSet[nowD.getFullYear() + '-' + String(nowD.getMonth() + 1).padStart(2, '0')] = true;
+    allPayments.forEach(p => { const k = String(p.paidDate || '').slice(0, 7); if(/^\d{4}-\d{2}$/.test(k)) monthSet[k] = true; });
+    const monthKeys = Object.keys(monthSet).sort().reverse();
+    const sel = document.getElementById('collected-period');
+    if(sel){
+      sel.innerHTML = '<option value="all">All time</option><option value="range">Date range\u2026</option>' + monthKeys.map(k => '<option value="' + k + '">' + monthNamesShort[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4) + '</option>').join('');
+      sel.value = (collectedFilter.period === 'range' || collectedFilter.period === 'all' || monthSet[collectedFilter.period]) ? collectedFilter.period : 'all';
+      const fromEl = document.getElementById('collected-from'), toEl = document.getElementById('collected-to');
+      const w = collectedWindow();
+      if(fromEl) fromEl.value = collectedFilter.period === 'range' ? (collectedFilter.from || '') : (w.from || '');
+      if(toEl) toEl.value = collectedFilter.period === 'range' ? (collectedFilter.to || '') : (w.to || '');
+      const clr = document.getElementById('collected-clear'); if(clr) clr.style.display = collectedFilter.period === 'all' ? 'none' : '';
+    }
+    const payments = allPayments.filter(paymentInCollectedWindow);
     const total = payments.reduce((s,p) => s + p.amount, 0);
+    const note = document.getElementById('collected-filter-note');
+    if(note){
+      const w = collectedWindow();
+      note.textContent = collectedFilter.period === 'all' ? '' : ('Showing ' + payments.length + ' payment' + (payments.length === 1 ? '' : 's') + (w.from ? ' from ' + fmtDate(w.from) : '') + (w.to ? ' to ' + fmtDate(w.to) : '') + ' \u00b7 $' + total.toLocaleString(undefined,{minimumFractionDigits:2}));
+    }
 
     const now = new Date();
     const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 90);
@@ -3928,7 +4048,7 @@ saveState(); renderAll();
     }
 
     document.getElementById('collected-all-kpis').innerHTML = `
-      <div class="kpi"><div class="label">Amount Collected (All-Time)</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${payments.length} payment${payments.length===1?'':'s'} recorded</div></div>
+      <div class="kpi"><div class="label">Amount Collected${collectedFilter.period === 'all' ? ' (All-Time)' : ' (Selected Period)'}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${payments.length} payment${payments.length===1?'':'s'} recorded</div></div>
       <div class="kpi"><div class="label">DSO &mdash; Last 90 Days</div><div class="value">${dso === null ? 'N/A' : dso}</div><div class="sub">${dso === null ? 'no payments in window' : 'avg. days, invoice to payment'}</div></div>
     `;
 
@@ -3945,13 +4065,13 @@ saveState(); renderAll();
 
     const bodyEl = document.getElementById('collected-all-body');
     if(years.length === 0){
-      bodyEl.innerHTML = `<div class="empty">No payments recorded yet. ${window.__CLMS_REAL ? 'Payments posted in ' + hEsc(dataSourcesLabel()) + ' land here automatically, or record one manually from an invoice\'s Manage drawer.' : 'Post one via Integrations &rarr; "Simulate a NetSuite Payment," or record one manually from an invoice\'s Manage drawer.'}</div>`;
+      bodyEl.innerHTML = collectedFilter.period !== 'all' ? `<div class="empty">No payments in this period. <span class="hist-link" onclick="clearCollectedFilter()">Show all time</span></div>` : `<div class="empty">No payments recorded yet. ${window.__CLMS_REAL ? 'Payments posted in ' + hEsc(dataSourcesLabel()) + ' land here automatically, or record one manually from an invoice\'s Manage drawer.' : 'Post one via Integrations &rarr; "Simulate a NetSuite Payment," or record one manually from an invoice\'s Manage drawer.'}</div>`;
     } else {
       bodyEl.innerHTML = years.map(y => {
-        const months = Object.keys(byYear[y]).map(Number).sort((a,b) => a - b);
+        const months = Object.keys(byYear[y]).map(Number).sort((a,b) => b - a);
         const yearTotal = months.reduce((s,m) => s + byYear[y][m].reduce((s2,p) => s2 + p.amount, 0), 0);
         const monthsHTML = months.map(m => {
-          const rows = byYear[y][m].slice().sort((a,b) => new Date(a.paidDate) - new Date(b.paidDate));
+          const rows = byYear[y][m].slice().sort((a,b) => new Date(b.paidDate) - new Date(a.paidDate));
           const monthTotal = rows.reduce((s,p) => s + p.amount, 0);
           return `
             <div class="collected-month-block">
@@ -4073,7 +4193,7 @@ saveState(); renderAll();
               <td>${s.draftType}</td>
               <td>${s.recipient || '\u2014'}</td>
               <td style="font-family:var(--font-mono);font-size:11px;">${s.subject || '\u2014'}</td>
-              <td>${s.source === 'automation' ? '<span class="status-pill auto-tag">AUTONOMOUS</span>' : 'Manual'}</td>
+              <td>${s.source === 'automation' ? '<span class="status-pill auto-tag">AUTONOMOUS</span>' : ('Manual' + (s.sentBy ? ' <span class="sent-by">\u00b7 ' + hEsc(s.sentBy) + '</span>' : ''))}</td>
               <td><span class="status-pill ${s.status}">${msgStatusLabel(s.status)}</span></td>
               <td style="white-space:nowrap;"><button class="btn-small" onclick="openMessagesSent(${JSON.stringify(s.invoiceId)})" title="Read the most recent follow-up, demand letter or NOIL sent on this account">See messages sent</button></td>
             </tr>
@@ -4394,6 +4514,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       saveState(); renderAll();
       const d2 = document.getElementById('detail-response-summary'); if (d2 && currentDetailId === inv.id) d2.value = summary;
       closeReplyBox();
+      historyInvalidate(inv.id);
       showToast('Reply logged \u2014 Response Summary updated for ' + inv.name);
     } catch (e) { msg.textContent = 'Could not save that reply.'; }
     btn.disabled = false;
@@ -4536,7 +4657,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   function acctLink(id, name, extraClass){
     const label = hEsc(name == null ? '' : name);
     if(id === undefined || id === null || !findInv(id)) return label;
-    return '<a class="acct-link' + (extraClass ? ' ' + extraClass : '') + '" href="#" onclick="event.preventDefault();event.stopPropagation();closeHeaderPanels();openAccountHistory(' + JSON.stringify(id) + ');" title="Open this account">' + label + '</a>';
+    return '<a class="acct-link' + (extraClass ? ' ' + extraClass : '') + '" href="#" onmouseenter="historyPrefetch(' + JSON.stringify(id) + ')" ontouchstart="historyPrefetch(' + JSON.stringify(id) + ')" onclick="event.preventDefault();event.stopPropagation();closeHeaderPanels();openAccountHistory(' + JSON.stringify(id) + ');" title="Open this account">' + label + '</a>';
   }
   function hEsc(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   // Source systems are shown generically: any CRM connector (Salesforce, Dash, etc.) reads as CRM.
@@ -4578,18 +4699,41 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       : '<div class="hist-empty">No replies on this account yet.</div>';
     document.getElementById('overlay-detail').classList.remove('open');
     document.getElementById('overlay-history').classList.add('open');
-    let data = null;
-    if(isRemoteInvoice(inv)){
-      try {
-        const r = await fetch('/api/accounts/history?accountId=' + encodeURIComponent(id), { credentials: 'same-origin', cache: 'no-store' });
-        const j = await r.json();
-        if(j && j.ok) data = j;
-      } catch(e){ data = null; }
-    }
-    if(!data) data = synthesizeHistory(inv);
-    if(currentHistoryId !== id) return;
+    // Nobody waits: the history is drawn at once from what the dashboard
+    // already holds (every send, payment, note and document is loaded), and
+    // the server's fuller copy replaces it the moment it arrives - instantly
+    // when it was prefetched on hover or opened before.
+    const cached = historyCached(id);
+    renderAccountHistory(inv, cached || synthesizeHistory(inv));
+    if(!isRemoteInvoice(inv)) return;
+    const data = await historyFetch(id);
+    if(currentHistoryId !== id || !data) return;
     renderAccountHistory(inv, data);
   }
+  // Server histories, kept per account and dropped as soon as the account's
+  // data changes (a send, a payment, a note), so a reopen is immediate and
+  // never stale.
+  var __historyCache = {};
+  var __historyInFlight = {};
+  function historyCached(id){ if(!__historyCache) return null; const c = __historyCache[String(id)]; return c && c.fp === __accountsFingerprint ? c.data : null; }
+  function historyInvalidate(id){ if(!__historyCache) return; if(id === undefined || id === null){ Object.keys(__historyCache).forEach(function(k){ delete __historyCache[k]; }); } else { delete __historyCache[String(id)]; } }
+  function historyFetch(id){
+    if(!__historyCache){ __historyCache = {}; __historyInFlight = {}; }
+    const key = String(id);
+    const cached = historyCached(id);
+    if(cached) return Promise.resolve(cached);
+    if(__historyInFlight[key]) return __historyInFlight[key];
+    const fp = __accountsFingerprint;
+    __historyInFlight[key] = fetch('/api/accounts/history?accountId=' + encodeURIComponent(id), { credentials: 'same-origin', cache: 'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(j){ if(j && j.ok){ __historyCache[key] = { fp: fp, data: j }; return j; } return null; })
+      .catch(function(){ return null; })
+      .finally(function(){ delete __historyInFlight[key]; });
+    return __historyInFlight[key];
+  }
+  // Hovering an account name (or its Manage/History buttons) starts the fetch,
+  // so by the time the click lands the full history is usually already here.
+  function historyPrefetch(id){ const inv = findInv(id); if(inv && isRemoteInvoice(inv) && !historyCached(id)) historyFetch(id); }
   function closeAccountHistory(){ document.getElementById('overlay-history').classList.remove('open'); currentHistoryId = null; }
   function historyTo(fn){ const id = currentHistoryId; closeAccountHistory(); if(id !== null && id !== undefined) fn(id); }
 
@@ -4710,12 +4854,16 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('msg-sub').textContent = inv
       ? [inv.invoiceNumber, TENANT_DEPTS_CUSTOM ? null : (OFFICE_LABELS[inv.officeLocation] || inv.officeLocation), deptLabel(inv), inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ')
       : '';
-    document.getElementById('msg-current').innerHTML = '<div class="msg-card"><div class="msg-body empty">Loading…</div></div>';
     document.getElementById('msg-earlier').innerHTML = '';
     document.getElementById('msg-earlier-count').textContent = '';
     document.getElementById('msg-earlier-wrap').style.display = 'none';
     document.getElementById('msg-history-btn').style.display = inv ? '' : 'none';
     document.getElementById('overlay-messages').classList.add('open');
+    // Draw what the Comms Log already knows straight away (bodies included on
+    // live dashboards), then swap in the server's copy when it lands.
+    const local = synthesizeMessages(inv, id);
+    if(local.length){ currentMessages = local; renderMessagesSent(); }
+    else document.getElementById('msg-current').innerHTML = '<div class="msg-card"><div class="msg-body empty">Loading…</div></div>';
 
     let list = null;
     let loadFailed = false;
@@ -4728,6 +4876,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       } catch(e){ loadFailed = true; }
     }
     if(currentMessagesId !== id) return;   // drawer was reopened on another account
+    if(loadFailed && local.length) return;  // the local copy is already on screen
     if(loadFailed){
       // Never claim nothing was sent when we simply could not read the log.
       currentMessages = [];
@@ -4872,7 +5021,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   function synthesizeHistory(inv){
     const comms = [];
     ((state.commsLog) || []).filter(function(c){ return String(c.invoiceId) === String(inv.id); }).forEach(function(c){
-      comms.push({ at: c.sentTs || c.sentAt, label: c.draftType || 'Follow-up', recipientRole: c.recipient || inv.contact || null, recipientEmail: null, subject: c.subject || c.preview || null, status: c.status || 'sent', cadenceDay: null, source: c.source || 'manual' });
+      comms.push({ at: c.sentTs || c.sentAt, label: c.draftType || 'Follow-up', sentBy: c.sentBy || null, recipientRole: c.recipient || inv.contact || null, recipientEmail: null, subject: c.subject || c.preview || null, status: c.status || 'sent', cadenceDay: null, source: c.source || 'manual' });
     });
     if(!comms.length && inv.followups > 0){
       const start = hParse(inv.invoiceDate) || new Date(Date.now() - inv.days * 86400000);
@@ -4939,7 +5088,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>') : 'None yet', a.lastContact ? '' : 'muted') +
       tile('Follow-ups sent', String(a.followUpCount || 0)) +
       lastDayTile +
-      dateTile('Work Authorization signed', a.waSignedAt) +
+      (TENANT_DEPTS_CUSTOM ? waSignedTile(inv) : dateTile('Work Authorization signed', a.waSignedAt)) +
       dateTile('COS signed', a.cosSignedAt) +
       dateTile('Demand letter sent', a.demandLetterSentAt) +
       dateTile('NOIL sent', a.noilSentAt) +
@@ -4969,7 +5118,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const comms = data.comms || [];
     document.getElementById('hist-comms').innerHTML = comms.length
       ? ('<table class="hist-table"><thead><tr><th>When</th><th>Type</th><th>To</th><th>Subject</th><th>Status</th></tr></thead><tbody>' + comms.map(function(c){
-          return '<tr><td style="white-space:nowrap;">' + hEsc(hDateTime(c.at)) + '</td><td>' + hEsc(c.label || c.kind || '') + (c.cadenceDay ? (' <span class="tl-badge">DAY ' + hEsc(c.cadenceDay) + '</span>') : '') + '</td><td>' + hEsc([c.recipientRole, c.recipientEmail].filter(Boolean).join(' · ') || '—') + '</td><td>' + hEsc(c.subject || '—') + '</td><td>' + hEsc(String(c.status || '').replace(/_/g,' ')) + (c.error ? ('<div style="color:#B23A2E;font-size:11px;">' + hEsc(c.error) + '</div>') : '') + '</td></tr>';
+          return '<tr><td style="white-space:nowrap;">' + hEsc(hDateTime(c.at)) + '</td><td>' + hEsc(c.label || c.kind || '') + (c.cadenceDay ? (' <span class="tl-badge">DAY ' + hEsc(c.cadenceDay) + '</span>') : (c.sentBy ? ('<div class="sent-by">by ' + hEsc(c.sentBy) + '</div>') : '')) + '</td><td>' + hEsc([c.recipientRole, c.recipientEmail].filter(Boolean).join(' · ') || '—') + '</td><td>' + hEsc(c.subject || '—') + '</td><td>' + hEsc(String(c.status || '').replace(/_/g,' ')) + (c.error ? ('<div style="color:#B23A2E;font-size:11px;">' + hEsc(c.error) + '</div>') : '') + '</td></tr>';
         }).join('') + '</tbody></table>')
       : '<div class="hist-empty">No follow-ups, demand letters or NOILs have been sent on this account.</div>';
 
@@ -5310,6 +5459,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       recordPayment(state, inv, details);
       saveState(); renderAll();
       closePaymentForm();
+      historyInvalidate(inv.id);
       showToast(`Payment of $${amount.toLocaleString(undefined,{minimumFractionDigits:2})} recorded for ${inv.name}`);
     };
     if(!isRemoteInvoice(inv)){ applyLocally(); return; }
@@ -5863,6 +6013,10 @@ Do not invent facts beyond what's given.`;
     inv.followups += 1;
     inv.lastContact = isoDate(now);
     inv.responded = status;
+    // The Last Follow-Up column shows the send and who made it right away.
+    inv.lastFollowUpAt = now.toISOString();
+    inv.lastFollowUpBy = source === 'automation' ? 'clAIms automation' : ((state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || inv.lastFollowUpBy || null);
+    inv.lastFollowUpKind = draftType;
 
     // The ball moves to whoever we just emailed, pending their response.
     inv.currentlyWith = recipient === 'adjuster' ? 'adjuster' : (inv.payer === 'pm' ? 'pm' : 'homeowner');
@@ -5885,6 +6039,7 @@ Do not invent facts beyond what's given.`;
     state.commsLog.unshift({
       invoiceId: inv.id, invoiceName: inv.name, amount: inv.amount,
       sentAt: fmtDate(now), draftType: typeLabels[draftType], status, source, recipient: recipientLabel,
+      sentBy: source === 'automation' ? null : ((state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || null),
       subject: subject || null,
       preview: (draftText || '').slice(0,100),
       // Kept in full so "See messages sent" on the Comms Log shows exactly what
@@ -6102,6 +6257,11 @@ Do not invent facts beyond what's given.`;
       recordSend(inv, currentDraftType, bodyText, 'manual', currentRecipient, subject);
       saveState();
       closeDrawer();
+      historyInvalidate(inv.id);
+      // Last Contact, Responded?, Last Follow-Up and the Comms Log update on
+      // every tab the moment the send is confirmed; the reload that follows
+      // brings back the server's copy of the same.
+      quietRender(renderAll);
       showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} (${res.to})`);
       loadRealAccounts();
     }).catch(function(){
