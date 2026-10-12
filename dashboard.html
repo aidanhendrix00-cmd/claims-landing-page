@@ -272,6 +272,13 @@
   /* Office / department stacked bar chart */
   .office-chart{display:flex;justify-content:space-around;align-items:flex-end;gap:20px;padding:20px 10px 6px;flex-wrap:wrap;}
   .chart-col{display:flex;flex-direction:column;align-items:center;cursor:pointer;width:120px;}
+  .chart-col.selected .chart-bar{box-shadow:0 0 0 2px var(--ink);}
+  .chart-col.selected .chart-office-label{color:var(--ink);font-weight:700;}
+  .mtd-list-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px;margin:22px 0 0;padding:10px 14px;background:var(--ink);color:#fff;border-radius:10px 10px 0 0;}
+  .mtd-list-head h3{margin:0;font-family:var(--font-display);font-size:14px;color:#fff;}
+  .mtd-list-head .cnt{font-weight:400;font-size:12px;opacity:.75;margin-left:8px;}
+  .mtd-list-head .tot{font-family:var(--font-mono);font-size:13px;}
+  .mtd-list-head .hist-link{color:#fff;opacity:.8;font-size:12px;margin-left:10px;}
   .chart-bar-wrap{height:240px;display:flex;align-items:flex-end;}
   .chart-bar{width:68px;display:flex;flex-direction:column-reverse;border-radius:6px 6px 2px 2px;overflow:hidden;box-shadow:0 0 0 1px var(--line);transition:box-shadow .12s ease;}
   .chart-col:hover .chart-bar{box-shadow:0 0 0 2px var(--ink);}
@@ -799,6 +806,7 @@
         <div class="report-card"><h3>Legend</h3><div class="chart-legend" id="mtd-legend"></div></div>
         <div class="report-card"><h3 id="mtd-drill-title">Click a bar for a breakdown</h3><div id="mtd-drilldown"></div></div>
       </div>
+      <div id="mtd-office-list"></div>
     </section>
 
     <!-- ===================== COLLECTED THIS MONTH VIEW ===================== -->
@@ -3858,7 +3866,7 @@ saveState(); renderAll();
     });
     return grouped;
   }
-  function renderOfficeChart(chartId, legendId, drillId, titleId, records){
+  function renderOfficeChart(chartId, legendId, drillId, titleId, records, onSelect, selected){
     const grouped = groupByOfficeDept(records);
     const maxTotal = Math.max(1, ...OFFICE_LOCATIONS.map(o => grouped[o].total));
     const chartEl = document.getElementById(chartId);
@@ -3870,7 +3878,7 @@ saveState(); renderAll();
         return `<div class="chart-seg" style="height:${h}px;background:${color};" title="${DEPARTMENT_LABELS[c.department]} \u2014 ${CATEGORY_LABELS[c.category]}: $${c.amount.toLocaleString(undefined,{maximumFractionDigits:0})}"></div>`;
       }).join('');
       return `
-        <div class="chart-col" data-office="${o}">
+        <div class="chart-col${selected && selected.indexOf(o) !== -1 ? ' selected' : ''}" data-office="${o}">
           <div class="chart-bar-wrap"><div class="chart-bar">${segs}</div></div>
           <div class="chart-total">$${g.total.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
           <div class="chart-office-label">${OFFICE_LABELS[o]}</div>
@@ -3891,6 +3899,7 @@ saveState(); renderAll();
       col.addEventListener('click', () => {
         const office = col.dataset.office;
         showOfficeDrilldown(drillId, titleId, office, grouped[office]);
+        if(typeof onSelect === 'function') onSelect(office, col, grouped[office]);
       });
     });
   }
@@ -3916,11 +3925,64 @@ saveState(); renderAll();
       <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Synced automatically, no manual entry' : 'Not connected yet'}</div></div>
       <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${OFFICE_LOCATIONS.map(o => OFFICE_LABELS[o]).join(', ')}</div></div>
     `;
-    renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', records);
-    document.getElementById('mtd-drill-title').textContent = 'Click a bar for a breakdown';
-    document.getElementById('mtd-drilldown').innerHTML = '';
+    // Clicking a bar selects that office (click again to unselect; several can
+    // be selected). The breakdown box shows the office just clicked, and the
+    // list at the bottom shows every invoice for the selected offices, by month.
+    mtdSelectedOffices = mtdSelectedOffices.filter(o => OFFICE_LOCATIONS.indexOf(o) !== -1);
+    renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', records, function(office){
+      const i = mtdSelectedOffices.indexOf(office);
+      if(i === -1) mtdSelectedOffices.push(office); else mtdSelectedOffices.splice(i, 1);
+      mtdLastOffice = i === -1 ? office : (mtdSelectedOffices[mtdSelectedOffices.length - 1] || null);
+      renderInvoicedMTD();
+    }, mtdSelectedOffices);
+    const grouped = groupByOfficeDept(records);
+    if(mtdLastOffice && mtdSelectedOffices.indexOf(mtdLastOffice) !== -1 && grouped[mtdLastOffice]) showOfficeDrilldown('mtd-drilldown', 'mtd-drill-title', mtdLastOffice, grouped[mtdLastOffice]);
+    else { document.getElementById('mtd-drill-title').textContent = 'Click a bar for a breakdown'; document.getElementById('mtd-drilldown').innerHTML = ''; }
+    renderMtdOfficeList(start, end);
     const navCount = document.getElementById('nav-count-mtd');
     if(navCount) navCount.textContent = records.length;
+  }
+  var mtdSelectedOffices = [];
+  var mtdLastOffice = null;
+  function mtdClearOffices(){ mtdSelectedOffices = []; mtdLastOffice = null; renderInvoicedMTD(); }
+  // Every invoice dated this month for the selected office(s), newest month
+  // first and newest invoice first within a month - the same table the Aging
+  // Report uses, so the two tabs read the same way.
+  function renderMtdOfficeList(start, end){
+    const listEl = document.getElementById('mtd-office-list');
+    if(!listEl) return;
+    if(!mtdSelectedOffices.length){ listEl.innerHTML = ''; return; }
+    const rows = state.invoices.filter(inv => mtdSelectedOffices.indexOf(inv.officeLocation) !== -1 && dateInRange(inv.invoiceDate, start, end));
+    const total = rows.reduce((s,i) => s + Number(i.amount || 0), 0);
+    const offices = mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', ');
+    const head = `<div class="mtd-list-head"><h3>${hEsc(offices)}<span class="cnt">${rows.length} invoice${rows.length===1?'':'s'} dated this month</span><span class="hist-link" onclick="mtdClearOffices()">Clear selection</span></h3><span class="tot">${money2(total)}</span></div>`;
+    if(!rows.length){ listEl.innerHTML = head + `<div class="aging-dept"><div class="empty" style="padding:16px;">No invoices dated this month for ${hEsc(offices)}.</div></div>`; return; }
+    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const byMonth = {};
+    rows.forEach(inv => { const k = String(inv.invoiceDate || '').slice(0, 7) || 'undated'; (byMonth[k] = byMonth[k] || []).push(inv); });
+    const monthKeys = Object.keys(byMonth).sort().reverse();
+    listEl.innerHTML = head + monthKeys.map(k => {
+      const list = byMonth[k].slice().sort((a, b) => String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')) || Number(b.amount || 0) - Number(a.amount || 0));
+      const mTotal = list.reduce((s,i) => s + Number(i.amount || 0), 0);
+      const label = /^\d{4}-\d{2}$/.test(k) ? (monthNames[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4)) : 'Undated';
+      return `<div class="aging-dept">
+        <div class="aging-dept-head"><span>${label}<span class="cnt">${list.length} invoice${list.length===1?'':'s'}</span></span><span class="tot">${money2(mTotal)}</span></div>
+        <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Invoice date</th><th>${TENANT_DEPTS_CUSTOM ? 'Business' : 'Department'}</th><th>${TENANT_DEPTS_CUSTOM ? 'City' : 'Office'}</th><th>Payer</th><th>Status</th><th class="amt">Invoiced</th><th class="amt">Balance</th><th></th></tr></thead><tbody>
+        ${list.map(inv => `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
+          <td><div style="font-weight:600;color:var(--ink);">${acctLink(inv.id, inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${hEsc(inv.meta || '')}</div></td>
+          <td style="font-family:var(--font-mono);font-size:11.5px;white-space:nowrap;">${hEsc(inv.invoiceNumber || '\u2014')}</td>
+          <td style="white-space:nowrap;">${inv.invoiceDate ? fmtDate(inv.invoiceDate) : '\u2014'}</td>
+          <td>${hEsc(deptLabel(inv) || DEPARTMENT_LABELS[inv.department] || inv.department || '\u2014')}</td>
+          <td>${hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '\u2014')}</td>
+          <td><span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer] || inv.payer || '\u2014'}</span></td>
+          <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '\u2014'}</span>${inv.escalated ? ' <span class="badge escalated">ESCALATED</span>' : ''}</td>
+          <td class="amt">${money2(inv.amount)}</td>
+          <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}</td>
+          <td style="white-space:nowrap;"><span class="hist-link" onclick="openAccountHistory(${inv.id})">History</span> &middot; <span class="hist-link" onclick="openDetail(${inv.id})">Manage</span></td>
+        </tr>`).join('')}
+        </tbody></table></div>
+      </div>`;
+    }).join('');
   }
 
   function renderCollectedMTD(){
