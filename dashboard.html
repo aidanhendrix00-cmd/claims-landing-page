@@ -131,7 +131,8 @@
   .chips{display:flex;gap:6px;flex-wrap:wrap;}
   .chip{font-size:11.5px;padding:5px 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--slate);cursor:pointer;transition:all .15s ease;}
   .chip.active{background:var(--ink);border-color:var(--ink);color:#fff;}
-  .search{font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);width:170px;color:var(--ink);}
+  .search{font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);width:170px;color:var(--ink);appearance:none;-webkit-appearance:none;}
+  .search::-webkit-search-decoration,.search::-webkit-search-cancel-button{-webkit-appearance:none;}
   .search:focus{outline:none;border-color:var(--slate-soft);}
   select.sort{font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--font-body);}
 
@@ -708,7 +709,7 @@
       <div class="section-head">
         <h2>Account Manager</h2>
         <div class="toolbar">
-          <input class="search" id="search" placeholder="Search customer or property..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="renderQueue()">
+          <input class="search" id="search" type="search" name="queue-search" placeholder="Search customer or property..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="renderQueue()">
           <select class="sort" id="sort" onchange="renderQueue()">
             <option value="days-desc">Sort: Days (High-Low)</option>
             <option value="amount-desc">Sort: Amount (High-Low)</option>
@@ -1433,7 +1434,7 @@
       </div>
       <div class="form-row">
         <label id="int-secret-label">API Secret / Client Secret</label>
-        <input id="int-secret" type="password" placeholder="Enter secret" autocomplete="off">
+        <input id="int-secret" type="password" placeholder="Enter secret" autocomplete="new-password">
       </div>
     </div>
 
@@ -3311,9 +3312,23 @@ function todoRowHTML(item, num, priority){
       </div>`;
   }
 
+  // The queue search box is the first text field on the page, so a browser's
+  // password manager can drop the saved sign-in email into it (it looks like a
+  // username box). A value the browser filled in, or that is simply the signed-
+  // in user's own email, is not a search: clear it instead of filtering to nothing.
+  function queueSearchValue(){
+    const box = document.getElementById('search');
+    if (!box) return '';
+    let v = String(box.value || '');
+    let filled = false;
+    try { filled = box.matches(':-webkit-autofill') || box.matches(':autofill'); } catch (e) { filled = false; }
+    const myEmail = (state.currentUser && state.currentUser.email) ? String(state.currentUser.email).toLowerCase() : '';
+    if (filled || (myEmail && v.trim().toLowerCase() === myEmail)) { box.value = ''; v = ''; }
+    return v.toLowerCase();
+  }
   function renderQueue(){
     const el = document.getElementById('queue');
-    const searchVal = (document.getElementById('search').value || '').toLowerCase();
+    const searchVal = queueSearchValue();
     const payerFilter = currentFilterPayer();
     const sortVal = document.getElementById('sort').value;
 
