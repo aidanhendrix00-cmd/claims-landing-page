@@ -131,7 +131,8 @@
   .chips{display:flex;gap:6px;flex-wrap:wrap;}
   .chip{font-size:11.5px;padding:5px 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--slate);cursor:pointer;transition:all .15s ease;}
   .chip.active{background:var(--ink);border-color:var(--ink);color:#fff;}
-  .search{font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);width:170px;color:var(--ink);}
+  .search{font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);width:170px;color:var(--ink);appearance:none;-webkit-appearance:none;}
+  .search::-webkit-search-decoration,.search::-webkit-search-cancel-button{-webkit-appearance:none;}
   .search:focus{outline:none;border-color:var(--slate-soft);}
   select.sort{font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--font-body);}
 
@@ -521,14 +522,10 @@
   .queue .card:nth-child(5),.todo-row:nth-child(5){animation-delay:140ms} .queue .card:nth-child(6),.todo-row:nth-child(6){animation-delay:175ms}
   .queue .card:nth-child(7){animation-delay:210ms} .queue .card:nth-child(8){animation-delay:245ms} .queue .card:nth-child(n+9){animation-delay:280ms}
   table.log tbody tr,table.sheet tbody tr,table.aging tbody tr{animation:rowIn .3s var(--ease-out) both;}
-  /* Background refreshes re-render in place: no entrance animations, no jump. */
-  body.quiet-render .view.active,body.quiet-render .queue .card,body.quiet-render .todo-row,
-  body.quiet-render table.log tbody tr,body.quiet-render table.sheet tbody tr,body.quiet-render table.aging tbody tr,
-  body.quiet-render .topbar h1::after,body.quiet-render .notif-panel{animation:none !important;}
-  /* ...and nothing slides, lifts or underlines while that refresh lands (the toast and drawers keep their own motion). */
-  body.quiet-render .kpi,body.quiet-render .kpi::after,body.quiet-render .card,body.quiet-render .todo-row,body.quiet-render .chip,
-  body.quiet-render .btn-primary,body.quiet-render .btn-small,body.quiet-render .wf-box,body.quiet-render .wf-box input,
-  body.quiet-render .chart-bar,body.quiet-render .chart-seg,body.quiet-render .nav-item,body.quiet-render .slider,body.quiet-render .slider::before{transition:none !important;}
+  /* Nodes inserted by a background refresh skip the entrance animations
+     (the marker is set on the new nodes only, before first paint, so nothing
+     already on screen is ever cancelled or replayed). */
+  .qr:not(.status-dot):not(.sfdot),.qr:not(.status-dot):not(.sfdot)::before,.qr:not(.status-dot):not(.sfdot)::after{animation:none !important;}
 
   /* Cards and rows respond to the hand */
   .card{transition:transform .25s var(--ease-out),box-shadow .25s var(--ease-out),border-color .2s ease;box-shadow:var(--shadow-soft);}
@@ -708,7 +705,7 @@
       <div class="section-head">
         <h2>Account Manager</h2>
         <div class="toolbar">
-          <input class="search" id="search" placeholder="Search customer or property..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="renderQueue()">
+          <input class="search" id="search" type="search" name="queue-search" placeholder="Search customer or property..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="renderQueue()">
           <select class="sort" id="sort" onchange="renderQueue()">
             <option value="days-desc">Sort: Days (High-Low)</option>
             <option value="amount-desc">Sort: Amount (High-Low)</option>
@@ -1433,7 +1430,7 @@
       </div>
       <div class="form-row">
         <label id="int-secret-label">API Secret / Client Secret</label>
-        <input id="int-secret" type="password" placeholder="Enter secret" autocomplete="off">
+        <input id="int-secret" type="password" placeholder="Enter secret" autocomplete="new-password">
       </div>
     </div>
 
@@ -2481,21 +2478,29 @@ window.__previewTenantConfig = function(cfg){
   if (typeof renderAll === 'function') renderAll();
 };
 
-let __quietRenders = 0;
 let __quietDepth = 0;
-// Re-renders triggered by a background refresh keep every element still:
-// entrance animations only play on the first paint and on tab changes, and
-// while a quiet render runs, an element whose markup has not changed is left
-// exactly as it is (same nodes, same scroll position, same hover/focus), so
-// nothing on screen re-paints or jumps unless its content really changed.
+// Re-renders triggered by a background refresh keep every element still.
+// While one runs, an element whose markup has not changed is left exactly as
+// it is (same nodes, same scroll position, same hover/focus), and the nodes
+// that are new get a marker that skips the entrance animation. Nothing on
+// screen is ever cancelled or restarted - toggling a page-wide class to
+// suppress animations is what used to replay every slide-in after a refresh.
 function quietRender(fn){
-  document.body.classList.add('quiet-render');
-  __quietRenders++;
   __quietDepth++;
+  let mo = null;
+  try { mo = new MutationObserver(function(){}); mo.observe(document.body, { childList: true, subtree: true }); } catch (e) { mo = null; }
   try { fn(); } finally {
     __quietDepth--;
-    const n = __quietRenders;
-    setTimeout(function(){ if (__quietRenders === n) document.body.classList.remove('quiet-render'); }, 400);
+    if (mo) {
+      const recs = mo.takeRecords(); mo.disconnect();
+      recs.forEach(function(r){
+        r.addedNodes.forEach(function(n){
+          if (n.nodeType !== 1) return;
+          n.classList.add('qr');
+          n.querySelectorAll('*').forEach(function(c){ c.classList.add('qr'); });
+        });
+      });
+    }
   }
 }
 (function(){
@@ -3311,9 +3316,23 @@ function todoRowHTML(item, num, priority){
       </div>`;
   }
 
+  // The queue search box is the first text field on the page, so a browser's
+  // password manager can drop the saved sign-in email into it (it looks like a
+  // username box). A value the browser filled in, or that is simply the signed-
+  // in user's own email, is not a search: clear it instead of filtering to nothing.
+  function queueSearchValue(){
+    const box = document.getElementById('search');
+    if (!box) return '';
+    let v = String(box.value || '');
+    let filled = false;
+    try { filled = box.matches(':-webkit-autofill') || box.matches(':autofill'); } catch (e) { filled = false; }
+    const myEmail = (state.currentUser && state.currentUser.email) ? String(state.currentUser.email).toLowerCase() : '';
+    if (filled || (myEmail && v.trim().toLowerCase() === myEmail)) { box.value = ''; v = ''; }
+    return v.toLowerCase();
+  }
   function renderQueue(){
     const el = document.getElementById('queue');
-    const searchVal = (document.getElementById('search').value || '').toLowerCase();
+    const searchVal = queueSearchValue();
     const payerFilter = currentFilterPayer();
     const sortVal = document.getElementById('sort').value;
 
