@@ -7548,7 +7548,8 @@ const DEMO_REPLIES = [
 ];
 function demoContactFields(paidKind, days, invoicedAt, c, k, invoiceNumber, amount) {
 const followups = paidKind === 'open' ? Math.min(3, Math.floor(days / 20)) : 1;
-if (!followups) return { responded: 'none', last_contact: null };
+// Bulk inserts need identical keys on every row (PostgREST PGRST102).
+if (!followups) return { last_contact: null, last_follow_up_at: null, last_follow_up_kind: null, last_follow_up_by: null, responded: 'none', response_summary: null };
 const last = new Date(invoicedAt.getTime() + Math.min(days, 7 + followups * 14) * 86400000);
 const replied = paidKind !== 'open' || (k % 3 === 0);
 return {
@@ -7712,8 +7713,14 @@ const tenantId = parseInt(body.tenantId, 10);
 if (!tenantId) return json({ ok: false, error: 'Missing tenantId' }, 400);
 const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=id,slug,company_name,offices,departments');
 if (!tenant) return json({ ok: false, error: 'Company not found' }, 404);
+// Internal page: the real database error is more useful than a generic 500.
+try {
 if (String(body.action) === 'remove') return json(Object.assign({ ok: true, action: 'remove' }, await demoRemove(env, tenantId)));
 return json(Object.assign({ ok: true, action: 'seed' }, await demoSeed(env, tenant)));
+} catch (e) {
+console.log('DEMO_ACTION_FAILED ' + (e && e.message));
+return json({ ok: false, error: 'Demo data failed: ' + String(e && e.message || e).slice(0, 600) }, 500);
+}
 }
 
 async function handleAdminOnboardingData(request, env) {
