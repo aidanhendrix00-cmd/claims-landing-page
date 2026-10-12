@@ -2116,6 +2116,20 @@ async function pgSelect(env, table, query) {
 const rows = await pgFetch(env, 'GET', table, query);
 return rows || [];
 }
+// Supabase answers at most 1,000 rows per request. The company-wide lists
+// (accounts, payments) page through in 1,000-row steps so a workspace with two
+// years of invoice history is never silently cut off.
+async function pgSelectAll(env, table, query, pageSize) {
+const size = pageSize || 1000;
+let out = []; let offset = 0;
+for (let i = 0; i < 50; i++) {
+const rows = await pgFetch(env, 'GET', table, query + '&limit=' + size + '&offset=' + offset) || [];
+out = out.concat(rows);
+if (rows.length < size) break;
+offset += size;
+}
+return out;
+}
 async function pgSelectOne(env, table, query) {
 const rows = await pgSelect(env, table, query);
 return (rows && rows[0]) || null;
@@ -2211,13 +2225,15 @@ function htmlToText(html) {
 // What the dashboard shows for one sent message. Bodies are stored as the HTML
 // we actually sent; bodyText is what gets displayed (escaped, never rendered).
 const COMMS_BODY_LIMIT = 20000;
-function commsToJson(c) {
+function commsToJson(c, brief) {
   const text = htmlToText(c.body);
   return {
     id: c.id, at: c.sent_at, kind: c.kind, label: commsKindLabel(c.kind), cadenceDay: c.cadence_day,
     recipientRole: c.recipient_role, recipientEmail: c.recipient_email, subject: c.subject,
     status: c.status, error: c.error,
-    body: text, preview: text.slice(0, 160), hasBody: !!text,
+    // The company-wide log carries a trimmed body (enough to show the message
+    // at once); the per-account message view returns it in full.
+    body: brief ? text.slice(0, 2500) : text, preview: text.slice(0, 160), hasBody: !!text,
     source: c.cadence_day ? 'automation' : 'manual'
   };
 }
@@ -4083,9 +4099,16 @@ await qboSaveConfig(env, conn, { cdcAt: startedAt, lastError: null }, { last_syn
 }
 // Run whatever this connection needs next. Safe to call from anywhere: it
 // skips quietly when another run holds the lock or the company is on hold.
+// A connection made against the other Intuit environment (sandbox tokens after
+// the switch to production, or the reverse) can never work: it is reported as
+// needing a reconnect instead of failing on every sync.
+function qboEnvMismatch(env, conn) {
+const current = qboSandbox(env) ? 'sandbox' : 'production';
+return !!(conn && conn.cfg && conn.cfg.environment && conn.cfg.environment !== current);
+}
 async function qboRunStep(env, conn, opts) {
 opts = opts || {};
-if (!conn || conn.status !== 'connected' || conn.cfg.needsReconnect || !qboConfigured(env)) return { ran: false };
+if (!conn || conn.status !== 'connected' || conn.cfg.needsReconnect || !qboConfigured(env) || qboEnvMismatch(env, conn)) return { ran: false };
 const hold = await integrationBillingHold(env, conn.tenant_id);
 if (hold) return { ran: false, held: true };
 if (!(await qboAcquireLock(env, conn))) return { ran: false, busy: true };
@@ -4190,6 +4213,12 @@ else { const ins = await pgInsert(env, 'integrations', Object.assign({ tenant_id
 try { await pgUpdate(env, 'tenants', 'id=' + pgEq(owner.tenant_id), { integration_status: 'complete' }); } catch (e) {}
 // Real books arriving: clear any demo invoices/employees so nothing fake mixes in.
 if (!qboSandbox(env)) { try { await demoRemove(env, owner.tenant_id); } catch (e) { console.log('DEMO_REMOVE_FAILED ' + (e && e.message)); } }
+// A different company than before (e.g. the sandbox company replaced by the
+// real one): its mirrored rows go before the new import starts.
+if (existing && prev.realmId && !sameCompany) {
+try { const n = await qboPurgeCompanyRows(env, owner.tenant_id); console.log('QBO_PREVIOUS_COMPANY_PURGED rows=' + n + ' realm=' + prev.realmId); }
+catch (e) { console.log('QBO_PURGE_FAILED ' + (e && e.message)); }
+}
 const conn = { id: integrationId, tenant_id: owner.tenant_id, status: 'connected', cfg: cfg, _access: tokens.access_token, _accessUntil: Date.now() + 3000000 };
 try {
 const info = await qboGet(env, conn, 'companyinfo/' + encodeURIComponent(realmId));
@@ -4206,16 +4235,18 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 const conn = (await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id)))[0] || null;
 const cfg = conn ? conn.cfg : {};
-const connected = !!(conn && conn.status === 'connected' && !cfg.needsReconnect);
+const envSwitched = qboEnvMismatch(env, conn);
+const connected = !!(conn && conn.status === 'connected' && !cfg.needsReconnect && !envSwitched);
 const importing = !!(connected && cfg.import && cfg.import.phase !== 'done');
 // Viewing the dashboard nudges an unfinished first import forward.
 if (importing && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
 const out = { ok: true, configured: qboConfigured(env), sandbox: qboSandbox(env), connected: connected,
-needsReconnect: !!(conn && cfg.needsReconnect), companyName: cfg.companyName || null,
+needsReconnect: !!(conn && (cfg.needsReconnect || (envSwitched && conn.status === 'connected'))), companyName: cfg.companyName || null,
 importing: importing, imported: (cfg.import && cfg.import.imported) || 0,
 lastSyncedAt: conn ? conn.last_synced_at : null, lastError: connected ? (cfg.lastError || null) : null,
 canManage: user.role === 'admin' && canSelfServeIntegrations(user) };
 if (out.canManage && conn && cfg.needsReconnect) out.reconnectReason = cfg.lastError || null;
+if (out.canManage && out.needsReconnect && envSwitched && conn.status === 'connected') out.reconnectReason = 'clAIms has switched to ' + (qboSandbox(env) ? 'sandbox' : 'live') + ' QuickBooks. Reconnect to link your ' + (qboSandbox(env) ? 'sandbox' : 'real') + ' QuickBooks company.';
 return json(out);
 }
 
@@ -4233,8 +4264,10 @@ for (let i = 0; i < Math.min(expected.length, signature.length); i++) diff |= ex
 if (diff !== 0) return new Response('invalid signature', { status: 401 });
 let body; try { body = JSON.parse(raw); } catch (e) { return new Response('bad payload', { status: 400 }); }
 const realms = {};
-if (Array.isArray(body)) { for (const ev of body) if (ev && ev.intuitaccountid) realms[String(ev.intuitaccountid)] = true; } // CloudEvents format
-else { for (const n of (body.eventNotifications || [])) if (n && n.realmId) realms[String(n.realmId)] = true; } // classic format
+const realmOf = function (ev) { if (!ev) return null; return ev.intuitaccountid || ev.intuitAccountId || ev.realmId || ev.realmid || (ev.data && (ev.data.realmId || ev.data.realmid || ev.data.intuitaccountid)) || null; };
+if (Array.isArray(body)) { for (const ev of body) { const r = realmOf(ev); if (r) realms[String(r)] = true; } } // CloudEvents format
+else if (body.eventNotifications) { for (const n of body.eventNotifications) { const r = realmOf(n); if (r) realms[String(r)] = true; } } // classic format
+else { const r = realmOf(body); if (r) realms[String(r)] = true; } // single event
 const work = (async function () {
 const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
 for (const conn of conns) { if (realms[String(conn.cfg.realmId)]) await qboRunStep(env, conn, { ctx: ctx }); }
@@ -4243,6 +4276,23 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
 return new Response('ok', { status: 200 });
 }
 
+// A different QuickBooks company is being connected (sandbox -> production,
+// or a new file): everything mirrored from the previous company is removed
+// so its invoices, payments and notes never show beside the new books.
+async function qboPurgeCompanyRows(env, tenantId) {
+const tid = pgEq(tenantId);
+const rows = await pgSelect(env, 'accounts', 'tenant_id=' + tid + '&external_id=like.' + encodeURIComponent(QBO_EXTERNAL_PREFIX + '*') + '&select=id') || [];
+const ids = rows.map(function (a) { return a.id; });
+for (const chunk of qboChunks(ids, 100)) {
+const inList = 'in.(' + chunk.join(',') + ')';
+for (const t of ['user_activity', 'account_notes', 'invoice_payments', 'invoice_comms', 'documents']) {
+try { await pgDelete(env, t, 'tenant_id=' + tid + '&account_id=' + inList); } catch (e) {}
+}
+await pgDelete(env, 'accounts', 'tenant_id=' + tid + '&id=' + inList);
+}
+try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + tid + '&external_id=like.' + encodeURIComponent(QBO_PAYMENT_PREFIX + '*')); } catch (e) {}
+return ids.length;
+}
 async function qboDisconnect(env, conn) {
 const cfg = conn.cfg;
 const token = await decryptSecret(env, cfg.refreshToken);
@@ -4404,6 +4454,7 @@ await enqueueOutbox(env, user.tenant_id, account.id, 'document', row && row.id, 
 name: cleanName, kind: kind, label: label || null, contentType: file.type || null, size: size
 });
 await logUserActivity(env, user, account, 'document', 'Uploaded ' + kind + (label ? ' (' + label + ')' : '') + ': ' + cleanName);
+await touchAccount(env, accountId);
 return json({ ok: true, document: documentToJson(row) });
 }
 
@@ -4429,6 +4480,7 @@ const row = await pgSelectOne(env, 'documents', 'id=' + pgEq(body.id) + '&tenant
 if (!row) return json({ ok: false, error: 'Document not found' }, 404);
 await storageDelete(env, row.storage_path);
 await pgDelete(env, 'documents', 'id=' + pgEq(row.id));
+await touchAccount(env, row.account_id);
 return json({ ok: true });
 }
 
@@ -4603,10 +4655,10 @@ const account = await accountForUser(env, user, accountId);
 if (!account) return json({ ok: false, error: 'Account not found' }, 404);
 q = 'account_id=' + pgEq(account.id) + '&' + q;
 }
-let rows = await pgSelect(env, 'invoice_payments', q);
+let rows = await pgSelectAll(env, 'invoice_payments', q + ',id.desc');
 // Managers and employees only see payments on accounts in their own office.
 if (!accountId && user.role !== 'admin') {
-const mine = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=id');
+const mine = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=id&order=id.asc');
 const allowed = {}; (mine || []).forEach(function (a) { allowed[String(a.id)] = true; });
 rows = (rows || []).filter(function (r) { return allowed[String(r.account_id)]; });
 }
@@ -5018,6 +5070,23 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 const url = new URL(request.url);
 const accountId = url.searchParams.get('accountId');
+// ?all=1: every account's recent notes in one answer (the dashboard used to
+// ask once per invoice on every refresh). Office-scoped like /api/accounts.
+if (!accountId && url.searchParams.get('all')) {
+let acctQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id&order=id.asc';
+if (user.role !== 'admin') acctQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=id&order=id.asc';
+const accts = await pgSelectAll(env, 'accounts', acctQuery);
+const allowed = {}; accts.forEach(function (a) { allowed[String(a.id)] = true; });
+const rows = await pgSelectAll(env, 'account_notes', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=occurred_at.desc,id.desc');
+const byAccount = {}; const perAccount = 50;
+rows.forEach(function (n) {
+const k = String(n.account_id);
+if (!allowed[k]) return;
+const list = byAccount[k] || (byAccount[k] = []);
+if (list.length < perAccount) list.push(noteToJson(n));
+});
+return json({ ok: true, notesByAccount: byAccount });
+}
 if (!accountId) return json({ ok: false, error: 'accountId is required' }, 400);
 const account = await accountForUser(env, user, accountId);
 if (!account) return json({ ok: false, error: 'Account not found' }, 404);
@@ -5055,6 +5124,7 @@ const kind = String(body.activity || 'note');
 if (kind !== 'skip') {
 await logUserActivity(env, user, account, kind, text.slice(0, 600));
 }
+await touchAccount(env, account.id);
 return json({ ok: true, note: noteToJson(row) });
 }
 
@@ -5711,6 +5781,12 @@ async function mailboxForUser(env, user) {
 return await pgSelectOne(env, 'user_mailboxes', 'user_id=' + pgEq(user.id) + '&status=' + pgEq('connected') + '&select=*') || null;
 }
 
+// Anything written about an account that lives outside the accounts row
+// (a note, a document) still bumps the row's updated_at, so every open
+// dashboard's change probe sees it within seconds.
+async function touchAccount(env, accountId) {
+try { await pgUpdate(env, 'accounts', 'id=' + pgEq(accountId), { updated_at: new Date().toISOString() }); } catch (e) {}
+}
 async function handleAccountsPing(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -5856,8 +5932,8 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 const url = new URL(request.url);
 let limit = parseInt(url.searchParams.get('limit'), 10);
-if (!isFinite(limit) || limit < 1) limit = 400;
-if (limit > 1000) limit = 1000;
+if (!isFinite(limit) || limit < 1) limit = 1000;
+if (limit > 2000) limit = 2000;
 // Same visibility rule as /api/accounts: admins see the company, everyone else
 // sees their own office.
 let accountQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,customer_name,invoice_number,amount,office,department&order=invoiced_at.desc';
@@ -5880,7 +5956,7 @@ const comms = [];
 rows.forEach(function (c) {
 const a = byId[c.account_id];
 if (!a) return; // outside this user's office
-comms.push(Object.assign(commsToJson(c), {
+comms.push(Object.assign(commsToJson(c, true), {
 accountId: c.account_id,
 accountName: a.customer_name || null,
 invoiceNumber: a.invoice_number || ('INV-' + (10000 + a.id)),
@@ -5988,9 +6064,9 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 let list;
 if (user.role === 'admin') {
-list = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=invoiced_at.desc');
+list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=invoiced_at.desc,id.desc');
 } else {
-list = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=*&order=invoiced_at.desc');
+list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=*&order=invoiced_at.desc,id.desc');
 }
 const accounts = list.map(function (a) {
 let days = null;
@@ -7421,20 +7497,36 @@ function demoRand(seed) { let x = seed % 2147483647; if (x <= 0) x += 2147483646
 function demoEmail(name) { return 'demo.' + name.toLowerCase().replace(/[^a-z]+/g, '.') + '@' + DEMO_EMAIL_DOMAIN; }
 function demoContactEmail(name, customer) { return name.toLowerCase().split(/\s+/)[0].replace(/[^a-z]/g, '') + '@' + customer.toLowerCase().replace(/[^a-z]+/g, '').slice(0, 14) + '.example.com'; }
 
+// Every placeholder prefix a workspace may carry: this seeder's rows and the
+// older sample set ('SAMPLE-*') some workspaces were set up with. Both go when
+// demo data is removed or a production QuickBooks company is connected, so a
+// live dashboard never mixes sample invoices with real ones.
+const DEMO_EXTERNAL_PREFIXES = [DEMO_EXTERNAL_PREFIX, 'SAMPLE-', 'sample-'];
+async function demoAccountIds(env, tenantId) {
+let ids = [];
+for (const pre of DEMO_EXTERNAL_PREFIXES) {
+const rows = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(pre + '*') + '&select=id') || [];
+ids = ids.concat(rows.map(function (a) { return a.id; }));
+}
+return Array.from(new Set(ids));
+}
 async function demoRemove(env, tenantId) {
 const users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=like.' + encodeURIComponent('*@' + DEMO_EMAIL_DOMAIN) + '&select=id') || [];
-const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(DEMO_EXTERNAL_PREFIX + '*') + '&select=id') || [];
-const acctIds = accounts.map(function (a) { return a.id; });
+const acctIds = await demoAccountIds(env, tenantId);
 const userIds = users.map(function (u) { return u.id; });
 for (const chunk of qboChunks(acctIds, 100)) {
 const inList = 'in.(' + chunk.join(',') + ')';
-for (const t of ['user_activity', 'account_activity', 'account_notes', 'invoice_payments', 'communications']) {
+for (const t of ['user_activity', 'account_activity', 'account_notes', 'invoice_payments', 'invoice_comms', 'documents']) {
 try { await pgDelete(env, t, 'tenant_id=' + pgEq(tenantId) + '&account_id=' + inList); } catch (e) {}
 }
 }
 if (userIds.length) { try { await pgDelete(env, 'user_activity', 'tenant_id=' + pgEq(tenantId) + '&user_id=in.(' + userIds.join(',') + ')'); } catch (e) {} }
-try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(DEMO_EXTERNAL_PREFIX + '*')); } catch (e) {}
-if (acctIds.length) await pgDelete(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(DEMO_EXTERNAL_PREFIX + '*'));
+for (const pre of DEMO_EXTERNAL_PREFIXES) {
+try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(pre + '*')); } catch (e) {}
+}
+for (const chunk of qboChunks(acctIds, 100)) {
+await pgDelete(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&id=in.(' + chunk.join(',') + ')');
+}
 if (userIds.length) {
 try { await pgDelete(env, 'sessions', 'user_id=in.(' + userIds.join(',') + ')'); } catch (e) {}
 await pgDelete(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=like.' + encodeURIComponent('*@' + DEMO_EMAIL_DOMAIN));
