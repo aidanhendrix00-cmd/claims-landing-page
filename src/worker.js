@@ -2362,7 +2362,8 @@ function brandEmailHtml(html) {
 }
 
 async function sendEmail(env, opts) {
-const to = opts.to, subject = opts.subject, html = opts.html, kind = opts.kind, tenantId = opts.tenantId, userId = opts.userId, replyTo = opts.replyTo;
+const toAll = Array.isArray(opts.to) ? opts.to.filter(Boolean) : [opts.to];
+const to = toAll.join(', '), subject = opts.subject, html = opts.html, kind = opts.kind, tenantId = opts.tenantId, userId = opts.userId, replyTo = opts.replyTo;
 const fromAddr = opts.from || FROM_EMAIL;
 if (!env.RESEND_API_KEY) {
 try {
@@ -2371,7 +2372,7 @@ await pgInsert(env, 'email_log', { to_email: to, subject: subject, kind: kind, t
 return { ok: false, skipped: true };
 }
 try {
-const payload = { from: fromAddr, to: [to], subject: subject, html: brandEmailHtml(html) };
+const payload = { from: fromAddr, to: toAll, subject: subject, html: brandEmailHtml(html) };
 if (opts.cc && opts.cc.length) payload.cc = opts.cc;
 if (opts.attachments && opts.attachments.length) payload.attachments = opts.attachments.map(function (a) { return { filename: a.filename, content: a.base64 }; });
 if (replyTo) payload.reply_to = replyTo;
@@ -5284,12 +5285,16 @@ if (full.escalated && user.role !== 'admin' && user.role !== 'manager') {
 return json({ ok: false, code: 'escalated', error: 'This account is escalated to a manager. Ask them before sending anything further.' }, 409);
 }
 
-const to = String(body.to || full.contact_email || '').trim();
+// "To" is editable in the send dialog: one or several addresses (comma or
+// semicolon separated). The first is the primary recipient for the log and
+// status; the rest are added as further recipients.
+const toList = parseCcList(body.to !== undefined && String(body.to).trim() ? body.to : (full.contact_email || ''), '');
+const to = toList[0] || '';
 if (!to || to.indexOf('@') === -1) {
-return json({ ok: false, error: 'No contact email on this account. Add one before sending.' }, 400);
+return json({ ok: false, error: body.to !== undefined ? 'Enter at least one valid email address in To.' : 'No contact email on this account. Add one before sending.' }, 400);
 }
 // Optional manual CC, entered by the user in the send dialog.
-const ccList = parseCcList(body.cc, to);
+const ccList = parseCcList(body.cc, to).filter(function (a) { return toList.map(function (t) { return t.toLowerCase(); }).indexOf(a.toLowerCase()) === -1; });
 const text = String(body.body || '').trim();
 if (!text) return json({ ok: false, error: 'The message is empty.' }, 400);
 const subject = String(body.subject || ('Outstanding invoice - ' + (full.customer_name || ''))).slice(0, 200);
@@ -5312,7 +5317,7 @@ if (mailbox) {
 // Goes out through the user's own mailbox: genuinely from them, and a copy
 // lands in their Sent folder.
 result = await sendViaMailbox(env, mailbox, {
-to: to, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(user.full_name || mailbox.email), attachments: attach.attachments
+to: toList, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(user.full_name || mailbox.email), attachments: attach.attachments
 });
 if (result && result.ok) { sentVia = 'mailbox'; }
 else {
@@ -5329,7 +5334,7 @@ return json({ ok: false, error: (result && result.error) || 'Your connected emai
 if (!result) {
 try {
 result = await sendEmail(env, {
-to: to, cc: ccList, subject: subject, html: html,
+to: toList, cc: ccList, subject: subject, html: html,
 kind: 'manual_' + draftType,
 tenantId: user.tenant_id, userId: user.id,
 from: sender.from, replyTo: sender.replyTo, attachments: attach.attachments
@@ -5718,7 +5723,7 @@ function buildMimeMessage(fromName, fromEmail, to, subject, html, cc, attachment
 const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
 const lines = [
 'From: "' + mimeHeaderSafe(fromName).replace(/"/g, '') + '" <' + mimeHeaderSafe(fromEmail) + '>',
-'To: ' + mimeHeaderSafe(to)
+'To: ' + (Array.isArray(to) ? to.map(mimeHeaderSafe).join(', ') : mimeHeaderSafe(to))
 ];
 if (cc && cc.length) lines.push('Cc: ' + cc.map(mimeHeaderSafe).join(', '));
 lines.push('Subject: ' + mimeEncodeSubject(subject));
@@ -5764,7 +5769,7 @@ if (mailbox.provider === 'microsoft') {
 const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
 method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
 body: JSON.stringify({ message: { subject: opts.subject, body: { contentType: 'HTML', content: opts.html },
-toRecipients: [{ emailAddress: { address: opts.to } }],
+toRecipients: (Array.isArray(opts.to) ? opts.to : [opts.to]).map(function (a) { return { emailAddress: { address: a } }; }),
 ccRecipients: (opts.cc || []).map(function(a){ return { emailAddress: { address: a } }; }),
 attachments: (opts.attachments || []).map(function (a) { return { '@odata.type': '#microsoft.graph.fileAttachment', name: a.filename, contentType: a.contentType, contentBytes: a.base64 }; }) }, saveToSentItems: true }) });
 if (!res.ok) {
