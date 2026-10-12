@@ -1077,8 +1077,10 @@
       <div style="margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;">
         <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);background:#FAF8F2;">
           <span style="font-size:11.5px;font-weight:700;color:var(--slate);width:26px;">To</span>
-          <span id="draft-to-display" style="font-size:13px;color:var(--ink);"></span>
+          <input id="draft-to" type="text" autocomplete="off" placeholder="Email address(es), separated by commas" oninput="onDraftToInput()" style="flex:1;border:none;outline:none;font-size:13px;background:transparent;color:var(--ink);" />
+          <button type="button" class="btn-small" id="draft-to-reset" onclick="resetDraftTo()" title="Back to the contact on file for this account" style="display:none;white-space:nowrap;">Use contact on file</button>
         </div>
+        <div class="hint" id="draft-to-note" style="display:none;margin:0;padding:6px 12px;border-bottom:1px solid var(--line);"></div>
         <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;">
           <span style="font-size:11.5px;font-weight:700;color:var(--slate);width:26px;">Cc</span>
           <input id="draft-cc" type="text" autocomplete="off" placeholder="Add emails, separated by commas" style="flex:1;border:none;outline:none;font-size:13px;background:transparent;color:var(--ink);" />
@@ -6210,22 +6212,48 @@ Do not invent facts beyond what's given.`;
     customSubject = document.getElementById('draft-subject').value;
   }
 
+  // Validates the editable To line and keeps the Approve button honest about it.
+  function draftToList(){
+    const el = document.getElementById('draft-to');
+    return String(el ? el.value : '').split(/[,;]/).map(function(a){ return a.trim(); }).filter(function(a){ return a && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a); });
+  }
+  function onDraftToInput(){
+    const el = document.getElementById('draft-to'); if(!el) return;
+    const list = draftToList();
+    const onFile = el.dataset.onFile || '';
+    const changed = el.value.trim().toLowerCase() !== onFile.trim().toLowerCase();
+    const note = document.getElementById('draft-to-note');
+    const reset = document.getElementById('draft-to-reset');
+    const approveBtnEl = document.getElementById('approve-btn');
+    let msg = '', bad = false;
+    if(!list.length){
+      bad = !!state.currentUser;
+      msg = el.value.trim() ? 'Enter at least one valid email address.' : (onFile ? '' : (state.currentUser ? 'No contact email on file for this account \u2014 type one here or add it in your CRM.' : 'Contact email on file for this account'));
+    } else if(list.length > 1){
+      msg = 'Sending to ' + list.length + ' people: ' + list.join(', ');
+    } else if(changed && onFile){
+      msg = 'Sending to a different address than the contact on file (' + onFile + ').';
+    }
+    el.style.color = bad ? '#B23A2E' : '';
+    if(note){ note.textContent = msg; note.style.display = msg ? '' : 'none'; note.style.color = bad ? '#B23A2E' : ''; }
+    if(reset) reset.style.display = (changed && onFile) ? '' : 'none';
+    if(approveBtnEl){ approveBtnEl.dataset.noRecipient = bad ? '1' : ''; approveBtnEl.title = bad ? 'Enter an email address in To before sending' : ''; }
+  }
+  function resetDraftTo(){ const el = document.getElementById('draft-to'); if(!el) return; el.value = el.dataset.onFile || ''; onDraftToInput(); el.focus(); }
   function updateRecipientUI(){
     const inv = currentInvoice;
     if(!inv) return;
-    const toEl = document.getElementById('draft-to-display');
+    const toEl = document.getElementById('draft-to');
     if(toEl){
       const toAddr = inv.contactEmail || inv.contact_email || '';
-      // Real accounts need an address on file before anything can go out; the demo's sample accounts send to a placeholder.
-      const missingTo = !!state.currentUser && !toAddr;
-      toEl.textContent = toAddr || (state.currentUser ? 'No contact email on file \u2014 add one in your CRM before sending' : 'Contact email on file for this account');
-      toEl.style.color = missingTo ? '#B23A2E' : '';
-      const approveBtnEl = document.getElementById('approve-btn');
-      if(approveBtnEl){ approveBtnEl.dataset.noRecipient = missingTo ? '1' : ''; approveBtnEl.title = missingTo ? 'This account has no contact email on file' : ''; }
+      // The To line starts as the contact on file and can be changed or added
+      // to (several addresses, comma-separated). It resets when the drawer
+      // opens on a different account, so one job's recipients never follow
+      // you to the next.
+      if(toEl.dataset.invId !== String(inv.id)){ toEl.value = toAddr; toEl.dataset.invId = String(inv.id); toEl.dataset.onFile = toAddr; }
       const ccEl = document.getElementById('draft-cc');
-      // Reset Cc when switching accounts, so one job's copy list never
-      // silently follows you to the next job.
       if(ccEl && ccEl.dataset.invId !== String(inv.id)){ ccEl.value = ''; ccEl.dataset.invId = String(inv.id); }
+      onDraftToInput();
     }
     const contactName = contactPersonName(inv);
     document.getElementById('recipient-sub-homeowner').textContent = inv.payer === 'pm' ? 'Property manager on file' : 'Property owner on file';
@@ -6403,8 +6431,9 @@ Do not invent facts beyond what's given.`;
     const approveBtn = document.getElementById('approve-btn');
     const inv = currentInvoice;
     if(!inv) return;
-    if(state.currentUser && !(inv.contactEmail || inv.contact_email)){
-      showToast('No contact email on file for ' + inv.name + ' \u2014 add one in your CRM, then try again.');
+    if(state.currentUser && !draftToList().length){
+      showToast('Enter an email address in To for ' + inv.name + ' before sending.');
+      const toEl = document.getElementById('draft-to'); if(toEl) toEl.focus();
       return;
     }
     if(isDoNotContact(inv)){
@@ -6438,6 +6467,7 @@ Do not invent facts beyond what's given.`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accountId: inv.id,
+        to: draftToList().join(', '),
         subject: subject,
         body: bodyText,
         draftType: currentDraftType,
