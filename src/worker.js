@@ -7534,6 +7534,56 @@ await pgDelete(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=like.' + en
 return { accounts: acctIds.length, employees: userIds.length };
 }
 
+// What the follow-ups on a demo invoice left behind: last contact, whether the
+// customer answered, and the one-line summary the Response Summary column shows.
+const DEMO_REPLIES = [
+'Confirmed receipt; invoice is approved and scheduled for the next check run on Friday.',
+'Asked for a copy of the signed work authorization before releasing payment.',
+'Disputes two line items; requested a revised invoice for the remaining balance.',
+'Payment of the full balance was mailed yesterday - check number to follow.',
+'Property manager is out until Monday; AP will process on return.',
+'Says the invoice was never received; resent to the corporate AP mailbox.',
+'Approved for payment; AP needs a W-9 on file before cutting the check.',
+'Partial payment sent this week; the remainder after the unit-count review.'
+];
+function demoContactFields(paidKind, days, invoicedAt, c, k, invoiceNumber, amount) {
+const followups = paidKind === 'open' ? Math.min(3, Math.floor(days / 20)) : 1;
+if (!followups) return { responded: 'none', last_contact: null };
+const last = new Date(invoicedAt.getTime() + Math.min(days, 7 + followups * 14) * 86400000);
+const replied = paidKind !== 'open' || (k % 3 === 0);
+return {
+last_contact: last.toISOString().slice(0, 10),
+last_follow_up_at: last.toISOString(), last_follow_up_kind: days > 40 && paidKind === 'open' ? 'demand' : 'followup',
+last_follow_up_by: k % 2 ? 'clAIms automation' : null,
+responded: replied ? 'replied' : (k % 2 ? 'opened' : 'sent'),
+response_summary: replied ? DEMO_REPLIES[(k + followups) % DEMO_REPLIES.length] : null
+};
+}
+function demoCommsRows(tenant, accounts, nowMs) {
+const rows = [];
+for (const a of accounts) {
+const n = parseInt(a.follow_up_count, 10) || 0;
+if (!n) continue;
+const invoiced = new Date(a.invoiced_at).getTime();
+const contact = String(a.contact || '').replace(/\s*\(.*\)$/, '');
+for (let i = 1; i <= n; i++) {
+const at = new Date(Math.min(nowMs - 3600000, invoiced + (7 + (i - 1) * 14) * 86400000 + 9 * 3600000));
+const demand = i === n && a.last_follow_up_kind === 'demand';
+const auto = i % 2 === 1;
+const subject = (demand ? 'Demand for payment - ' : (i === 1 ? 'Invoice ' : 'Follow-up ' + i + ': invoice ')) + a.invoice_number + ' - ' + a.customer_name;
+const body = '<div>Hello ' + contact + ',<br><br>' + (demand
+? 'Invoice ' + a.invoice_number + ' for $' + Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }) + ' remains unpaid after several reminders. Please remit payment within 10 days to avoid further collection action.'
+: 'This is a ' + (i === 1 ? 'friendly reminder' : 'follow-up') + ' that invoice ' + a.invoice_number + ' for $' + Number(a.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }) + ' is outstanding. Please let us know if anything is needed to process payment.') +
+'<br><br>Thank you,<br>Accounts Receivable</div>';
+rows.push({ tenant_id: tenant.id, account_id: a.id, cadence_day: auto ? (7 + (i - 1) * 14) : null,
+kind: (auto ? 'cadence_' : 'manual_') + (demand ? 'demand' : 'followup'), recipient_role: a.payer === 'insurance' ? 'adjuster' : (a.payer === 'pm' ? 'pm' : 'homeowner'),
+recipient_email: a.contact_email || null, subject: subject,
+status: i === n ? (a.responded === 'replied' ? 'replied' : (a.responded === 'opened' ? 'opened' : 'sent')) : 'opened',
+body: body, error: null, sent_at: at.toISOString() });
+}
+}
+return rows;
+}
 async function demoSeed(env, tenant) {
 await demoRemove(env, tenant.id);
 const rnd = demoRand(Number(tenant.id) * 7919 + 13);
@@ -7569,7 +7619,7 @@ const invoicedAt = new Date(nowMs - days * 86400000);
 const invoiceNumber = 'DEMO-' + String(1040 + n * 10 + k);
 const paidAt = paidKind === 'paid' ? new Date(invoicedAt.getTime() + (4 + Math.floor(rnd() * 20)) * 86400000) : null;
 accountMeta.push({ days: days, paidKind: paidKind, paidAt: paidAt, paidAmount: paidAmount, payer: c[1], customer: c[0], seq: created + 1 });
-accountRows.push({
+accountRows.push(Object.assign({
 tenant_id: tenant.id, external_id: DEMO_EXTERNAL_PREFIX + tenant.id + '-' + (++created),
 office: office, customer_name: c[0], meta: services[k % services.length], payer: c[1], contact: c[2] + ' (' + c[3] + ')',
 contact_email: demoContactEmail(c[2], c[0]), contact_info: c[2] + ' · ' + demoContactEmail(c[2], c[0]) + ' · (555) 01' + String(10 + k) + '-' + String(1000 + n * 37 + k * 11).slice(-4) + ' · ' + c[3],
@@ -7578,7 +7628,7 @@ invoice_number: invoiceNumber, amount: amount, invoiced_at: invoicedAt.toISOStri
 status: paidKind === 'paid' ? 'paid' : 'in_ar', paid_amount: paidAmount, paid_at: paidAt ? paidAt.toISOString() : null,
 department: dept, category: null, follow_up_count: paidKind === 'open' ? Math.min(3, Math.floor(days / 20)) : 1,
 note: 'Demo invoice — ' + departments[dept] + (office ? ' · ' + offices[office] : ''), escalated: days > 90 && paidKind === 'open', wa_sent: days > 30
-});
+}, demoContactFields(paidKind, days, invoicedAt, c, k, invoiceNumber, amount)));
 if (office) perOffice[office] = (perOffice[office] || 0) + 1;
 }
 // Each business's invoices land in the cities it serves (matched against the
@@ -7615,6 +7665,11 @@ deposited_on: (a.paidAt || new Date(nowMs - 2 * 86400000)).toISOString().slice(0
 bank_name: null, memo: 'Demo payment', source: 'integration', external_id: DEMO_EXTERNAL_PREFIX + 'pay-' + tenant.id + '-' + a.seq });
 }
 if (paymentRows.length) { try { await pgInsert(env, 'invoice_payments', paymentRows); } catch (e) {} }
+// Every follow-up the invoices carry exists as a sent message, so the Comms
+// Log, Response Received and "See messages sent" are populated too.
+let commsLogged = 0;
+const commsRows = demoCommsRows(tenant, accounts, nowMs);
+if (commsRows.length) { try { commsLogged = (await pgInsert(env, 'invoice_comms', commsRows) || []).length; } catch (e) { console.log('DEMO_COMMS_FAILED ' + (e && e.message)); } }
 // A month of activity: follow-ups, responses, payments, notes and escalations
 // by the demo employees, newest first on the Employees Activity tab.
 const templates = [
@@ -7646,7 +7701,7 @@ type: t[0], summary: summary, account_id: a.id, customer_name: a.customer_name, 
 }
 let logged = 0;
 if (activityRows.length) { try { logged = (await pgInsert(env, 'user_activity', activityRows) || []).length; } catch (e) {} }
-return { accounts: accounts.length, employees: employees.length, activity: logged, departments: deptKeys.length, offices: officeKeys.length };
+return { accounts: accounts.length, employees: employees.length, activity: logged, comms: commsLogged, departments: deptKeys.length, offices: officeKeys.length };
 }
 
 async function handleAdminOnboardingDemo(request, env) {
