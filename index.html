@@ -1193,6 +1193,13 @@
     document.body.style.overflow = '';
     document.title = DEFAULT_TITLE;
   }
+  // The demo dashboard's own "Home" link asks the page to close the demo
+  // (otherwise it would load the home page inside the demo frame, leaving the
+  // dark overlay header on screen).
+  window.addEventListener('message', function(ev){
+    const d = ev && ev.data;
+    if(d && d.type === 'clms-demo-close'){ closeOverlay('#demo'); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  });
   function showSignupOverlayVisually(){
     document.getElementById('signupOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';

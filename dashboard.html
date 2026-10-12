@@ -322,9 +322,23 @@
   #sender-banner .btn-small.ghost{background:transparent;color:#7A4B00;border-color:#E0B96A;}
 
   /* Spreadsheet view */
-  .sheet-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);}
-  table.sheet{border-collapse:collapse;width:100%;min-width:1300px;}
-  table.sheet th{position:sticky;top:0;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--slate-soft);font-weight:700;padding:10px 12px;border-bottom:1px solid var(--line);background:#FAFBFA;white-space:nowrap;}
+  /* The ledger scrolls inside its own box (both directions), so the column
+     headers stay pinned at the top and the totals at the bottom however far
+     down you go, and the horizontal scrollbar is always in reach. */
+  .sheet-wrap{overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);max-height:calc(100vh - 230px);min-height:320px;overscroll-behavior-x:contain;scrollbar-width:auto;cursor:default;}
+  .sheet-wrap.panning{cursor:grabbing;user-select:none;}
+  .sheet-wrap::-webkit-scrollbar{height:14px;width:12px;}
+  .sheet-wrap::-webkit-scrollbar-track{background:#F2F3F2;}
+  .sheet-wrap::-webkit-scrollbar-thumb{background:#B8C0BD;border-radius:8px;border:3px solid #F2F3F2;}
+  .sheet-wrap::-webkit-scrollbar-thumb:hover{background:#8F9A96;}
+  table.sheet{border-collapse:separate;border-spacing:0;width:100%;min-width:1300px;}
+  table.sheet th{position:sticky;top:0;z-index:3;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--slate-soft);font-weight:700;padding:10px 12px;border-bottom:1px solid var(--line);background:#FAFBFA;white-space:nowrap;box-shadow:0 1px 0 var(--line);}
+  table.sheet th:first-child,table.sheet td:first-child{position:sticky;left:0;z-index:2;background:var(--panel);box-shadow:1px 0 0 var(--line);}
+  table.sheet th:first-child{z-index:4;background:#FAFBFA;}
+  table.sheet tr:hover td:first-child{background:#FAFBFA;}
+  .sheet-scroll-btns{display:inline-flex;gap:4px;margin-left:auto;}
+  .sheet-scroll-btns .rc-btn{width:30px;height:28px;font-size:14px;}
+  .sheet-scroll-hint{font-size:11px;color:var(--slate-soft);align-self:center;margin-right:6px;}
   table.sheet td{padding:8px 12px;font-size:12px;border-bottom:1px solid var(--line);border-right:1px solid #F0F2F1;vertical-align:middle;white-space:nowrap;}
   table.sheet tr:hover td{background:#FAFBFA;}
   table.sheet .amt{font-family:var(--font-mono);}
@@ -642,7 +656,7 @@
       <div id="notif-recent"></div>
     </div>
   </div>
-  <a href="/" class="gh-account-link gh-home-link" title="Back to Home" style="display:flex;align-items:center;">&larr; Home</a>
+  <a href="/" class="gh-account-link gh-home-link" title="Back to Home" style="display:flex;align-items:center;" target="_top" onclick="if(window.__CLMS_DEMO && window.parent && window.parent !== window){ try { window.parent.postMessage({ type: 'clms-demo-close' }, '*'); event.preventDefault(); } catch (e) {} }">&larr; Home</a>
 <div class="gh-account" id="gh-account" style="display:none;">
     <a href="/account" class="gh-account-link">My Account</a>
     <button class="gh-logout-btn" id="gh-logout-btn" type="button">Logout</button>
@@ -764,10 +778,11 @@
             <label class="wf-box"><input type="checkbox" value="next_week" onchange="togglePaymentWeek(this.value, this.checked)"><span>Next Week</span></label>
             <label class="wf-box"><input type="checkbox" value="following_week" onchange="togglePaymentWeek(this.value, this.checked)"><span>Following Week</span></label>
           </div>
+          <div class="sheet-scroll-btns" title="Scroll the ledger sideways (Shift + mouse wheel, or click and drag the table, also work)"><span class="sheet-scroll-hint">Scroll</span><button type="button" class="rc-btn" aria-label="Scroll left" onclick="sheetScrollBy(-1)">&#9664;</button><button type="button" class="rc-btn" aria-label="Scroll right" onclick="sheetScrollBy(1)">&#9654;</button></div>
         </div>
       </div>
       <div class="hint" style="margin-bottom:12px;">* next to a projected payment date means it falls outside the 3-week window (This Week through Following Week).</div>
-      <div class="sheet-wrap">
+      <div class="sheet-wrap" id="sheet-wrap">
         <table class="sheet" id="sheet-table">
           <thead id="sheet-head">
             <tr>
@@ -830,7 +845,7 @@
       <div class="topbar"><div><h1>Collected</h1><p>Payments received, newest month first &#8212; narrow to a month or a date range here, and by office and department via the sidebar</p></div></div>
       <div class="collected-filter" id="collected-filter">
         <label>Period <select id="collected-period" onchange="setCollectedPeriod(this.value)"><option value="all">All time</option></select></label>
-        <label>From <input type="date" id="collected-from" onchange="setCollectedRange()"></label>
+        <label>From <input type="date" id="collected-from" onchange="setCollectedRange()" title="Pick one date in both boxes to see a single day"></label>
         <label>To <input type="date" id="collected-to" onchange="setCollectedRange()"></label>
         <button type="button" class="btn-small" id="collected-clear" onclick="clearCollectedFilter()" style="display:none;">Clear</button>
         <span class="collected-filter-note" id="collected-filter-note"></span>
@@ -1072,9 +1087,13 @@
     </div>
 
     <div class="drawer-section">
-      <h4>Attach Documents</h4>
+      <h4>Documents</h4>
       <div id="draft-doc-checks"></div>
-      <div class="hint">Selected documents are pulled from the CRM account and referenced in the draft below.</div>
+      <input type="file" id="draft-upload-file" multiple style="display:none;" onchange="draftUploadDocuments()">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;">
+        <button type="button" class="btn-small" id="draft-upload-btn" onclick="document.getElementById('draft-upload-file').value='';document.getElementById('draft-upload-file').click();">&#8679; Upload documents</button>
+        <span class="hint" id="draft-upload-note" style="margin:0;"></span>
+      </div>
     </div>
 
     <div class="drawer-section" id="subject-section" style="display:none;">
@@ -2985,9 +3004,48 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     const view = btn.dataset.view;
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-' + view).classList.add('active');
+    if(view === 'sheet') setTimeout(fitSheetWrap, 0);
     if(view === 'activity' && typeof loadEmployeeActivity === 'function') loadEmployeeActivity(false);
   });
 
+  // Accounts Receivable ledger: sideways scrolling that works with a mouse.
+  // Arrow buttons page the table, Shift+wheel is native, and pressing on any
+  // plain cell and dragging pans the table (inputs, links and buttons still
+  // work normally). The box is sized to the window so its own scrollbar is
+  // always visible and the headers stay pinned.
+  function sheetScrollBy(dir){
+    const wrap = document.getElementById('sheet-wrap'); if(!wrap) return;
+    wrap.scrollBy({ left: dir * Math.max(240, Math.round(wrap.clientWidth * 0.6)), behavior: 'smooth' });
+  }
+  function fitSheetWrap(){
+    const wrap = document.getElementById('sheet-wrap'); if(!wrap) return;
+    const top = wrap.getBoundingClientRect().top + window.scrollY;
+    const h = Math.max(320, window.innerHeight - (top - window.scrollY) - 24);
+    wrap.style.maxHeight = h + 'px';
+  }
+  (function(){
+    const wrap = document.getElementById('sheet-wrap'); if(!wrap) return;
+    let panning = null;
+    wrap.addEventListener('mousedown', function(e){
+      if(e.button !== 0) return;
+      if(e.target.closest('input,textarea,select,button,a,label,.hist-link,[contenteditable]')) return;
+      panning = { x: e.clientX, y: e.clientY, left: wrap.scrollLeft, top: wrap.scrollTop, moved: false };
+    });
+    window.addEventListener('mousemove', function(e){
+      if(!panning) return;
+      const dx = e.clientX - panning.x, dy = e.clientY - panning.y;
+      if(!panning.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      panning.moved = true; wrap.classList.add('panning');
+      wrap.scrollLeft = panning.left - dx; wrap.scrollTop = panning.top - dy;
+    });
+    window.addEventListener('mouseup', function(){ if(panning){ wrap.classList.remove('panning'); panning = null; } });
+    // A plain vertical wheel at the top or bottom edge of the box lets the page
+    // scroll as usual; inside, the box scrolls. Shift+wheel scrolls sideways.
+    wrap.addEventListener('wheel', function(e){
+      if(e.shiftKey && Math.abs(e.deltaX) < 1 && Math.abs(e.deltaY) > 0){ wrap.scrollLeft += e.deltaY; e.preventDefault(); }
+    }, { passive: false });
+    window.addEventListener('resize', fitSheetWrap);
+  })();
   function renderNavCounts(){
     document.getElementById('nav-count-queue').textContent = state.invoices.filter(i=>!i.escalated && i.jobStatus!=='paid').length;
     document.getElementById('nav-count-sent').textContent = state.commsLog.length;
@@ -4060,6 +4118,10 @@ saveState(); renderAll();
     if(f.period === 'range'){ return { from: f.from || null, to: f.to || null }; }
     const m = /^(\d{4})-(\d{2})$/.exec(f.period || '');
     if(m){ const y = Number(m[1]), mo = Number(m[2]) - 1; const last = new Date(y, mo + 1, 0).getDate(); return { from: m[1] + '-' + m[2] + '-01', to: m[1] + '-' + m[2] + '-' + String(last).padStart(2, '0') }; }
+    const yr = /^(\d{4})$/.exec(f.period || '');
+    if(yr) return { from: yr[1] + '-01-01', to: yr[1] + '-12-31' };
+    const day = /^(\d{4}-\d{2}-\d{2})$/.exec(f.period || '');
+    if(day) return { from: day[1], to: day[1] };
     return { from: null, to: null };
   }
   function paymentInCollectedWindow(p){
@@ -4077,10 +4139,14 @@ saveState(); renderAll();
     const monthSet = {}; monthSet[nowD.getFullYear() + '-' + String(nowD.getMonth() + 1).padStart(2, '0')] = true;
     allPayments.forEach(p => { const k = String(p.paidDate || '').slice(0, 7); if(/^\d{4}-\d{2}$/.test(k)) monthSet[k] = true; });
     const monthKeys = Object.keys(monthSet).sort().reverse();
+    const yearSet = {}; monthKeys.forEach(k => { yearSet[k.slice(0, 4)] = true; });
+    const yearKeys = Object.keys(yearSet).sort().reverse();
     const sel = document.getElementById('collected-period');
     if(sel){
-      sel.innerHTML = '<option value="all">All time</option><option value="range">Date range\u2026</option>' + monthKeys.map(k => '<option value="' + k + '">' + monthNamesShort[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4) + '</option>').join('');
-      sel.value = (collectedFilter.period === 'range' || collectedFilter.period === 'all' || monthSet[collectedFilter.period]) ? collectedFilter.period : 'all';
+      sel.innerHTML = '<option value="all">All time</option><option value="range">Date range\u2026</option>' +
+        '<optgroup label="By year">' + yearKeys.map(y => '<option value="' + y + '">' + y + '</option>').join('') + '</optgroup>' +
+        '<optgroup label="By month">' + monthKeys.map(k => '<option value="' + k + '">' + monthNamesShort[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4) + '</option>').join('') + '</optgroup>';
+      sel.value = (collectedFilter.period === 'range' || collectedFilter.period === 'all' || monthSet[collectedFilter.period] || yearSet[collectedFilter.period]) ? collectedFilter.period : 'all';
       const fromEl = document.getElementById('collected-from'), toEl = document.getElementById('collected-to');
       const w = collectedWindow();
       if(fromEl) fromEl.value = collectedFilter.period === 'range' ? (collectedFilter.from || '') : (w.from || '');
@@ -5814,6 +5880,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         const seeded = state.currentUser ? [] : (inv.documents || []).filter(function(x){ return !x.remote; });
         inv.documents = seeded.concat(res.documents.map(function(x){ return Object.assign({ remote: true }, x); }));
         if(currentDetailId === inv.id) renderDetailDocs(inv);
+        if(currentInvoice && currentInvoice.id === inv.id && typeof renderDraftDocs === 'function') renderDraftDocs();
       })
       .catch(function(){});
   }
@@ -6198,12 +6265,10 @@ Do not invent facts beyond what's given.`;
 
     updateRecipientUI();
 
-    document.getElementById('draft-doc-checks').innerHTML = currentInvoice.documents.map(d => `
-      <div class="doc-check">
-        <input type="checkbox" id="chk-${d.id}" value="${d.id}" checked>
-        <label for="chk-${d.id}">${d.name}</label>
-      </div>
-    `).join('');
+    renderDraftDocs();
+    const dn = document.getElementById('draft-upload-note'); if(dn) dn.textContent = '';
+    // Stored documents are loaded lazily, so Draft Now from the queue sees them too.
+    if(isRemoteInvoice(currentInvoice)) loadRemoteDocuments(currentInvoice);
 
     document.getElementById('draft-text').value = '';
     document.getElementById('err').style.display = 'none';
@@ -6233,6 +6298,62 @@ Do not invent facts beyond what's given.`;
     e.preventDefault();
   });
 
+  // Documents on the draft: everything stored on the account, ticked to go out
+  // with the email as real attachments. "Upload documents" adds files to the
+  // account right here (same storage as Manage) and ticks them automatically.
+  function renderDraftDocs(){
+    const box = document.getElementById('draft-doc-checks');
+    if(!box || !currentInvoice) return;
+    const docs = currentInvoice.documents || [];
+    const checked = {};
+    box.querySelectorAll('input[type=checkbox]').forEach(function(c){ checked[c.value] = c.checked; });
+    box.innerHTML = docs.length ? docs.map(d => `
+      <div class="doc-check">
+        <input type="checkbox" id="chk-${d.id}" value="${d.id}" ${checked[String(d.id)] === false ? '' : 'checked'}>
+        <label for="chk-${d.id}">${hEsc(d.label || d.name)}${d.label && d.label !== d.name ? ' <span style="color:var(--slate-soft);">(' + hEsc(d.name) + ')</span>' : ''}</label>
+      </div>
+    `).join('') : '<div class="hint" style="margin:0 0 4px;">No documents on this account yet. Upload one to send it with this message.</div>';
+  }
+  function draftUploadDocuments(){
+    const inv = currentInvoice;
+    const fileEl = document.getElementById('draft-upload-file');
+    const files = fileEl && fileEl.files ? Array.from(fileEl.files) : [];
+    if(!inv || !files.length) return;
+    const btn = document.getElementById('draft-upload-btn');
+    const note = document.getElementById('draft-upload-note');
+    if(btn){ btn.disabled = true; btn.textContent = 'Uploading\u2026'; }
+    let done = 0, failed = 0;
+    const next = function(){
+      if(!files.length){
+        if(btn){ btn.disabled = false; btn.innerHTML = '&#8679; Upload documents'; }
+        if(note) note.textContent = (done ? done + ' document' + (done === 1 ? '' : 's') + ' uploaded and attached.' : '') + (failed ? ' ' + failed + ' failed.' : '');
+        renderDraftDocs();
+        if(currentDetailId === inv.id) renderDetailDocs(inv);
+        return;
+      }
+      const file = files.shift();
+      if(note) note.textContent = 'Uploading ' + file.name + '\u2026';
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('accountId', inv.id);
+      fd.append('kind', 'Other');
+      fd.append('label', file.name.replace(/\.[a-z0-9]+$/i, ''));
+      fetch('/api/documents/upload', { method: 'POST', credentials: 'same-origin', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(res){
+          if(res && res.ok && res.document){
+            inv.documents = inv.documents || [];
+            inv.documents.push(Object.assign({ remote: !res.demo }, res.document));
+            addActivity(inv, (res.document.label || res.document.name) + ' uploaded.', 'manual', 'skip');
+            saveState();
+            done++;
+          } else failed++;
+        })
+        .catch(function(){ failed++; })
+        .then(next);
+    };
+    next();
+  }
   function selectedDocs(){
     if(!currentInvoice) return [];
     return currentInvoice.documents.filter(d => {
@@ -6306,6 +6427,7 @@ Do not invent facts beyond what's given.`;
         body: bodyText,
         draftType: currentDraftType,
         recipient: currentRecipient,
+        documentIds: selectedDocs().filter(function(d){ return d.remote && /^[0-9]+$/.test(String(d.id)); }).map(function(d){ return d.id; }),
         cc: (function(){ const el = document.getElementById('draft-cc'); return el ? el.value : ''; })()
       })
     }).then(function(r){ return r.json(); }).then(function(res){
@@ -6324,7 +6446,8 @@ Do not invent facts beyond what's given.`;
       // every tab the moment the send is confirmed; the reload that follows
       // brings back the server's copy of the same.
       quietRender(renderAll);
-      showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} (${res.to})`);
+      const att = Array.isArray(res.attached) ? res.attached.length : 0;
+      showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} (${res.to})` + (att ? ` with ${att} attachment${att === 1 ? '' : 's'}` : '') + (res.attachmentsSkipped && res.attachmentsSkipped.length ? ` \u2014 ${res.attachmentsSkipped.length} file(s) too large to attach` : ''));
       loadRealAccounts();
     }).catch(function(){
       approveBtn.disabled = false;

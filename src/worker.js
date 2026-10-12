@@ -2357,6 +2357,7 @@ return { ok: false, skipped: true };
 try {
 const payload = { from: fromAddr, to: [to], subject: subject, html: brandEmailHtml(html) };
 if (opts.cc && opts.cc.length) payload.cc = opts.cc;
+if (opts.attachments && opts.attachments.length) payload.attachments = opts.attachments.map(function (a) { return { filename: a.filename, content: a.base64 }; });
 if (replyTo) payload.reply_to = replyTo;
 const res = await fetch('https://api.resend.com/emails', {
 method: 'POST',
@@ -5230,6 +5231,7 @@ escapeHtml(text) + '</div>';
 
 let result = null;
 let sentVia = 'platform';
+const attach = await loadSendAttachments(env, user, account.id, body.documentIds);
 const mailbox = await mailboxForUser(env, user);
 // Own-sender companies never send from the clAIms address, not even with the
 // user's name on it: the user connects their mailbox first.
@@ -5240,7 +5242,7 @@ if (mailbox) {
 // Goes out through the user's own mailbox: genuinely from them, and a copy
 // lands in their Sent folder.
 result = await sendViaMailbox(env, mailbox, {
-to: to, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(user.full_name || mailbox.email)
+to: to, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(user.full_name || mailbox.email), attachments: attach.attachments
 });
 if (result && result.ok) { sentVia = 'mailbox'; }
 else {
@@ -5260,7 +5262,7 @@ result = await sendEmail(env, {
 to: to, cc: ccList, subject: subject, html: html,
 kind: 'manual_' + draftType,
 tenantId: user.tenant_id, userId: user.id,
-from: sender.from, replyTo: sender.replyTo
+from: sender.from, replyTo: sender.replyTo, attachments: attach.attachments
 });
 } catch (e) { result = { ok: false, error: String(e) }; }
 }
@@ -5303,7 +5305,8 @@ const usedMailbox = sentVia === 'mailbox';
 return json({ ok: true, via: sentVia,
 sentFrom: usedMailbox ? (mailbox && mailbox.email) : sender.from,
 ownAddress: usedMailbox || sender.ownDomain,
-replyTo: usedMailbox ? (mailbox && mailbox.email) : sender.replyTo, to: to });
+replyTo: usedMailbox ? (mailbox && mailbox.email) : sender.replyTo, to: to,
+attached: attach.attachments.map(function (a) { return a.filename; }), attachmentsSkipped: attach.skipped });
 }
 
 // Admins register their company's sending domain, get the DNS records to add,
@@ -5612,7 +5615,36 @@ const bytes = new TextEncoder().encode(clean);
 let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
 return '=?UTF-8?B?' + btoa(bin) + '?=';
 }
-function buildMimeMessage(fromName, fromEmail, to, subject, html, cc) {
+function bytesToBase64(bytes) {
+const arr = new Uint8Array(bytes); let binary = '';
+for (let i = 0; i < arr.length; i += 0x8000) binary += String.fromCharCode.apply(null, arr.subarray(i, i + 0x8000));
+return btoa(binary);
+}
+// Files the team chose to send with a message: the account's stored documents,
+// pulled from storage and handed to whichever sender carries the email.
+// Capped at 20MB in total so Gmail (25MB raw) and Resend (40MB) both accept it.
+const ATTACH_TOTAL_LIMIT = 20 * 1024 * 1024;
+async function loadSendAttachments(env, user, accountId, documentIds) {
+const ids = (Array.isArray(documentIds) ? documentIds : []).map(function (v) { return String(v); }).filter(function (v) { return /^[0-9]+$/.test(v); }).slice(0, 10);
+if (!ids.length) return { attachments: [], skipped: [] };
+const rows = await pgSelect(env, 'documents', 'tenant_id=' + pgEq(user.tenant_id) + '&account_id=' + pgEq(accountId) + '&id=in.(' + ids.join(',') + ')&select=id,file_name,content_type,size_bytes,storage_path') || [];
+const attachments = []; const skipped = []; let total = 0;
+for (const row of rows) {
+const size = Number(row.size_bytes || 0);
+if (total + size > ATTACH_TOTAL_LIMIT) { skipped.push(row.file_name); continue; }
+try {
+const res = await fetch(env.SUPABASE_URL + '/storage/v1/object/' + DOC_BUCKET + '/' + row.storage_path, {
+headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY } });
+if (!res.ok) { skipped.push(row.file_name); continue; }
+const bytes = await res.arrayBuffer();
+if (total + bytes.byteLength > ATTACH_TOTAL_LIMIT) { skipped.push(row.file_name); continue; }
+total += bytes.byteLength;
+attachments.push({ filename: row.file_name || ('document-' + row.id), contentType: row.content_type || 'application/octet-stream', base64: bytesToBase64(bytes) });
+} catch (e) { skipped.push(row.file_name); }
+}
+return { attachments: attachments, skipped: skipped };
+}
+function buildMimeMessage(fromName, fromEmail, to, subject, html, cc, attachments) {
 const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
 const lines = [
 'From: "' + mimeHeaderSafe(fromName).replace(/"/g, '') + '" <' + mimeHeaderSafe(fromEmail) + '>',
@@ -5621,15 +5653,33 @@ const lines = [
 if (cc && cc.length) lines.push('Cc: ' + cc.map(mimeHeaderSafe).join(', '));
 lines.push('Subject: ' + mimeEncodeSubject(subject));
 lines.push('MIME-Version: 1.0');
+if (!attachments || !attachments.length) {
 lines.push('Content-Type: text/html; charset=UTF-8');
 return lines.join(CRLF) + CRLF + CRLF + html;
+}
+const boundary = 'clms_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+lines.push('Content-Type: multipart/mixed; boundary="' + boundary + '"');
+const parts = [
+'--' + boundary, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: 8bit', '', html
+];
+attachments.forEach(function (a) {
+const name = String(a.filename || 'attachment').replace(/[\r\n"]/g, '_');
+parts.push('--' + boundary);
+parts.push('Content-Type: ' + a.contentType + '; name="' + name + '"');
+parts.push('Content-Disposition: attachment; filename="' + name + '"');
+parts.push('Content-Transfer-Encoding: base64');
+parts.push('');
+parts.push((a.base64.match(/.{1,76}/g) || []).join(CRLF));
+});
+parts.push('--' + boundary + '--');
+return lines.join(CRLF) + CRLF + CRLF + parts.join(CRLF);
 }
 async function sendViaMailbox(env, mailbox, opts) {
 const token = await mailboxAccessToken(env, mailbox);
 if (!token) return { ok: false, error: 'Your connected email needs to be reconnected.', needsReconnect: true };
 try {
 if (mailbox.provider === 'google') {
-const mime = buildMimeMessage(opts.fromName || mailbox.email, mailbox.email, opts.to, opts.subject, opts.html, opts.cc);
+const mime = buildMimeMessage(opts.fromName || mailbox.email, mailbox.email, opts.to, opts.subject, opts.html, opts.cc, opts.attachments);
 const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
 method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
 body: JSON.stringify({ raw: base64UrlEncode(new TextEncoder().encode(mime)) }) });
@@ -5645,7 +5695,8 @@ const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
 method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
 body: JSON.stringify({ message: { subject: opts.subject, body: { contentType: 'HTML', content: opts.html },
 toRecipients: [{ emailAddress: { address: opts.to } }],
-ccRecipients: (opts.cc || []).map(function(a){ return { emailAddress: { address: a } }; }) }, saveToSentItems: true }) });
+ccRecipients: (opts.cc || []).map(function(a){ return { emailAddress: { address: a } }; }),
+attachments: (opts.attachments || []).map(function (a) { return { '@odata.type': '#microsoft.graph.fileAttachment', name: a.filename, contentType: a.contentType, contentBytes: a.base64 }; }) }, saveToSentItems: true }) });
 if (!res.ok) {
 const t = await res.text();
 console.log('MAILBOX_SEND_FAILED provider=microsoft status=' + res.status + ' body=' + t.slice(0, 300));
