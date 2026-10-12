@@ -2398,17 +2398,28 @@ async function loadAccountNotes(invoices){
   const remote = (invoices || []).filter(function(inv){
     return inv && inv.id !== undefined && inv.id !== null && String(inv.id).match(/^[0-9]+$/);
   });
+  if(!remote.length) return;
+  const toActivity = function(notes){
+    return (notes || []).map(function(n){
+      let ts = n.ts;
+      try { ts = new Date(n.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); } catch(e){}
+      return { id: n.id, ts: ts, text: n.text, source: n.source, author: n.author, url: n.url };
+    });
+  };
+  // One request for the whole company (was one per invoice on every refresh).
+  try {
+    const r = await fetch('/api/accounts/notes?all=1', { credentials: 'same-origin', cache: 'no-store' });
+    const res = await r.json();
+    if(res && res.ok && res.notesByAccount){
+      remote.forEach(function(inv){ const list = res.notesByAccount[String(inv.id)]; if(list && list.length) inv.activity = toActivity(list); });
+      return;
+    }
+  } catch(e) {}
+  // Older worker without the bulk endpoint: fall back to per-account reads.
   await Promise.all(remote.map(function(inv){
     return fetch('/api/accounts/notes?accountId=' + encodeURIComponent(inv.id), { credentials: 'same-origin' })
       .then(function(r){ return r.json(); })
-      .then(function(res){
-        if(!res || !res.ok || !res.notes || !res.notes.length) return;
-        inv.activity = res.notes.map(function(n){
-          let ts = n.ts;
-          try { ts = new Date(n.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); } catch(e){}
-          return { id: n.id, ts: ts, text: n.text, source: n.source, author: n.author, url: n.url };
-        });
-      })
+      .then(function(res){ if(res && res.ok && res.notes && res.notes.length) inv.activity = toActivity(res.notes); })
       .catch(function(){});
   }));
 }
@@ -2935,6 +2946,9 @@ async function loadRealAccountsNow(){
           __pingMaxId = d.maxId;
           if (changed) {
             await loadRealAccounts();
+            // The Employees Activity feed is server-fed; refresh it too when
+            // it is the tab on screen, so what a teammate just did shows up.
+            if (typeof actViewOpen === 'function' && actViewOpen() && typeof loadEmployeeActivity === 'function') loadEmployeeActivity(true, true);
             if (newAccount && typeof showToast === 'function') showToast('New invoice synced from your connected system.');
           }
           // Plan or billing-state change (upgrade, downgrade, hold): refresh
@@ -3776,7 +3790,7 @@ saveState(); renderAll();
     if(!inv) return;
     inv.paymentType = val || null;
     persistInvoice(inv, ['paymentType']);
-    addActivity(inv, `Payment type set to ${val ? PAYMENT_TYPE_LABELS[val] : 'unspecified'}.`, 'manual', 'update');
+    addActivity(inv, `Payment type set to ${val ? (PAYMENT_TYPE_LABELS[val] || PAYMENT_METHOD_LABELS[val] || val) : 'unspecified'}.`, 'manual', 'update');
     saveState(); renderAll();
   }
 
@@ -5339,11 +5353,12 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     return list[n % list.length];
   }
 
-  async function loadEmployeeActivity(force){
+  async function loadEmployeeActivity(force, quiet){
     if(!document.getElementById('view-activity')) return;
+    const paint = function(){ if(quiet && typeof quietRender === 'function') quietRender(renderActivityView); else renderActivityView(); };
     if(actIsRealAdmin()){
       if(actLoading) return;
-      if(!force && employeeActivity.mode === 'real' && (Date.now() - employeeActivity.loadedAt) < 60000){ renderActivityView(); return; }
+      if(!force && employeeActivity.mode === 'real' && (Date.now() - employeeActivity.loadedAt) < 60000){ paint(); return; }
       actLoading = true;
       try {
         const r = await fetch('/api/team/activity?days=' + actRangeDays(), { credentials: 'same-origin', cache: 'no-store' });
@@ -5354,7 +5369,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     } else {
       employeeActivity = synthesizeEmployeeActivity();
     }
-    renderActivityView();
+    paint();
   }
   function renderActivityIfOpen(){
     if(!actViewOpen()) return;
