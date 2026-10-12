@@ -523,7 +523,12 @@
   table.log tbody tr,table.sheet tbody tr,table.aging tbody tr{animation:rowIn .3s var(--ease-out) both;}
   /* Background refreshes re-render in place: no entrance animations, no jump. */
   body.quiet-render .view.active,body.quiet-render .queue .card,body.quiet-render .todo-row,
-  body.quiet-render table.log tbody tr,body.quiet-render table.sheet tbody tr,body.quiet-render table.aging tbody tr{animation:none !important;}
+  body.quiet-render table.log tbody tr,body.quiet-render table.sheet tbody tr,body.quiet-render table.aging tbody tr,
+  body.quiet-render .topbar h1::after,body.quiet-render .notif-panel{animation:none !important;}
+  /* ...and nothing slides, lifts or underlines while that refresh lands (the toast and drawers keep their own motion). */
+  body.quiet-render .kpi,body.quiet-render .kpi::after,body.quiet-render .card,body.quiet-render .todo-row,body.quiet-render .chip,
+  body.quiet-render .btn-primary,body.quiet-render .btn-small,body.quiet-render .wf-box,body.quiet-render .wf-box input,
+  body.quiet-render .chart-bar,body.quiet-render .chart-seg,body.quiet-render .nav-item,body.quiet-render .slider,body.quiet-render .slider::before{transition:none !important;}
 
   /* Cards and rows respond to the hand */
   .card{transition:transform .25s var(--ease-out),box-shadow .25s var(--ease-out),border-color .2s ease;box-shadow:var(--shadow-soft);}
@@ -2477,18 +2482,56 @@ window.__previewTenantConfig = function(cfg){
 };
 
 let __quietRenders = 0;
+let __quietDepth = 0;
 // Re-renders triggered by a background refresh keep every element still:
-// entrance animations only play on the first paint and on tab changes.
+// entrance animations only play on the first paint and on tab changes, and
+// while a quiet render runs, an element whose markup has not changed is left
+// exactly as it is (same nodes, same scroll position, same hover/focus), so
+// nothing on screen re-paints or jumps unless its content really changed.
 function quietRender(fn){
   document.body.classList.add('quiet-render');
   __quietRenders++;
+  __quietDepth++;
   try { fn(); } finally {
+    __quietDepth--;
     const n = __quietRenders;
     setTimeout(function(){ if (__quietRenders === n) document.body.classList.remove('quiet-render'); }, 400);
   }
 }
+(function(){
+  // Remember the last markup written to each element; during a quiet render a
+  // write of the identical string is a no-op. User-driven renders always write.
+  try {
+    const d = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+    if (d && d.set && d.get) Object.defineProperty(Element.prototype, 'innerHTML', {
+      configurable: true, enumerable: d.enumerable, get: d.get,
+      set: function(v){
+        if (__quietDepth > 0 && this.__clmsHtml === v && this.isConnected) return;
+        this.__clmsHtml = v;
+        d.set.call(this, v);
+      }
+    });
+    const t = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+    if (t && t.set && t.get) Object.defineProperty(Node.prototype, 'textContent', {
+      configurable: true, enumerable: t.enumerable, get: t.get,
+      set: function(v){
+        if (__quietDepth > 0 && this.nodeType === 1 && t.get.call(this) === String(v)) return;
+        t.set.call(this, v);
+      }
+    });
+  } catch (e) {}
+})();
 let __accountsLoadedOnce = false;
-async function loadRealAccounts(){
+let __accountsFingerprint = null;
+let __accountsLoading = null;
+function loadRealAccounts(){
+  // Overlapping refresh triggers (the 30-second timer, the change probe, the
+  // QuickBooks import poll) share one in-flight load instead of stacking.
+  if (__accountsLoading) return __accountsLoading;
+  __accountsLoading = loadRealAccountsNow().finally(function(){ __accountsLoading = null; });
+  return __accountsLoading;
+}
+async function loadRealAccountsNow(){
     try {
       const res = await fetch('/api/accounts', { credentials: 'include' });
       if (!res.ok) {
@@ -2725,7 +2768,19 @@ async function loadRealAccounts(){
         .sort(function(a, b){ return String(b.receivedTs || '') < String(a.receivedTs || '') ? -1 : (String(b.receivedTs || '') > String(a.receivedTs || '') ? 1 : 0); });
       state.paymentsLog = paymentsLog;
       if (typeof saveState === 'function') saveState();
-      if (typeof renderAll === 'function') { if (__accountsLoadedOnce) quietRender(renderAll); else renderAll(); }
+      // A background refresh that brought back exactly what is already on
+      // screen does not touch the page at all. Only changed data re-renders,
+      // and then quietly - the Integrations card is the one place a sync is
+      // meant to be visible, so its "last synced" line still ticks over.
+      let fp = null;
+      try { fp = JSON.stringify([invoices, paymentsLog, state.commsLog, state.responsesLog]); } catch (e) { fp = null; }
+      const unchanged = __accountsLoadedOnce && fp !== null && fp === __accountsFingerprint;
+      __accountsFingerprint = fp;
+      if (typeof renderAll === 'function') {
+        if (!__accountsLoadedOnce) renderAll();
+        else if (unchanged) quietRender(function(){ try { renderCustomIntegrations(); } catch (e) {} });
+        else quietRender(renderAll);
+      }
       __accountsLoadedOnce = true;
     } catch (err) {
       console.error('loadRealAccounts failed', err);
