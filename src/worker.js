@@ -2221,6 +2221,36 @@ function commsToJson(c) {
     source: c.cadence_day ? 'automation' : 'manual'
   };
 }
+// Who sent a manual message. invoice_comms has no sender column, but every
+// manual send is also logged in user_activity (same account, same moment,
+// actor name), so manual rows are matched to the nearest send activity.
+async function commsAttachSenders(env, tenantId, comms) {
+  const manual = (comms || []).filter(function (c) { return c && c.source === 'manual' && c.at; });
+  if (!manual.length) return comms;
+  const ids = Array.from(new Set(manual.map(function (c) { return c.accountId; }).filter(function (v) { return v !== undefined && v !== null; })));
+  if (!ids.length) return comms;
+  let acts = [];
+  try {
+    acts = await pgSelect(env, 'user_activity', 'tenant_id=' + pgEq(tenantId) +
+      '&type=in.(followup,demand,noil)&account_id=in.(' + ids.slice(0, 900).join(',') + ')' +
+      '&select=account_id,actor_name,created_at&order=created_at.desc&limit=1000') || [];
+  } catch (e) { acts = []; }
+  if (!acts.length) return comms;
+  const byAccount = {};
+  acts.forEach(function (a) { (byAccount[String(a.account_id)] = byAccount[String(a.account_id)] || []).push(a); });
+  manual.forEach(function (c) {
+    const list = byAccount[String(c.accountId)] || [];
+    const t = new Date(c.at).getTime();
+    if (!isFinite(t)) return;
+    let best = null, bestGap = 120000; // within two minutes of the send
+    list.forEach(function (a) {
+      const gap = Math.abs(new Date(a.created_at).getTime() - t);
+      if (isFinite(gap) && gap < bestGap) { best = a; bestGap = gap; }
+    });
+    if (best && best.actor_name) c.sentBy = String(best.actor_name);
+  });
+  return comms;
+}
 function commsKindLabel(kind) {
   const k = String(kind || '').toLowerCase();
   if (k.indexOf('noil') !== -1) return 'NOIL';
@@ -5808,6 +5838,7 @@ office: a.office || null,
 department: a.department || null
 }));
 });
+await commsAttachSenders(env, user.tenant_id, comms);
 return json({ ok: true, comms: comms });
 }
 
@@ -5850,11 +5881,16 @@ push(a.noil_sent_at, 'noil', 'Notice of Intent to Lien sent', null, 'system');
 push(a.notified_at, 'escalation', 'Escalated' + (a.notified_name ? (' - ' + a.notified_name + ' notified') : ''), null, 'dashboard');
 if (a.do_not_contact) push(a.do_not_contact_at || a.updated_at, 'escalation', DO_NOT_CONTACT_LABEL, a.do_not_contact_by ? ('flagged by ' + a.do_not_contact_by) : null, 'dashboard');
 push(a.paid_at, 'payment', 'Paid in full', null, 'system');
+const commsJson = comms.map(function (c) { return Object.assign(commsToJson(c), { accountId: c.account_id }); });
+await commsAttachSenders(env, user.tenant_id, commsJson);
+const senderById = {};
+commsJson.forEach(function (c) { if (c.sentBy) senderById[String(c.id)] = c.sentBy; });
 comms.forEach(function (c) {
 const who = [c.recipient_role, c.recipient_email].filter(Boolean).join(' - ');
 const st = String(c.status || '');
+const by = senderById[String(c.id)];
 push(c.sent_at, kindLabel(c.kind) === 'NOIL' ? 'noil' : (kindLabel(c.kind) === 'Demand letter' ? 'demand' : 'followup'),
-kindLabel(c.kind) + (st === 'sent' ? ' sent' : (st ? (' - ' + st.replace(/_/g, ' ')) : '')) + (c.cadence_day ? (' (Day ' + c.cadence_day + ')') : ''),
+kindLabel(c.kind) + (st === 'sent' ? ' sent' : (st ? (' - ' + st.replace(/_/g, ' ')) : '')) + (c.cadence_day ? (' (Day ' + c.cadence_day + ')') : '') + (by ? (' by ' + by) : ''),
 [who, c.subject].filter(Boolean).join(' | '), c.cadence_day ? 'automation' : 'dashboard');
 });
 activity.forEach(function (x) {
@@ -5886,7 +5922,7 @@ projectedPaymentDate: a.projected_payment_date, paymentType: a.payment_type, las
 note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at,
 contactInfo: a.contact_info || null, lastFollowUpAt: a.last_follow_up_at || null, lastFollowUpBy: a.last_follow_up_by || null, lastFollowUpKind: a.last_follow_up_kind || null
 },
-comms: comms.map(commsToJson),
+comms: commsJson,
 activity: activity.map(function (x) { return { id: x.id, at: x.sent_at, type: x.type, recipient: x.recipient, subject: x.subject, status: x.status, source: x.source }; }),
 payments: payments.map(function (p) { return { id: p.id, at: p.deposited_on, amount: money(p.amount), method: p.method, payerName: p.payer_name, reference: p.reference, bankName: p.bank_name, memo: p.memo }; }),
 documents: docs.map(documentToJson),
