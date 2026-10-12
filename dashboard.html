@@ -522,14 +522,10 @@
   .queue .card:nth-child(5),.todo-row:nth-child(5){animation-delay:140ms} .queue .card:nth-child(6),.todo-row:nth-child(6){animation-delay:175ms}
   .queue .card:nth-child(7){animation-delay:210ms} .queue .card:nth-child(8){animation-delay:245ms} .queue .card:nth-child(n+9){animation-delay:280ms}
   table.log tbody tr,table.sheet tbody tr,table.aging tbody tr{animation:rowIn .3s var(--ease-out) both;}
-  /* Background refreshes re-render in place: no entrance animations, no jump. */
-  body.quiet-render .view.active,body.quiet-render .queue .card,body.quiet-render .todo-row,
-  body.quiet-render table.log tbody tr,body.quiet-render table.sheet tbody tr,body.quiet-render table.aging tbody tr,
-  body.quiet-render .topbar h1::after,body.quiet-render .notif-panel{animation:none !important;}
-  /* ...and nothing slides, lifts or underlines while that refresh lands (the toast and drawers keep their own motion). */
-  body.quiet-render .kpi,body.quiet-render .kpi::after,body.quiet-render .card,body.quiet-render .todo-row,body.quiet-render .chip,
-  body.quiet-render .btn-primary,body.quiet-render .btn-small,body.quiet-render .wf-box,body.quiet-render .wf-box input,
-  body.quiet-render .chart-bar,body.quiet-render .chart-seg,body.quiet-render .nav-item,body.quiet-render .slider,body.quiet-render .slider::before{transition:none !important;}
+  /* Nodes inserted by a background refresh skip the entrance animations
+     (the marker is set on the new nodes only, before first paint, so nothing
+     already on screen is ever cancelled or replayed). */
+  .qr:not(.status-dot):not(.sfdot),.qr:not(.status-dot):not(.sfdot)::before,.qr:not(.status-dot):not(.sfdot)::after{animation:none !important;}
 
   /* Cards and rows respond to the hand */
   .card{transition:transform .25s var(--ease-out),box-shadow .25s var(--ease-out),border-color .2s ease;box-shadow:var(--shadow-soft);}
@@ -2482,21 +2478,29 @@ window.__previewTenantConfig = function(cfg){
   if (typeof renderAll === 'function') renderAll();
 };
 
-let __quietRenders = 0;
 let __quietDepth = 0;
-// Re-renders triggered by a background refresh keep every element still:
-// entrance animations only play on the first paint and on tab changes, and
-// while a quiet render runs, an element whose markup has not changed is left
-// exactly as it is (same nodes, same scroll position, same hover/focus), so
-// nothing on screen re-paints or jumps unless its content really changed.
+// Re-renders triggered by a background refresh keep every element still.
+// While one runs, an element whose markup has not changed is left exactly as
+// it is (same nodes, same scroll position, same hover/focus), and the nodes
+// that are new get a marker that skips the entrance animation. Nothing on
+// screen is ever cancelled or restarted - toggling a page-wide class to
+// suppress animations is what used to replay every slide-in after a refresh.
 function quietRender(fn){
-  document.body.classList.add('quiet-render');
-  __quietRenders++;
   __quietDepth++;
+  let mo = null;
+  try { mo = new MutationObserver(function(){}); mo.observe(document.body, { childList: true, subtree: true }); } catch (e) { mo = null; }
   try { fn(); } finally {
     __quietDepth--;
-    const n = __quietRenders;
-    setTimeout(function(){ if (__quietRenders === n) document.body.classList.remove('quiet-render'); }, 400);
+    if (mo) {
+      const recs = mo.takeRecords(); mo.disconnect();
+      recs.forEach(function(r){
+        r.addedNodes.forEach(function(n){
+          if (n.nodeType !== 1) return;
+          n.classList.add('qr');
+          n.querySelectorAll('*').forEach(function(c){ c.classList.add('qr'); });
+        });
+      });
+    }
   }
 }
 (function(){
