@@ -338,6 +338,12 @@
   body.sheet-fullscreen .sheet-fs-bar{display:inline-flex;}
   .sheet-fs-bar .btn-small{background:#fff;color:var(--ink);border-color:#fff;}
   .sheet-wrap.panning{cursor:grabbing;user-select:none;}
+  .sheet-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;}
+  .sheet-tools .sheet-search{width:220px;}
+  .sheet-date{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--slate);}
+  .sheet-date input[type=date]{font-size:12px;padding:5px 7px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:var(--font-body);}
+  .sheet-count{font-size:11.5px;color:var(--slate-soft);margin-left:auto;}
+  .btn-small.ghost{background:transparent;}
   .sheet-wrap::-webkit-scrollbar{height:14px;width:12px;}
   .sheet-wrap::-webkit-scrollbar-track{background:#F2F3F2;}
   .sheet-wrap::-webkit-scrollbar-thumb{background:#B8C0BD;border-radius:8px;border:3px solid #F2F3F2;}
@@ -792,6 +798,28 @@
           </div>
           <div class="sheet-scroll-btns" title="Scroll the ledger sideways (Shift + mouse wheel, or click and drag the table, also work)"><span class="sheet-scroll-hint">Scroll</span><button type="button" class="rc-btn" aria-label="Scroll left" onclick="sheetScrollBy(-1)">&#9664;</button><button type="button" class="rc-btn" aria-label="Scroll right" onclick="sheetScrollBy(1)">&#9654;</button><button type="button" class="btn-small" style="margin-left:8px;" onclick="sheetFullscreen(true)" title="Open the ledger across the whole window">&#9974; Full screen</button></div>
         </div>
+      </div>
+      <div class="sheet-tools" id="sheet-tools">
+        <input class="search sheet-search" id="sheet-search" type="search" name="ledger-search" placeholder="Search accounts…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="setSheetSearch(this.value)" title="Type part of an account name, invoice number, or contact">
+        <label class="sheet-date" title="Only invoices dated within this range"><span>Invoice date</span><input type="date" id="sheet-date-from" onchange="setSheetDate('from', this.value)"><span>to</span><input type="date" id="sheet-date-to" onchange="setSheetDate('to', this.value)"></label>
+        <select class="sort" id="sheet-sort" onchange="setSheetSort(this.value)" title="Order of the rows">
+          <option value="name-asc">Sort: A–Z</option>
+          <option value="name-desc">Sort: Z–A</option>
+          <option value="date-desc">Sort: Invoice date (newest)</option>
+          <option value="date-asc">Sort: Invoice date (oldest)</option>
+          <option value="amount-desc">Sort: Balance (high–low)</option>
+          <option value="days-desc">Sort: Days outstanding</option>
+          <option value="collections">Sort: Sent to collections first</option>
+        </select>
+        <select class="sort" id="sheet-show" onchange="setSheetShow(this.value)" title="Which invoices to show">
+          <option value="all">Show: All open</option>
+          <option value="collections">Show: Sent to collections</option>
+          <option value="not-collections">Show: Not in collections</option>
+          <option value="replied">Show: Replied</option>
+          <option value="no-reply">Show: No reply yet</option>
+        </select>
+        <button type="button" class="btn-small ghost" id="sheet-clear" onclick="clearSheetFilters()" style="display:none;">Clear</button>
+        <span class="sheet-count" id="sheet-count"></span>
       </div>
       <div class="hint" style="margin-bottom:12px;">* next to a projected payment date means it falls outside the 3-week window (This Week through Following Week).</div>
       <div class="sheet-fs-bar" id="sheet-fs-bar"><span>Accounts Receivable &mdash; full screen</span><button type="button" class="btn-small" onclick="sheetFullscreen(false)">Exit (Esc)</button></div>
@@ -1637,6 +1665,9 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
     return dt.toLocaleDateString(undefined,{month:'short', day:'numeric', year:'numeric'});
   }
   function isoDate(d){ return d.toISOString().slice(0,10); }
+  // The calendar day where the user is (a send at 10 pm Central is today, not
+  // tomorrow's UTC date). isoDate() stays UTC for dates parsed from the API.
+  function localDay(d){ const x = d || new Date(); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
   function addDays(date, n){ const d = new Date(date); d.setDate(d.getDate()+n); return d; }
 
   /* ============================================================
@@ -2760,7 +2791,7 @@ async function loadRealAccountsNow(){
             invoiceNumber: inv.invoiceNumber,
             amount: amt,
             remainingBalance: Math.max(0, +(inv.amount - running).toFixed(2)),
-            paidDate: dayOf(r.deposited_on || r.created_at) || isoDate(new Date()),
+            paidDate: dayOf(r.deposited_on || r.created_at) || localDay(),
             officeLocation: inv.officeLocation,
             department: inv.department,
             category: inv.category,
@@ -2787,7 +2818,7 @@ async function loadRealAccountsNow(){
             invoiceNumber: inv.invoiceNumber,
             amount: unitemised,
             remainingBalance: Math.max(0, +(inv.amount - inv.amountPaid).toFixed(2)),
-            paidDate: dayOf(a.paidDate) || isoDate(new Date()),
+            paidDate: dayOf(a.paidDate) || localDay(),
             officeLocation: inv.officeLocation,
             department: inv.department,
             category: inv.category,
@@ -2815,6 +2846,14 @@ async function loadRealAccountsNow(){
         if (keptDocs.length) inv.documents = keptDocs;
         inv.needsAttention = !!prev.needsAttention;
         inv.paymentEmailSent = !!prev.paymentEmailSent;
+        // A send this tab just confirmed is never rolled back by a read that
+        // happened to land before the server's own row caught up.
+        if (prev.lastFollowUpAt && (!inv.lastFollowUpAt || String(prev.lastFollowUpAt) > String(inv.lastFollowUpAt))) {
+          inv.lastFollowUpAt = prev.lastFollowUpAt; inv.lastFollowUpBy = prev.lastFollowUpBy || inv.lastFollowUpBy; inv.lastFollowUpKind = prev.lastFollowUpKind || inv.lastFollowUpKind;
+          if (prev.lastContact && (!inv.lastContact || String(prev.lastContact) > String(inv.lastContact))) inv.lastContact = prev.lastContact;
+          if ((prev.followups || 0) > (inv.followups || 0)) inv.followups = prev.followups;
+          if (inv.responded === 'none' && prev.responded && prev.responded !== 'none') inv.responded = prev.responded;
+        }
         inv.__localActivity = (prev.activity || []).filter(function(x){ return x && x.at; });
       });
       state.invoices = invoices;
@@ -3055,11 +3094,24 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     if(document.body.classList.contains('sheet-fullscreen')){ wrap.style.maxHeight = ''; return; }
     wrap.style.maxHeight = Math.max(480, window.innerHeight - 100) + 'px';
   }
+  // Full screen asks the browser for the real thing (the whole monitor, like
+  // F11) and lays the ledger over the window; if the browser refuses, the
+  // ledger still fills the window. Esc or the Exit button leaves both.
   function sheetFullscreen(on){
     document.body.classList.toggle('sheet-fullscreen', !!on);
     fitSheetWrap();
-    if(on){ const wrap = document.getElementById('sheet-wrap'); if(wrap) wrap.focus && wrap.focus(); }
+    const root = document.documentElement;
+    if(on){
+      const wrap = document.getElementById('sheet-wrap'); if(wrap) wrap.focus && wrap.focus();
+      try { if (!document.fullscreenElement && root.requestFullscreen) { const p = root.requestFullscreen(); if (p && p.catch) p.catch(function(){}); } } catch(e) {}
+    } else {
+      try { if (document.fullscreenElement && document.exitFullscreen) { const p = document.exitFullscreen(); if (p && p.catch) p.catch(function(){}); } } catch(e) {}
+    }
   }
+  document.addEventListener('fullscreenchange', function(){
+    // The browser left full screen (Esc, F11, another app): drop the overlay too.
+    if (!document.fullscreenElement && document.body.classList.contains('sheet-fullscreen')) { document.body.classList.remove('sheet-fullscreen'); fitSheetWrap(); }
+  });
   // Opening the tab brings the ledger's toolbar to the top of the window so
   // the box above the fold is the whole sheet.
   function scrollSheetIntoPlace(){
@@ -3612,17 +3664,20 @@ saveState(); renderAll();
   // (QuickBooks-only workspaces): the ledger a collections desk actually works
   // from, with the free-text columns editable in place.
   const TRACKER_COLS = ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?', 'Response Summary', 'Notes', 'Last Follow-Up', 'Projected Collection', 'Payment Type', 'Sent to Collections'];
+  // A follow-up timestamp is shown on the calendar day it happened here (a
+  // send at 10 pm Central is today, not tomorrow's UTC date).
+  function followUpDay(ts){ const d = new Date(ts); return isNaN(d.getTime()) ? String(ts).slice(0, 10) : localDay(d); }
   function lastFollowUpHTML(inv){
     if (!inv.lastFollowUpAt) return '<span style="color:var(--slate-soft);">\u2014</span>';
     const kind = { followup: 'Follow-up', demand: 'Demand letter', demand_letter: 'Demand letter', noil: 'NOIL', first_contact: 'First contact' }[inv.lastFollowUpKind] || (inv.lastFollowUpKind ? hEsc(inv.lastFollowUpKind) : 'Follow-up');
-    return '<div style="white-space:nowrap;">' + fmtDate(String(inv.lastFollowUpAt).slice(0, 10)) + '</div><div style="font-size:11px;color:var(--slate);">' + kind + (inv.lastFollowUpBy ? ' \u00b7 by ' + hEsc(inv.lastFollowUpBy) : '') + '</div>';
+    return '<div style="white-space:nowrap;">' + fmtDate(followUpDay(inv.lastFollowUpAt)) + '</div><div style="font-size:11px;color:var(--slate);">' + kind + (inv.lastFollowUpBy ? ' \u00b7 by ' + hEsc(inv.lastFollowUpBy) : '') + '</div>';
   }
   // One-line tracker summary on queue/escalation cards for operating-company
   // workspaces (replaces the restoration "last on site" line).
   function trackerLineHTML(inv){
     const bits = [];
     if (inv.contactInfo) bits.push('<span title="Point of contact">\u260E ' + hEsc(String(inv.contactInfo).split(/\n/)[0].slice(0, 60)) + '</span>');
-    if (inv.lastFollowUpAt) bits.push('<span title="Last follow-up">Last follow-up ' + fmtDate(String(inv.lastFollowUpAt).slice(0,10)) + (inv.lastFollowUpBy ? ' by ' + hEsc(inv.lastFollowUpBy) : '') + '</span>');
+    if (inv.lastFollowUpAt) bits.push('<span title="Last follow-up">Last follow-up ' + fmtDate(followUpDay(inv.lastFollowUpAt)) + (inv.lastFollowUpBy ? ' by ' + hEsc(inv.lastFollowUpBy) : '') + '</span>');
     if (inv.projectedPaymentDate) bits.push('<span title="Projected collection date">Expected ' + fmtDate(inv.projectedPaymentDate) + (inv.paymentType ? ' via ' + hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType) : '') + '</span>');
     if (!bits.length) return '';
     return '<div class="onsite-line" style="gap:10px;flex-wrap:wrap;">' + bits.join('<span style="color:var(--slate-soft);">\u00b7</span>') + '</div>';
@@ -3672,6 +3727,72 @@ saveState(); renderAll();
     // Re-render everything except the sheet so the textarea keeps focus order.
     renderNavCounts(); renderQueue();
   }
+  // Accounts Receivable search / invoice-date range / sort / show. Kept in
+  // state so they survive a refresh; the inputs are only written when they
+  // differ, so typing is never interrupted by a background render.
+  const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'days-desc': 1, 'collections': 1 };
+  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1 };
+  function sheetSearchValue(){
+    const box = document.getElementById('sheet-search');
+    if (!box) return String(state.sheetSearch || '');
+    let v = String(box.value || '');
+    let filled = false;
+    try { filled = box.matches(':-webkit-autofill') || box.matches(':autofill'); } catch (e) { filled = false; }
+    const myEmail = (state.currentUser && state.currentUser.email) ? String(state.currentUser.email).toLowerCase() : '';
+    if (filled || (myEmail && v.trim().toLowerCase() === myEmail)) { box.value = ''; v = ''; }
+    return v;
+  }
+  function setSheetSearch(v){ state.sheetSearch = String(v || ''); saveState(); renderSheet(); }
+  function setSheetDate(which, v){ const key = which === 'to' ? 'sheetDateTo' : 'sheetDateFrom'; state[key] = /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : ''; saveState(); renderSheet(); }
+  function setSheetSort(v){ state.sheetSort = SHEET_SORTS[v] ? v : 'name-asc'; saveState(); renderSheet(); }
+  function setSheetShow(v){ state.sheetShow = SHEET_SHOWS[v] ? v : 'all'; saveState(); renderSheet(); }
+  function clearSheetFilters(){
+    state.sheetSearch = ''; state.sheetDateFrom = ''; state.sheetDateTo = ''; state.sheetShow = 'all';
+    const box = document.getElementById('sheet-search'); if (box) box.value = '';
+    saveState(); renderSheet();
+  }
+  function syncSheetControls(){
+    const box = document.getElementById('sheet-search');
+    if (box) { const typed = sheetSearchValue(); if (document.activeElement === box) state.sheetSearch = typed; else if (box.value !== String(state.sheetSearch || '')) box.value = String(state.sheetSearch || ''); }
+    const from = document.getElementById('sheet-date-from'); if (from && from.value !== (state.sheetDateFrom || '')) from.value = state.sheetDateFrom || '';
+    const to = document.getElementById('sheet-date-to'); if (to && to.value !== (state.sheetDateTo || '')) to.value = state.sheetDateTo || '';
+    const sort = document.getElementById('sheet-sort'); if (sort && sort.value !== (state.sheetSort || 'name-asc')) sort.value = SHEET_SORTS[state.sheetSort] ? state.sheetSort : 'name-asc';
+    const show = document.getElementById('sheet-show'); if (show && show.value !== (state.sheetShow || 'all')) show.value = SHEET_SHOWS[state.sheetShow] ? state.sheetShow : 'all';
+    const clear = document.getElementById('sheet-clear');
+    if (clear) clear.style.display = (state.sheetSearch || state.sheetDateFrom || state.sheetDateTo || (state.sheetShow && state.sheetShow !== 'all')) ? '' : 'none';
+  }
+  function matchesSheetFilters(inv){
+    const q = String(state.sheetSearch || '').trim().toLowerCase();
+    if (q) {
+      const hay = [inv.name, inv.invoiceNumber, inv.contact, inv.contactInfo, inv.contactEmail, inv.claimNumber, inv.meta].map(function(x){ return String(x || '').toLowerCase(); }).join(' \u0001 ');
+      if (hay.indexOf(q) === -1) return false;
+    }
+    const day = inv.invoiceDate ? String(inv.invoiceDate).slice(0, 10) : '';
+    if (state.sheetDateFrom && (!day || day < state.sheetDateFrom)) return false;
+    if (state.sheetDateTo && (!day || day > state.sheetDateTo)) return false;
+    const show = state.sheetShow || 'all';
+    if (show === 'collections' && !isDoNotContact(inv)) return false;
+    if (show === 'not-collections' && isDoNotContact(inv)) return false;
+    if (show === 'replied' && inv.responded !== 'replied') return false;
+    if (show === 'no-reply' && inv.responded === 'replied') return false;
+    return true;
+  }
+  function sortSheetRows(rows){
+    const mode = SHEET_SORTS[state.sheetSort] ? state.sheetSort : 'name-asc';
+    const byName = function(a, b){ return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }); };
+    const byDate = function(a, b){ return String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || '')); };
+    return rows.slice().sort(function(a, b){
+      switch (mode) {
+        case 'name-desc': return byName(b, a) || byDate(b, a);
+        case 'date-desc': return byDate(b, a) || byName(a, b);
+        case 'date-asc': return byDate(a, b) || byName(a, b);
+        case 'amount-desc': return (balanceDue(b) - balanceDue(a)) || byName(a, b);
+        case 'days-desc': return (agingDays(b) - agingDays(a)) || byName(a, b);
+        case 'collections': return ((isDoNotContact(b) ? 1 : 0) - (isDoNotContact(a) ? 1 : 0)) || byName(a, b);
+        default: return byName(a, b) || byDate(b, a);
+      }
+    });
+  }
   function renderSheet(){
     const body = document.getElementById('sheet-body');
     const head = document.getElementById('sheet-head');
@@ -3696,8 +3817,12 @@ saveState(); renderAll();
     });
     const foot = document.getElementById('sheet-foot');
 
-    const rows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter).slice().sort((a,b)=>balanceDue(b)-balanceDue(a));
-    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center;padding:24px;color:var(--slate);">${realEmptyQueueMessage() || 'No open invoices match the current filters. Paid invoices have moved to the Collected tab.'}</td></tr>`; if(foot) foot.innerHTML = ''; return; }
+    syncSheetControls();
+    const openRows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter);
+    const rows = sortSheetRows(openRows.filter(matchesSheetFilters));
+    const countEl = document.getElementById('sheet-count');
+    if (countEl) countEl.textContent = rows.length === openRows.length ? (rows.length + ' invoice' + (rows.length === 1 ? '' : 's')) : (rows.length + ' of ' + openRows.length + ' invoices');
+    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center;padding:24px;color:var(--slate);">${(openRows.length ? 'No open invoices match your search or filters.' : (realEmptyQueueMessage() || 'No open invoices match the current filters. Paid invoices have moved to the Collected tab.'))}</td></tr>`; if(foot) foot.innerHTML = ''; return; }
     // Totals for exactly the rows on screen, so the number always matches the table.
     if(foot){
       const totalInvoiced = rows.reduce(function(sum, i){ return sum + (Number(i.amount) || 0); }, 0);
@@ -3772,7 +3897,7 @@ saveState(); renderAll();
   function setWaSigned(id, checked){
     const inv = findInv(id);
     if(!inv) return;
-    setSignatureDate(id, 'waSignedDate', checked ? isoDate(new Date()) : '');
+    setSignatureDate(id, 'waSignedDate', checked ? localDay() : '');
     const tile = document.getElementById('hist-wa-tile');
     if(tile){ const tmp = document.createElement('div'); tmp.innerHTML = waSignedTile(inv); tile.replaceWith(tmp.firstChild); }
   }
@@ -4335,7 +4460,7 @@ saveState(); renderAll();
     if(!inv){ showToast('No open invoice selected.'); return; }
     const remaining = Math.max(0, inv.amount - (inv.amountPaid || 0));
     recordPayment(state, inv, {
-      method: 'wire', amount: remaining, paidDate: isoDate(new Date()),
+      method: 'wire', amount: remaining, paidDate: localDay(),
       payerName: inv.name, memo: 'Posted automatically via NetSuite bank feed.', source: 'automation'
     });
     saveState(); renderAll();
@@ -4452,7 +4577,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       }
 
       const now = new Date();
-      inv.lastContact = isoDate(now);
+      inv.lastContact = localDay(now);
       inv.responded = 'replied';
       inv.responseSummary = text;
       state.responsesLog.unshift({
@@ -4674,7 +4799,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     try {
       let summary = text.replace(/\s+/g, ' ').slice(0, 220);
       if (isRemoteInvoice(inv)) {
-        const res = await fetch('/api/invoices/reply', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: inv.id, emailText: text, from: from }) });
+        const res = await fetch('/api/invoices/reply', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: inv.id, emailText: text, from: from, localDate: localDay() }) });
         const d = await res.json().catch(function(){ return null; });
         if (!res.ok || !d || !d.ok) { msg.textContent = (d && d.error) || 'Could not save that reply.'; btn.disabled = false; return; }
         summary = d.summary; inv.lastContact = d.lastContact || inv.lastContact;
@@ -4807,7 +4932,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
           kv('Business', hEsc(deptLabel(inv))) +
           kv('Invoice age', agingDays(inv) + ' days') +
           kv('Last contact', inv.lastContact ? fmtDate(inv.lastContact) : 'None yet', !inv.lastContact) +
-          kv('Last follow-up', inv.lastFollowUpAt ? (fmtDate(String(inv.lastFollowUpAt).slice(0,10)) + (inv.lastFollowUpBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.lastFollowUpBy) + '</div>' : '')) : 'None yet', !inv.lastFollowUpAt) +
+          kv('Last follow-up', inv.lastFollowUpAt ? (fmtDate(followUpDay(inv.lastFollowUpAt)) + (inv.lastFollowUpBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.lastFollowUpBy) + '</div>' : '')) : 'None yet', !inv.lastFollowUpAt) +
           kv('Projected collection', inv.projectedPaymentDate ? fmtDate(inv.projectedPaymentDate) : 'Not set', !inv.projectedPaymentDate) +
           kv('Payment type', hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType || 'Not set'), !inv.paymentType) +
           kv('Notes', inv.note ? hEsc(inv.note).replace(/\n/g, '<br>') : 'None', !inv.note);
@@ -5591,7 +5716,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('payment-form-sub').textContent = `${inv.name} \u00b7 Balance due: $${remaining.toLocaleString(undefined,{minimumFractionDigits:2})}`;
     document.getElementById('pf-method').value = 'check';
     document.getElementById('pf-amount').value = remaining.toFixed(2);
-    document.getElementById('pf-date').value = isoDate(new Date());
+    document.getElementById('pf-date').value = localDay();
     document.getElementById('pf-payer').value = inv.name;
     document.getElementById('pf-checknum').value = '';
     document.getElementById('pf-refnum').value = '';
@@ -5616,11 +5741,11 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const owed = Math.round(balanceDue(inv) * 100) / 100;
     if(amount > owed + 0.005){ showToast('That is more than the $' + owed.toLocaleString(undefined,{minimumFractionDigits:2}) + ' still due on this invoice.'); return; }
     const paidDateRaw = document.getElementById('pf-date').value;
-    if(paidDateRaw && paidDateRaw > isoDate(new Date())){ showToast('The deposit date cannot be in the future.'); return; }
+    if(paidDateRaw && paidDateRaw > localDay()){ showToast('The deposit date cannot be in the future.'); return; }
     const details = {
       method: document.getElementById('pf-method').value,
       amount,
-      paidDate: document.getElementById('pf-date').value || isoDate(new Date()),
+      paidDate: document.getElementById('pf-date').value || localDay(),
       payerName: document.getElementById('pf-payer').value.trim() || inv.name,
       checkNumber: document.getElementById('pf-checknum').value.trim(),
       referenceNumber: document.getElementById('pf-refnum').value.trim(),
@@ -6185,7 +6310,7 @@ Do not invent facts beyond what's given.`;
     const now = new Date();
 
     inv.followups += 1;
-    inv.lastContact = isoDate(now);
+    inv.lastContact = localDay(now);
     inv.responded = status;
     // The Last Follow-Up column shows the send and who made it right away.
     inv.lastFollowUpAt = now.toISOString();
@@ -6500,6 +6625,7 @@ Do not invent facts beyond what's given.`;
         body: bodyText,
         draftType: currentDraftType,
         recipient: currentRecipient,
+        localDate: localDay(),
         documentIds: selectedDocs().filter(function(d){ return d.remote && /^[0-9]+$/.test(String(d.id)); }).map(function(d){ return d.id; }),
         cc: (function(){ const el = document.getElementById('draft-cc'); return el ? el.value : ''; })()
       })
@@ -6507,8 +6633,12 @@ Do not invent facts beyond what's given.`;
       approveBtn.disabled = false;
       approveBtn.textContent = "Approve & Send";
       if(!res || !res.ok){
-        if (res && (res.code === 'connect_email' || res.needsReconnect)) { showSenderBanner(true); showConnectEmailPrompt(res.error); return; }
-        showToast((res && res.error) || 'The email could not be sent.');
+        // Nothing went out, so nothing on the dashboard changes. Say so where
+        // the person is looking - inside the drawer - not only in a toast.
+        const needsEmail = !!(res && (res.code === 'connect_email' || res.needsReconnect));
+        showSendRefused((res && res.error) || 'The email could not be sent.', needsEmail);
+        if (needsEmail) { showSenderBanner(true); showConnectEmailPrompt(res.error); }
+        else showToast((res && res.error) || 'The email could not be sent.');
         return;
       }
       recordSend(inv, currentDraftType, bodyText, 'manual', currentRecipient, subject);
@@ -6525,8 +6655,16 @@ Do not invent facts beyond what's given.`;
     }).catch(function(){
       approveBtn.disabled = false;
       approveBtn.textContent = "Approve & Send";
+      showSendRefused('The email could not be sent. Please try again.', false);
       showToast('The email could not be sent. Please try again.');
     });
+  }
+  function showSendRefused(msg, needsEmail){
+    const errBox = document.getElementById('err'); if(!errBox) return;
+    errBox.innerHTML = '<b>Nothing was sent.</b> ' + hEsc(msg || '') +
+      (needsEmail ? ' <a class="btn-small" href="/account#email" style="margin-left:8px;text-decoration:none;">Connect my email</a>' : '');
+    errBox.style.display = 'block';
+    try { errBox.scrollIntoView({ block: 'nearest' }); } catch(e) {}
   }
 
   /* ============================================================

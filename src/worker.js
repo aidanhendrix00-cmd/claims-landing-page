@@ -5358,7 +5358,7 @@ return json({ ok: false, error: (result && result.error) || 'The email could not
 const now = new Date();
 await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), {
 follow_up_count: (parseInt(full.follow_up_count, 10) || 0) + 1,
-last_contact: now.toISOString().slice(0, 10),
+last_contact: clientDay(body.localDate, now),
 responded: full.responded && full.responded !== 'none' ? full.responded : 'sent',
 last_follow_up_at: now.toISOString(),
 last_follow_up_by: String(user.full_name || user.email || '').slice(0, 160),
@@ -5781,6 +5781,18 @@ return { ok: true, via: 'microsoft' };
 }
 return { ok: false, error: 'Unsupported mail provider.' };
 } catch (e) { return { ok: false, error: String(e) }; }
+}
+// The calendar day a dashboard action happened where the user is: the page
+// sends its local date, which is used when it is within a day of the server's
+// clock (otherwise the UTC day). Last Contact then reads as the day the person
+// actually sent or logged something, not tomorrow's date for an evening send.
+function clientDay(localDate, now) {
+const base = (now || new Date());
+const utcDay = base.toISOString().slice(0, 10);
+const v = String(localDate || '').trim();
+if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return utcDay;
+const diff = Math.abs(new Date(v + 'T00:00:00Z').getTime() - new Date(utcDay + 'T00:00:00Z').getTime());
+return diff <= 86400000 ? v : utcDay;
 }
 async function mailboxForUser(env, user) {
 return await pgSelectOne(env, 'user_mailboxes', 'user_id=' + pgEq(user.id) + '&status=' + pgEq('connected') + '&select=*') || null;
@@ -8448,8 +8460,9 @@ if (text.length < 5) return json({ ok: false, error: 'Paste the email you receiv
 const from = String(body.from || '').trim().slice(0, 160);
 const receivedAt = body.receivedAt ? new Date(body.receivedAt) : new Date();
 const when = isNaN(receivedAt.getTime()) ? new Date() : receivedAt;
+const contactDay = body.receivedAt && !isNaN(receivedAt.getTime()) ? when.toISOString().slice(0, 10) : clientDay(body.localDate, when);
 const result = await summarizeReplyText(env, text, account);
-await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), { response_summary: result.summary, responded: 'replied', last_contact: when.toISOString().slice(0, 10), updated_at: new Date().toISOString() });
+await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), { response_summary: result.summary, responded: 'replied', last_contact: contactDay, updated_at: new Date().toISOString() });
 try {
 await pgInsert(env, 'account_notes', { occurred_at: when.toISOString(), tenant_id: user.tenant_id, account_id: account.id,
 body: ('Reply received' + (from ? ' from ' + from : '') + ':\n\n' + text).slice(0, 4000), author_name: user.full_name || user.email || 'Team member', source: 'reply' });
