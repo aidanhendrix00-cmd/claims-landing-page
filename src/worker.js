@@ -717,6 +717,9 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   // the same endpoints the dashboard uses, so a report always matches the
   // screen at the moment it is run.
   var R = { me: null, accounts: null, payments: null, comms: null, activity: null, loading: null, lastRows: null, lastCols: null, lastTitle: '' };
+  // What is picked on the page. Report and Status take one value; City,
+  // Business and Payer take any number (none picked = all).
+  var SEL = { type: 'queue', city: [], biz: [], payer: [], status: 'all' };
   var EM = '—';
   function $(id){ return document.getElementById(id); }
   function esc(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -764,27 +767,57 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   }
   function msg(t, ok){ var el = $('rptMsg'); if(!el) return; el.style.display = t ? 'block' : 'none'; el.style.color = ok ? '#1F5346' : '#8A1C13'; el.textContent = t || ''; }
 
+  // Every choice is a row of buttons you click, not a drop-down: what is
+  // picked is always visible, and City / Business / Payer take several.
+  var STATUS_OPTS = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', 'Sent to collections'], ['escalated', 'Escalated'], ['replied', 'Replied']];
+  var PAYER_OPTS = [['insurance', 'Insurance'], ['pm', 'Commercial or Property Management'], ['private', 'Private Pay']];
+  function chipRow(id, opts, picked, multi, allLabel){
+    var el = $(id); if(!el) return;
+    var isOn = function(k){ return multi ? picked.indexOf(k) !== -1 : picked === k; };
+    var html = multi ? ('<button type="button" class="rpt-chip' + (picked.length ? '' : ' active') + '" data-key="all">' + esc(allLabel || 'All') + '</button>') : '';
+    html += opts.map(function(o){ return '<button type="button" class="rpt-chip' + (multi ? ' multi' : '') + (isOn(o[0]) ? ' active' : '') + '" data-key="' + esc(o[0]) + '">' + esc(o[1]) + '</button>'; }).join('');
+    el.innerHTML = html;
+  }
   function fillSelects(){
     var me = R.me || {};
-    var city = $('rptCity'), biz = $('rptBiz');
     var cityWordV = cityWord(), bizWordV = bizWord();
     $('rptCityLabel').textContent = cityWordV; $('rptBizLabel').textContent = bizWordV;
-    city.innerHTML = '<option value="all">All ' + esc(cityWordV.toLowerCase() === 'city' ? 'cities' : 'offices') + '</option>' + Object.keys(me.offices || {}).map(function(k){ return '<option value="' + esc(k) + '">' + esc(me.offices[k]) + '</option>'; }).join('');
-    biz.innerHTML = '<option value="all">All ' + esc(bizWordV.toLowerCase() === 'business' ? 'businesses' : 'departments') + '</option>' + Object.keys(me.departments || {}).map(function(k){ return '<option value="' + esc(k) + '">' + esc(me.departments[k]) + '</option>'; }).join('');
-    var type = $('rptType');
-    type.innerHTML = Object.keys(REPORTS).filter(function(k){ return !REPORTS[k].adminOnly || (me.role === 'admin'); }).map(function(k){ return '<option value="' + k + '">' + esc(REPORTS[k].label) + '</option>'; }).join('');
+    var cities = Object.keys(me.offices || {}).map(function(k){ return [k, me.offices[k]]; });
+    var bizs = Object.keys(me.departments || {}).map(function(k){ return [k, me.departments[k]]; });
+    SEL.city = SEL.city.filter(function(k){ return !!(me.offices || {})[k]; });
+    SEL.biz = SEL.biz.filter(function(k){ return !!(me.departments || {})[k]; });
+    var types = Object.keys(REPORTS).filter(function(k){ return !REPORTS[k].adminOnly || (me.role === 'admin'); });
+    if(types.indexOf(SEL.type) === -1) SEL.type = types[0];
+    chipRow('rptType', types.map(function(k){ return [k, REPORTS[k].label]; }), SEL.type, false);
+    chipRow('rptCity', cities, SEL.city, true, 'All ' + (cityWordV === 'City' ? 'cities' : 'offices'));
+    chipRow('rptBiz', bizs, SEL.biz, true, 'All ' + (bizWordV === 'Business' ? 'businesses' : 'departments'));
+    chipRow('rptPayer', PAYER_OPTS, SEL.payer, true, 'All payers');
+    chipRow('rptStatus', STATUS_OPTS, SEL.status, false);
     syncDateLabel();
   }
-  function syncDateLabel(){ var k = $('rptType').value; var el = $('rptDateLabel'); if(el) el.textContent = (REPORTS[k] && REPORTS[k].dateField) || 'Date'; }
-  function filters(){
-    return { type: $('rptType').value, city: $('rptCity').value, biz: $('rptBiz').value, payer: $('rptPayer').value, status: $('rptStatus').value, from: $('rptFrom').value, to: $('rptTo').value };
+  function pick(group, key){
+    if(group === 'type'){ SEL.type = key; }
+    else if(group === 'status'){ SEL.status = key; }
+    else {
+      if(key === 'all') SEL[group] = [];
+      else { var i = SEL[group].indexOf(key); if(i === -1) SEL[group].push(key); else SEL[group].splice(i, 1); }
+    }
+    fillSelects();
   }
+  function wireChips(){
+    [['rptType', 'type'], ['rptCity', 'city'], ['rptBiz', 'biz'], ['rptPayer', 'payer'], ['rptStatus', 'status']].forEach(function(pair){
+      var el = $(pair[0]); if(!el) return;
+      el.addEventListener('click', function(e){ var b = e.target && e.target.closest ? e.target.closest('.rpt-chip') : null; if(!b || !el.contains(b)) return; pick(pair[1], b.getAttribute('data-key')); });
+    });
+  }
+  function syncDateLabel(){ var k = SEL.type; var el = $('rptDateLabel'); if(el) el.textContent = (REPORTS[k] && REPORTS[k].dateField) || 'Date'; }
+  function filters(){
+    return { type: SEL.type, city: SEL.city.length ? SEL.city.slice() : 'all', biz: SEL.biz.length ? SEL.biz.slice() : 'all', payer: SEL.payer.length ? SEL.payer.slice() : 'all', status: SEL.status, from: $('rptFrom').value, to: $('rptTo').value };
+  }
+  function hits(filter, value){ return filter === 'all' || filter.indexOf(String(value || '')) !== -1; }
   function inRange(d, f){ var s = day(d); if(f.from && (!s || s < f.from)) return false; if(f.to && (!s || s > f.to)) return false; return true; }
   function accountMatches(a, f){
-    if(f.city !== 'all' && String(a.officeLocation || '') !== f.city) return false;
-    if(f.biz !== 'all' && String(a.department || '') !== f.biz) return false;
-    if(f.payer !== 'all' && String(a.payer || '') !== f.payer) return false;
-    return true;
+    return hits(f.city, a.officeLocation) && hits(f.biz, a.department) && hits(f.payer, a.payer);
   }
   function statusMatches(a, f){
     var paid = isPaid(a);
@@ -857,7 +890,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       rows = cm.map(function(x){ var c = x.c; return [fmtWhen(c.at), c.accountName || (x.a && x.a.name) || '', c.invoiceNumber || (x.a && x.a.invoiceNumber) || '', officeLabel(c.office || (x.a && x.a.officeLocation)), deptLabel(c.department || (x.a && x.a.department)), c.label || c.kind || '', [c.recipientRole, c.recipientEmail].filter(Boolean).join(' · '), c.subject || '', String(c.status || '').replace(/_/g, ' '), c.source === 'automation' ? 'Automated' : 'Manual', c.senderName || c.sentBy || (c.source === 'automation' ? 'clAIms automation' : '')]; });
       foot = cm.length + ' message' + (cm.length === 1 ? '' : 's');
     } else if(f.type === 'activity'){
-      var act = (R.activity || []).filter(function(r){ var a = r.accountId ? byId[String(r.accountId)] : null; if(f.city !== 'all' && String(r.office || (a && a.officeLocation) || '') !== f.city) return false; if(f.biz !== 'all' && (!a || String(a.department || '') !== f.biz)) return false; if(f.payer !== 'all' && (!a || String(a.payer || '') !== f.payer)) return false; return inRange(r.at, f); });
+      var act = (R.activity || []).filter(function(r){ var a = r.accountId ? byId[String(r.accountId)] : null; if(!hits(f.city, r.office || (a && a.officeLocation))) return false; if(f.biz !== 'all' && (!a || !hits(f.biz, a.department))) return false; if(f.payer !== 'all' && (!a || !hits(f.payer, a.payer))) return false; return inRange(r.at, f); });
       act.sort(function(x, y){ return String(y.at || '').localeCompare(String(x.at || '')); });
       cols = ['When', 'Who', 'Role', cityWord(), 'Type', 'Account', 'Invoice #', 'What happened'];
       rows = act.map(function(r){ return [fmtWhen(r.at), r.actor || '', r.role || '', officeLabel(r.office), String(r.type || '').replace(/_/g, ' '), r.customer || '', r.invoiceNumber || '', r.summary || '']; });
@@ -868,9 +901,9 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   function totals(list){ var inv = 0, paid = 0, due = 0; list.forEach(function(a){ inv += Number(a.amount || 0); paid += Number(a.paidAmount || 0); due += balance(a); }); return list.length + ' invoice' + (list.length === 1 ? '' : 's') + ' · ' + money(inv) + ' invoiced · ' + money(paid) + ' paid · ' + money(due) + ' still due'; }
   function subtitle(f){
     var bits = [];
-    bits.push(f.city === 'all' ? ('All ' + (cityWord() === 'City' ? 'cities' : 'offices')) : officeLabel(f.city));
-    bits.push(f.biz === 'all' ? ('All ' + (bizWord() === 'Business' ? 'businesses' : 'departments')) : deptLabel(f.biz));
-    if(f.payer !== 'all') bits.push(PAYER[f.payer] || f.payer);
+    bits.push(f.city === 'all' ? ('All ' + (cityWord() === 'City' ? 'cities' : 'offices')) : f.city.map(officeLabel).join(', '));
+    bits.push(f.biz === 'all' ? ('All ' + (bizWord() === 'Business' ? 'businesses' : 'departments')) : f.biz.map(deptLabel).join(', '));
+    if(f.payer !== 'all') bits.push(f.payer.map(function(p){ return PAYER[p] || p; }).join(', '));
     if(f.status !== 'all') bits.push({ open: 'Open only', paid: 'Paid only', collections: 'Sent to collections', escalated: 'Escalated', replied: 'Replied' }[f.status] || f.status);
     if(f.from || f.to) bits.push((REPORTS[f.type].dateField || 'Date') + ' ' + (f.from ? fmtDay(f.from) : 'start') + ' – ' + (f.to ? fmtDay(f.to) : 'today'));
     return bits.join(' · ');
@@ -962,7 +995,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   }
   function init(){
     if(!$('rptType')) return;
-    $('rptType').addEventListener('change', syncDateLabel);
+    wireChips();
     $('rptRun').addEventListener('click', run);
     $('rptCsv').addEventListener('click', exportCsv);
     $('rptXlsx').addEventListener('click', exportXlsx);
@@ -971,7 +1004,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     fetch('/api/me', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){ if(d && d.ok){ R.me = d; fillSelects(); } }).catch(function(){});
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-  window.__clmsReports = { run: run, build: build, filters: filters, _R: R };
+  window.__clmsReports = { run: run, build: build, filters: filters, pick: pick, _R: R, _SEL: SEL };
 })();
 </script>`;
 
@@ -1026,8 +1059,12 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   'table.acct-table td{padding:12px 12px;border-bottom:1px solid #F0EDE3;vertical-align:middle;} ' +
   'table.acct-table tr:last-child td{border-bottom:none;} ' +
   '.filters-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;} ' +
-  '.rpt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 20px;} ' +
-  '.rpt-select{width:100%;font:inherit;font-size:13.5px;padding:8px 10px;border:1px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
+  '.rpt-fields{display:flex;flex-direction:column;gap:14px;} ' +
+  '.rpt-chips{display:flex;flex-wrap:wrap;gap:6px;padding-top:2px;} ' +
+  '.rpt-chip{font-family:inherit;font-size:12.5px;font-weight:600;padding:6px 13px;border-radius:20px;border:1px solid #E5E0D2;background:#fff;color:#615D53;cursor:pointer;transition:all .12s ease;} ' +
+  '.rpt-chip:hover{border-color:#171717;color:#171717;} ' +
+  '.rpt-chip.active{background:#171717;border-color:#171717;color:#fff;} ' +
+  '.rpt-chip.multi.active::before{content:"\\2713";margin-right:6px;font-size:11px;} ' +
   '.rpt-range{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} ' +
   '.rpt-range input{font:inherit;font-size:13px;padding:7px 9px;border:1px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
   '.rpt-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;} ' +
@@ -1039,7 +1076,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '.rpt-table th,.rpt-table td{padding:7px 9px;white-space:nowrap;} ' +
   '.rpt-table td{max-width:320px;overflow:hidden;text-overflow:ellipsis;} ' +
   '.rpt-foot{margin-top:10px;font-weight:700;font-size:13px;} ' +
-  '@media (max-width:760px){.rpt-grid{grid-template-columns:1fr;}} ' +
+  '@media (max-width:760px){.rpt-chips{gap:5px;}} ' +
   '.filters-row select{font-family:inherit;font-size:13px;padding:9px 12px;border:1.5px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
   '.team-name-cell{display:flex;align-items:center;gap:10px;} ' +
   '.team-avatar{width:32px;height:32px;border-radius:50%;background:#F0EDE3;color:#615D53;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;} ' +
@@ -1284,12 +1321,12 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-card"> ' +
   '<h3>Reports</h3> ' +
   '<div class="acct-card-sub">Run any dashboard tab as a report, narrowed to a city, business, payer, status and date range, then download it as a PDF or a spreadsheet. Reports read the same live data the dashboard shows.</div> ' +
-  '<div class="rpt-grid"> ' +
-  '<div class="acct-field"><label>Report</label><select id="rptType" class="rpt-select"></select></div> ' +
-  '<div class="acct-field"><label id="rptCityLabel">City</label><select id="rptCity" class="rpt-select"><option value="all">All</option></select></div> ' +
-  '<div class="acct-field"><label id="rptBizLabel">Business</label><select id="rptBiz" class="rpt-select"><option value="all">All</option></select></div> ' +
-  '<div class="acct-field"><label>Payer</label><select id="rptPayer" class="rpt-select"><option value="all">All payers</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="private">Private Pay</option></select></div> ' +
-  '<div class="acct-field"><label>Status</label><select id="rptStatus" class="rpt-select"><option value="all">Default for the report</option><option value="open">Open only</option><option value="paid">Paid only</option><option value="collections">Sent to collections</option><option value="escalated">Escalated</option><option value="replied">Replied</option></select></div> ' +
+  '<div class="rpt-fields"> ' +
+  '<div class="acct-field"><label>Report</label><div class="rpt-chips" id="rptType"></div></div> ' +
+  '<div class="acct-field"><label id="rptCityLabel">City</label><div class="rpt-chips" id="rptCity"></div></div> ' +
+  '<div class="acct-field"><label id="rptBizLabel">Business</label><div class="rpt-chips" id="rptBiz"></div></div> ' +
+  '<div class="acct-field"><label>Payer</label><div class="rpt-chips" id="rptPayer"></div></div> ' +
+  '<div class="acct-field"><label>Status</label><div class="rpt-chips" id="rptStatus"></div></div> ' +
   '<div class="acct-field"><label><span id="rptDateLabel">Date</span> range</label><div class="rpt-range"><input type="date" id="rptFrom"><span>to</span><input type="date" id="rptTo"></div><div class="rpt-presets"><button type="button" class="btn-outline btn-sm" data-rpt-range="month">This month</button><button type="button" class="btn-outline btn-sm" data-rpt-range="last-month">Last month</button><button type="button" class="btn-outline btn-sm" data-rpt-range="quarter">This quarter</button><button type="button" class="btn-outline btn-sm" data-rpt-range="year">This year</button><button type="button" class="btn-outline btn-sm" data-rpt-range="30">Last 30 days</button><button type="button" class="btn-outline btn-sm" data-rpt-range="all">All time</button></div></div> ' +
   '</div> ' +
   '<div class="rpt-actions"><button class="btn-dark" id="rptRun">Run report</button><div id="rptExports" style="display:none;"><span>Download:</span><button type="button" class="btn-outline btn-sm" id="rptPdf">PDF</button><button type="button" class="btn-outline btn-sm" id="rptXlsx">Spreadsheet (.xlsx)</button><button type="button" class="btn-outline btn-sm" id="rptCsv">CSV</button></div></div> ' +
