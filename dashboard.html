@@ -274,6 +274,11 @@
   .chart-col{display:flex;flex-direction:column;align-items:center;cursor:pointer;width:120px;}
   .chart-col.selected .chart-bar{box-shadow:0 0 0 2px var(--ink);}
   .chart-col.selected .chart-office-label{color:var(--ink);font-weight:700;}
+  .mtd-filters{display:flex;flex-direction:column;gap:8px;margin:0 0 16px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;}
+  .mtd-filter-group{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;}
+  .mtd-filter-group .wf-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--slate-soft);min-width:80px;padding-top:7px;}
+  .mtd-filter-group .chips{flex:1;}
+  .chip.multi.active::before{content:'\2713';margin-right:5px;font-size:10px;}
   .mtd-list-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px;margin:22px 0 0;padding:10px 14px;background:var(--ink);color:#fff;border-radius:10px 10px 0 0;}
   .mtd-list-head h3{margin:0;font-family:var(--font-display);font-size:14px;color:#fff;}
   .mtd-list-head .cnt{font-weight:400;font-size:12px;opacity:.75;margin-left:8px;}
@@ -854,9 +859,18 @@
     <section class="view" id="view-invoicedmtd">
       <div class="topbar"><div><h1>Invoiced Month to Date</h1><p>Synced automatically from NetSuite &amp; your CRM &#8212; sorted by office location, broken down by department</p></div></div>
       <div class="kpis" id="mtd-kpis"></div>
+      <div class="mtd-filters" id="mtd-filters">
+        <div class="mtd-filter-group"><span class="wf-label" id="mtd-city-label">Cities</span><div class="chips" id="mtd-city-chips"></div></div>
+        <div class="mtd-filter-group"><span class="wf-label" id="mtd-dept-label">Businesses</span><div class="chips" id="mtd-dept-chips"></div></div>
+        <div class="hint" style="margin:0;">Pick any number of cities and businesses (or click the bars). The charts, the breakdown and the list below follow the selection.</div>
+      </div>
       <div class="report-card" style="margin-bottom:18px;">
-        <h3>By Office Location</h3>
+        <h3 id="mtd-chart-title">By City</h3>
         <div class="office-chart" id="mtd-chart"></div>
+      </div>
+      <div class="report-card" style="margin-bottom:18px;">
+        <h3 id="mtd-dept-chart-title">By Business</h3>
+        <div class="office-chart" id="mtd-dept-chart"></div>
       </div>
       <div class="report-grid">
         <div class="report-card"><h3>Legend</h3><div class="chart-legend" id="mtd-legend"></div></div>
@@ -914,13 +928,50 @@
         </div>
       </div>
 
-      <div class="section-head" style="margin-top:22px;"><h2>Received</h2></div>
+      <div class="section-head" style="margin-top:22px;"><h2>Received</h2>
+        <div class="toolbar" id="responses-tools">
+          <input class="search" id="resp-search" type="search" name="responses-search" placeholder="Search account or reply\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="setRespFilter('search', this.value)">
+          <select class="sort" id="resp-type" onchange="setRespFilter('type', this.value)" title="In response to"><option value="all">In response to: All</option><option value="Follow-Up">Follow-Up</option><option value="Demand Letter">Demand Letter</option><option value="NOIL">NOIL</option></select>
+          <select class="sort" id="resp-status" onchange="setRespFilter('status', this.value)" title="Job status"><option value="all">Job status: All</option></select>
+          <label class="sheet-date" title="Received between"><span>Received</span><input type="date" id="resp-from" onchange="setRespFilter('from', this.value)"><span>to</span><input type="date" id="resp-to" onchange="setRespFilter('to', this.value)"></label>
+          <select class="sort" id="resp-sort" onchange="setRespFilter('sort', this.value)" title="Order">
+            <option value="date-desc">Sort: Received (newest)</option>
+            <option value="date-asc">Sort: Received (oldest)</option>
+            <option value="amount-desc">Sort: Amount (high\u2013low)</option>
+            <option value="amount-asc">Sort: Amount (low\u2013high)</option>
+            <option value="name-asc">Sort: Account A\u2013Z</option>
+            <option value="type">Sort: In response to</option>
+            <option value="status">Sort: Job status</option>
+          </select>
+          <button type="button" class="btn-small ghost" id="resp-clear" onclick="clearRespFilters()" style="display:none;">Clear</button>
+          <span class="sheet-count" id="resp-count"></span>
+        </div>
+      </div>
       <div id="responses-wrap"></div>
     </section>
 
     <!-- ===================== ESCALATIONS VIEW ===================== -->
     <section class="view" id="view-escalations">
       <div class="topbar"><div><h1>Escalations</h1><p>Invoices pulled out of the autonomous cadence for manager attention</p></div></div>
+      <div class="kpis" id="esc-kpis"></div>
+      <div class="section-head"><h2>Escalated accounts</h2>
+        <div class="toolbar" id="esc-tools">
+          <input class="search" id="esc-search" type="search" name="escalations-search" placeholder="Search escalated accounts\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="setEscFilter('search', this.value)">
+          <select class="sort" id="esc-office" onchange="setEscFilter('office', this.value)"></select>
+          <select class="sort" id="esc-dept" onchange="setEscFilter('dept', this.value)"></select>
+          <select class="sort" id="esc-payer" onchange="setEscFilter('payer', this.value)"><option value="all">Payer: All</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="private">Private Pay</option></select>
+          <select class="sort" id="esc-notified" onchange="setEscFilter('notified', this.value)"><option value="all">Notified: Any</option><option value="yes">Manager notified</option><option value="no">Not yet notified</option></select>
+          <select class="sort" id="esc-sort" onchange="setEscFilter('sort', this.value)">
+            <option value="balance-desc">Sort: Balance (high\u2013low)</option>
+            <option value="days-desc">Sort: Days since contact</option>
+            <option value="age-desc">Sort: Invoice age</option>
+            <option value="name-asc">Sort: Account A\u2013Z</option>
+            <option value="followups-desc">Sort: Follow-ups sent</option>
+          </select>
+          <button type="button" class="btn-small ghost" id="esc-clear" onclick="clearEscFilters()" style="display:none;">Clear</button>
+          <span class="sheet-count" id="esc-count"></span>
+        </div>
+      </div>
       <div class="queue" id="escalations-wrap"></div>
     </section>
 
@@ -1258,7 +1309,8 @@
           <option value="Contract">Contract</option>
           <option value="WorkAuth">Work Authorization</option>
           <option value="COS">Certificate of Satisfaction</option>
-          <option value="MoistureLog">Moisture Log</option>
+          <option value="COI">COI (Certificate of Insurance)</option>
+          <option value="W9">W-9</option>
           <option value="Other">Other</option>
         </select>
         <input type="text" id="detail-upload-name" placeholder="Name this document" style="display:none;flex:1;min-width:150px;padding:6px 8px;border:1px solid #E5E0D2;border-radius:6px;font-size:12px;">
@@ -1391,6 +1443,17 @@
   .hist-kv .k{font-family:var(--font-mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--slate-soft);}
   .hist-kv .v{font-size:13.5px;font-weight:600;color:var(--ink);margin-top:3px;word-break:break-word;}
   .hist-kv .v.muted{color:var(--slate-soft);font-weight:400;}
+  /* Editable tiles look exactly like the others until you click them. */
+  .hist-kv.editable{cursor:pointer;position:relative;transition:border-color .12s ease,box-shadow .12s ease;}
+  .hist-kv.editable:hover{border-color:var(--slate-soft);box-shadow:0 0 0 2px rgba(23,23,23,.06);}
+  .hist-kv.editable:hover::after{content:'\270E edit';position:absolute;top:7px;right:10px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate-soft);}
+  .hist-kv.editing{cursor:default;border-color:var(--ink);}
+  .hist-kv.editing::after{content:none;}
+  .hist-edit{display:flex;flex-direction:column;gap:6px;margin-top:5px;}
+  .hist-edit input,.hist-edit select,.hist-edit textarea{font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);width:100%;}
+  .hist-edit textarea{min-height:64px;resize:vertical;}
+  .hist-edit .row{display:flex;gap:6px;align-items:center;}
+  .hist-edit .row .btn-small{padding:5px 10px;}
   .hist-kv input[type=date]{width:100%;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12.5px;margin-top:3px;background:#fff;}
   .tl{border-left:2px solid var(--line);margin:4px 0 0 8px;padding-left:16px;}
   .tl-item{position:relative;padding:7px 0 9px;font-size:12.5px;}
@@ -1664,6 +1727,9 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
     if(isNaN(dt.getTime())) return null;
     return dt.toLocaleDateString(undefined,{month:'short', day:'numeric', year:'numeric'});
   }
+  // The system of record's name in dynamic text: a QuickBooks workspace has no
+  // CRM, so anything synced in is labelled QuickBooks there.
+  function sysLabel(){ return (window.__me && window.__me.ok && window.__me.integrationMode === 'quickbooks') ? 'QuickBooks' : 'CRM'; }
   function isoDate(d){ return d.toISOString().slice(0,10); }
   // The calendar day where the user is (a send at 10 pm Central is today, not
   // tomorrow's UTC date). isoDate() stays UTC for dates parsed from the API.
@@ -2261,8 +2327,9 @@ qbInit();
     document.querySelectorAll('[data-base-admin-only]').forEach(function(el){ el.style.display = baseAdmin ? '' : 'none'; });
     document.querySelectorAll('[data-qb-only]').forEach(function(el){ el.style.display = (isAdminUser && qbMode) ? '' : 'none'; });
     if (qbMode) {
-      // Automation copy talks about "your CRM"; this workspace's system of record is QuickBooks.
-      document.querySelectorAll('#view-automations, .view > .topbar p, .drawer-sub').forEach(function(root){
+      // A QuickBooks workspace has no CRM: every mention of one, anywhere on
+      // the page, reads as QuickBooks (the only system of record here).
+      document.querySelectorAll('main, .overlay, .drawer, #drawer, #history-overlay').forEach(function(root){
         var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         var node;
         while ((node = walker.nextNode())) {
@@ -2276,6 +2343,7 @@ qbInit();
             .replace(/\bNetSuite\b/g, 'QuickBooks');
         }
       });
+      document.querySelectorAll('[title*="CRM"]').forEach(function(el){ el.title = el.title.replace(/your CRM/g, 'QuickBooks').replace(/\bCRM\b/g, 'QuickBooks'); });
       const t = document.getElementById('real-integrations-title'); if (t) t.textContent = 'QuickBooks Connection';
       const p = document.getElementById('real-integrations-intro'); if (p) p.textContent = isAdminUser
         ? 'QuickBooks Online is the only system this workspace needs. Connect it once below and every open invoice, customer and payment appears across the queue, spreadsheet, reports and collections automatically — refreshed continuously, no manual entry.'
@@ -3644,7 +3712,7 @@ saveState(); renderAll();
   function latestSalesforceUpdateHTML(inv){
     if(!inv.activity || inv.activity.length === 0) return '<span style="color:var(--slate-soft);">\u2014</span>';
     const latest = inv.activity[0];
-    return `<span class="sf-tag">CRM</span>${latest.text}<span class="su-ts">${latest.ts}</span>`;
+    return `<span class="sf-tag">${sysLabel()}</span>${latest.text}<span class="su-ts">${latest.ts}</span>`;
   }
 
   function respondedLabel(inv){
@@ -4139,50 +4207,133 @@ saveState(); renderAll();
     document.getElementById(drillId).innerHTML = rows || `<div class="empty" style="padding:12px;">No activity this period.</div>`;
   }
 
+  // Invoiced MTD: any number of cities and businesses can be selected, from
+  // the chips or by clicking bars. The city chart is narrowed by the chosen
+  // businesses, the business chart by the chosen cities, and the KPIs, the
+  // breakdown and the list below follow both. Nothing is fetched: it is all
+  // re-cut from the invoices already on the page, so it is instant.
+  const CITY_PALETTE = ['#2F6F8F','#C96A2B','#4E8F5A','#8A5BB5','#C94C4C','#2B9E9E','#B5932B','#5A6ACF','#D1689A','#6B8E23','#8C6D4F','#3A8FD1','#A64BA6','#5F7F8F'];
+  function cityColor(o){ const i = OFFICE_LOCATIONS.indexOf(o); return CITY_PALETTE[(i < 0 ? 0 : i) % CITY_PALETTE.length]; }
+  function deptBaseColor(d){ const shades = DEPT_COLOR_SHADES[d] || ['#8892A6']; return shades[0]; }
+  function mtdDeptKeys(){ return Object.keys(DEPARTMENT_LABELS); }
+  function groupByDeptOffice(records){
+    const grouped = {};
+    mtdDeptKeys().forEach(d => grouped[d] = { total: 0, offices: {} });
+    records.forEach(r => {
+      if(!grouped[r.department]) grouped[r.department] = { total: 0, offices: {} };
+      grouped[r.department].total += r.amount;
+      grouped[r.department].offices[r.officeLocation] = (grouped[r.department].offices[r.officeLocation] || 0) + r.amount;
+    });
+    return grouped;
+  }
+  function renderDeptChart(chartId, records, onSelect, selected){
+    const chartEl = document.getElementById(chartId); if(!chartEl) return;
+    const grouped = groupByDeptOffice(records);
+    const keys = mtdDeptKeys();
+    const maxTotal = Math.max(1, ...keys.map(d => grouped[d].total));
+    chartEl.innerHTML = keys.map(d => {
+      const g = grouped[d];
+      const segs = Object.keys(g.offices).sort((a, b) => g.offices[b] - g.offices[a]).map(o => {
+        const h = g.total > 0 ? Math.max(2, (g.offices[o] / maxTotal) * 240) : 0;
+        return `<div class="chart-seg" style="height:${h}px;background:${cityColor(o)};" title="${hEsc(OFFICE_LABELS[o] || o)}: $${g.offices[o].toLocaleString(undefined,{maximumFractionDigits:0})}"></div>`;
+      }).join('');
+      return `
+        <div class="chart-col${selected && selected.indexOf(d) !== -1 ? ' selected' : ''}" data-dept="${hEsc(d)}">
+          <div class="chart-bar-wrap"><div class="chart-bar">${segs}</div></div>
+          <div class="chart-total">$${g.total.toLocaleString(undefined,{maximumFractionDigits:0})}</div>
+          <div class="chart-office-label">${hEsc(DEPARTMENT_LABELS[d] || d)}</div>
+        </div>`;
+    }).join('');
+    chartEl.querySelectorAll('.chart-col').forEach(col => {
+      col.addEventListener('click', () => { if(typeof onSelect === 'function') onSelect(col.dataset.dept); });
+    });
+    return grouped;
+  }
+  function showDeptDrilldown(drillId, titleId, dept, g){
+    const rows = Object.keys(g.offices).sort((a, b) => g.offices[b] - g.offices[a]).map(o => {
+      const pct = g.total > 0 ? ((g.offices[o] / g.total) * 100).toFixed(0) : 0;
+      return `<div class="drill-row"><span class="drill-swatch" style="background:${cityColor(o)};"></span><span class="drill-label">${hEsc(OFFICE_LABELS[o] || o)}</span><span class="drill-amt">$${g.offices[o].toLocaleString(undefined,{maximumFractionDigits:0})} (${pct}%)</span></div>`;
+    }).join('');
+    document.getElementById(titleId).textContent = `${DEPARTMENT_LABELS[dept] || dept} \u2014 $${g.total.toLocaleString(undefined,{maximumFractionDigits:0})}`;
+    document.getElementById(drillId).innerHTML = rows || `<div class="empty" style="padding:12px;">No activity this period.</div>`;
+  }
+  function renderMtdFilterChips(){
+    const cityLabel = document.getElementById('mtd-city-label'); if(cityLabel) cityLabel.textContent = TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices';
+    const deptLabelEl = document.getElementById('mtd-dept-label'); if(deptLabelEl) deptLabelEl.textContent = TENANT_DEPTS_CUSTOM ? 'Businesses' : 'Departments';
+    const chip = function(key, label, on, fn){ return `<div class="chip multi${on ? ' active' : ''}" onclick="${fn}('${hEsc(key)}')" title="Click to ${on ? 'remove' : 'add'}">${hEsc(label)}</div>`; };
+    const cities = document.getElementById('mtd-city-chips');
+    if(cities) cities.innerHTML = `<div class="chip${mtdSelectedOffices.length ? '' : ' active'}" onclick="mtdClearOffices()">All</div>` + OFFICE_LOCATIONS.map(o => chip(o, OFFICE_LABELS[o] || o, mtdSelectedOffices.indexOf(o) !== -1, 'mtdToggleOffice')).join('');
+    const depts = document.getElementById('mtd-dept-chips');
+    if(depts) depts.innerHTML = `<div class="chip${mtdSelectedDepts.length ? '' : ' active'}" onclick="mtdClearDepts()">All</div>` + mtdDeptKeys().map(d => chip(d, DEPARTMENT_LABELS[d] || d, mtdSelectedDepts.indexOf(d) !== -1, 'mtdToggleDept')).join('');
+    const ct = document.getElementById('mtd-chart-title'); if(ct) ct.textContent = (TENANT_DEPTS_CUSTOM ? 'By City' : 'By Office Location') + (mtdSelectedDepts.length ? ' \u2014 ' + mtdSelectedDepts.map(d => DEPARTMENT_LABELS[d] || d).join(', ') : '');
+    const dt = document.getElementById('mtd-dept-chart-title'); if(dt) dt.textContent = (TENANT_DEPTS_CUSTOM ? 'By Business' : 'By Department') + (mtdSelectedOffices.length ? ' \u2014 ' + mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', ') : '');
+  }
+  function mtdToggleOffice(office){
+    const i = mtdSelectedOffices.indexOf(office);
+    if(i === -1) mtdSelectedOffices.push(office); else mtdSelectedOffices.splice(i, 1);
+    mtdLast = i === -1 ? { kind: 'office', key: office } : (mtdSelectedOffices.length ? { kind: 'office', key: mtdSelectedOffices[mtdSelectedOffices.length - 1] } : null);
+    renderInvoicedMTD();
+  }
+  function mtdToggleDept(dept){
+    const i = mtdSelectedDepts.indexOf(dept);
+    if(i === -1) mtdSelectedDepts.push(dept); else mtdSelectedDepts.splice(i, 1);
+    mtdLast = i === -1 ? { kind: 'dept', key: dept } : (mtdSelectedDepts.length ? { kind: 'dept', key: mtdSelectedDepts[mtdSelectedDepts.length - 1] } : null);
+    renderInvoicedMTD();
+  }
+  function mtdMatches(inv){
+    return (!mtdSelectedOffices.length || mtdSelectedOffices.indexOf(inv.officeLocation) !== -1) && (!mtdSelectedDepts.length || mtdSelectedDepts.indexOf(inv.department) !== -1);
+  }
   function renderInvoicedMTD(){
     const { start, end } = monthRange();
     // Deliberately unfiltered by the sidebar dept/office filters -- this tab's
     // whole purpose is the full cross-office, cross-department breakdown.
-    const records = state.invoices
-      .filter(inv => dateInRange(inv.invoiceDate, start, end))
-      .map(inv => ({ officeLocation: inv.officeLocation, department: inv.department, category: inv.category, amount: inv.amount }));
-    const total = records.reduce((s,r) => s + r.amount, 0);
-    document.getElementById('mtd-kpis').innerHTML = `
-      <div class="kpi"><div class="label">Invoiced &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${records.length} invoice${records.length===1?'':'s'} dated this month</div></div>
-      <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Synced automatically, no manual entry' : 'Not connected yet'}</div></div>
-      <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${OFFICE_LOCATIONS.map(o => OFFICE_LABELS[o]).join(', ')}</div></div>
-    `;
-    // Clicking a bar selects that office (click again to unselect; several can
-    // be selected). The breakdown box shows the office just clicked, and the
-    // list at the bottom shows every invoice for the selected offices, by month.
     mtdSelectedOffices = mtdSelectedOffices.filter(o => OFFICE_LOCATIONS.indexOf(o) !== -1);
-    renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', records, function(office){
-      const i = mtdSelectedOffices.indexOf(office);
-      if(i === -1) mtdSelectedOffices.push(office); else mtdSelectedOffices.splice(i, 1);
-      mtdLastOffice = i === -1 ? office : (mtdSelectedOffices[mtdSelectedOffices.length - 1] || null);
-      renderInvoicedMTD();
-    }, mtdSelectedOffices);
-    const grouped = groupByOfficeDept(records);
-    if(mtdLastOffice && mtdSelectedOffices.indexOf(mtdLastOffice) !== -1 && grouped[mtdLastOffice]) showOfficeDrilldown('mtd-drilldown', 'mtd-drill-title', mtdLastOffice, grouped[mtdLastOffice]);
+    mtdSelectedDepts = mtdSelectedDepts.filter(d => !!DEPARTMENT_LABELS[d]);
+    const toRecord = inv => ({ officeLocation: inv.officeLocation, department: inv.department, category: inv.category, amount: inv.amount });
+    const monthInvoices = state.invoices.filter(inv => dateInRange(inv.invoiceDate, start, end));
+    const records = monthInvoices.filter(mtdMatches).map(toRecord);
+    const officeRecords = monthInvoices.filter(inv => !mtdSelectedDepts.length || mtdSelectedDepts.indexOf(inv.department) !== -1).map(toRecord);
+    const deptRecords = monthInvoices.filter(inv => !mtdSelectedOffices.length || mtdSelectedOffices.indexOf(inv.officeLocation) !== -1).map(toRecord);
+    const total = records.reduce((s,r) => s + r.amount, 0);
+    const selectionNote = (mtdSelectedOffices.length || mtdSelectedDepts.length)
+      ? [mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', '), mtdSelectedDepts.map(d => DEPARTMENT_LABELS[d] || d).join(', ')].filter(Boolean).join(' \u00b7 ')
+      : 'All ' + (TENANT_DEPTS_CUSTOM ? 'cities and businesses' : 'offices and departments');
+    document.getElementById('mtd-kpis').innerHTML = `
+      <div class="kpi"><div class="label">Invoiced &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${records.length} invoice${records.length===1?'':'s'} dated this month \u00b7 ${hEsc(selectionNote)}</div></div>
+      <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Synced automatically, no manual entry' : 'Not connected yet'}</div></div>
+      <div class="kpi"><div class="label">${TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${mtdDeptKeys().filter(d => records.some(r => r.department === d)).length}/${mtdDeptKeys().length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with invoices</div></div>
+    `;
+    renderMtdFilterChips();
+    // Clicking a bar selects that city or business (click again to unselect;
+    // any number can be selected). The breakdown box shows the bar just
+    // clicked, and the list at the bottom shows every matching invoice by month.
+    renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', officeRecords, function(office){ mtdToggleOffice(office); }, mtdSelectedOffices);
+    const deptGrouped = renderDeptChart('mtd-dept-chart', deptRecords, function(dept){ mtdToggleDept(dept); }, mtdSelectedDepts);
+    const grouped = groupByOfficeDept(officeRecords);
+    if(mtdLast && mtdLast.kind === 'office' && mtdSelectedOffices.indexOf(mtdLast.key) !== -1 && grouped[mtdLast.key]) showOfficeDrilldown('mtd-drilldown', 'mtd-drill-title', mtdLast.key, grouped[mtdLast.key]);
+    else if(mtdLast && mtdLast.kind === 'dept' && mtdSelectedDepts.indexOf(mtdLast.key) !== -1 && deptGrouped && deptGrouped[mtdLast.key]) showDeptDrilldown('mtd-drilldown', 'mtd-drill-title', mtdLast.key, deptGrouped[mtdLast.key]);
     else { document.getElementById('mtd-drill-title').textContent = 'Click a bar for a breakdown'; document.getElementById('mtd-drilldown').innerHTML = ''; }
     renderMtdOfficeList(start, end);
     const navCount = document.getElementById('nav-count-mtd');
-    if(navCount) navCount.textContent = records.length;
+    if(navCount) navCount.textContent = monthInvoices.length;
   }
   var mtdSelectedOffices = [];
-  var mtdLastOffice = null;
-  function mtdClearOffices(){ mtdSelectedOffices = []; mtdLastOffice = null; renderInvoicedMTD(); }
+  var mtdSelectedDepts = [];
+  var mtdLast = null;
+  function mtdClearOffices(){ mtdSelectedOffices = []; if(mtdLast && mtdLast.kind === 'office') mtdLast = null; renderInvoicedMTD(); }
+  function mtdClearDepts(){ mtdSelectedDepts = []; if(mtdLast && mtdLast.kind === 'dept') mtdLast = null; renderInvoicedMTD(); }
+  function mtdClearAll(){ mtdSelectedOffices = []; mtdSelectedDepts = []; mtdLast = null; renderInvoicedMTD(); }
   // Every invoice dated this month for the selected office(s), newest month
   // first and newest invoice first within a month - the same table the Aging
   // Report uses, so the two tabs read the same way.
   function renderMtdOfficeList(start, end){
     const listEl = document.getElementById('mtd-office-list');
     if(!listEl) return;
-    if(!mtdSelectedOffices.length){ listEl.innerHTML = ''; return; }
-    const rows = state.invoices.filter(inv => mtdSelectedOffices.indexOf(inv.officeLocation) !== -1 && dateInRange(inv.invoiceDate, start, end));
+    if(!mtdSelectedOffices.length && !mtdSelectedDepts.length){ listEl.innerHTML = ''; return; }
+    const rows = state.invoices.filter(inv => mtdMatches(inv) && dateInRange(inv.invoiceDate, start, end));
     const total = rows.reduce((s,i) => s + Number(i.amount || 0), 0);
-    const offices = mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', ');
-    const head = `<div class="mtd-list-head"><h3>${hEsc(offices)}<span class="cnt">${rows.length} invoice${rows.length===1?'':'s'} dated this month</span><span class="hist-link" onclick="mtdClearOffices()">Clear selection</span></h3><span class="tot">${money2(total)}</span></div>`;
+    const offices = [mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', '), mtdSelectedDepts.map(d => DEPARTMENT_LABELS[d] || d).join(', ')].filter(Boolean).join(' \u00b7 ');
+    const head = `<div class="mtd-list-head"><h3>${hEsc(offices)}<span class="cnt">${rows.length} invoice${rows.length===1?'':'s'} dated this month</span><span class="hist-link" onclick="mtdClearAll()">Clear selection</span></h3><span class="tot">${money2(total)}</span></div>`;
     if(!rows.length){ listEl.innerHTML = head + `<div class="aging-dept"><div class="empty" style="padding:16px;">No invoices dated this month for ${hEsc(offices)}.</div></div>`; return; }
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
     const byMonth = {};
@@ -4502,10 +4653,60 @@ saveState(); renderAll();
   /* ============================================================
      RESPONSE RECEIVED
      ============================================================ */
+  // Response Received: search, in-response-to, job status, received-date
+  // range and sort - kept in state, inputs only rewritten when they differ.
+  const RESP_SORTS = { 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'name-asc': 1, type: 1, status: 1 };
+  function respFilters(){ return state.respFilters || (state.respFilters = { search: '', type: 'all', status: 'all', from: '', to: '', sort: 'date-desc' }); }
+  function setRespFilter(key, v){
+    const f = respFilters();
+    if (key === 'from' || key === 'to') f[key] = /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : '';
+    else if (key === 'sort') f.sort = RESP_SORTS[v] ? v : 'date-desc';
+    else f[key] = String(v == null ? '' : v);
+    saveState(); renderResponses();
+  }
+  function clearRespFilters(){ state.respFilters = { search: '', type: 'all', status: 'all', from: '', to: '', sort: respFilters().sort }; const b = document.getElementById('resp-search'); if (b) b.value = ''; saveState(); renderResponses(); }
+  function syncRespControls(all){
+    const f = respFilters();
+    const box = document.getElementById('resp-search');
+    if (box) { if (document.activeElement === box) f.search = box.value; else if (box.value !== f.search) box.value = f.search; }
+    const st = document.getElementById('resp-status');
+    if (st) {
+      const statuses = Array.from(new Set(all.map(r => r.jobStatus).filter(Boolean)));
+      const want = '<option value="all">Job status: All</option>' + statuses.map(k => `<option value="${hEsc(k)}">${hEsc(STATUS_LABELS[k] || k)}</option>`).join('');
+      if (st.innerHTML !== want) st.innerHTML = want;
+      if (st.value !== f.status) st.value = statuses.indexOf(f.status) !== -1 ? f.status : 'all';
+    }
+    [['resp-type', 'type'], ['resp-from', 'from'], ['resp-to', 'to'], ['resp-sort', 'sort']].forEach(function(pair){ const el = document.getElementById(pair[0]); if (el && el.value !== f[pair[1]]) el.value = f[pair[1]]; });
+    const clear = document.getElementById('resp-clear'); if (clear) clear.style.display = (f.search || f.type !== 'all' || f.status !== 'all' || f.from || f.to) ? '' : 'none';
+  }
+  function respDay(r){ const t = r.receivedTs || r.receivedAt; const d = t ? new Date(t) : null; return d && !isNaN(d.getTime()) ? localDay(d) : ''; }
   function renderResponses(){
     const wrap = document.getElementById('responses-wrap');
-    const rows = state.responsesLog.filter(r => invoiceDeptMatches(r.invoiceId)).slice().sort((a, b) => logTime(b.receivedTs || b.receivedAt) - logTime(a.receivedTs || a.receivedAt));
-    if(rows.length === 0){ wrap.innerHTML = `<div class="empty">No responses logged yet${state.deptFilter!=='all' ? ' for this department' : ''}. Responses are captured automatically whenever a sent email comes back as "replied" &mdash; or trigger one above to see it flow through live.</div>`; return; }
+    const all = state.responsesLog.filter(r => invoiceDeptMatches(r.invoiceId));
+    syncRespControls(all);
+    const f = respFilters(); const q = f.search.trim().toLowerCase();
+    const rows = all.filter(r => {
+      if (q && [r.invoiceName, r.summary, r.inResponseTo].map(x => String(x || '').toLowerCase()).join(' ').indexOf(q) === -1) return false;
+      if (f.type !== 'all' && String(r.inResponseTo || '') !== f.type) return false;
+      if (f.status !== 'all' && String(r.jobStatus || '') !== f.status) return false;
+      const day = respDay(r);
+      if (f.from && (!day || day < f.from)) return false;
+      if (f.to && (!day || day > f.to)) return false;
+      return true;
+    }).sort((a, b) => {
+      const byDate = logTime(b.receivedTs || b.receivedAt) - logTime(a.receivedTs || a.receivedAt);
+      switch (f.sort) {
+        case 'date-asc': return -byDate;
+        case 'amount-desc': return (b.amount - a.amount) || byDate;
+        case 'amount-asc': return (a.amount - b.amount) || byDate;
+        case 'name-asc': return String(a.invoiceName || '').localeCompare(String(b.invoiceName || ''), undefined, { sensitivity: 'base' }) || byDate;
+        case 'type': return String(a.inResponseTo || '').localeCompare(String(b.inResponseTo || '')) || byDate;
+        case 'status': return String(STATUS_LABELS[a.jobStatus] || a.jobStatus || '').localeCompare(String(STATUS_LABELS[b.jobStatus] || b.jobStatus || '')) || byDate;
+        default: return byDate;
+      }
+    });
+    const countEl = document.getElementById('resp-count'); if (countEl) countEl.textContent = rows.length === all.length ? (rows.length + ' response' + (rows.length === 1 ? '' : 's')) : (rows.length + ' of ' + all.length + ' responses');
+    if(rows.length === 0){ wrap.innerHTML = `<div class="empty">${all.length ? 'No responses match your search or filters.' : 'No responses logged yet' + (state.deptFilter!=='all' ? ' for this department' : '') + '. Responses are captured automatically whenever a sent email comes back as "replied" &mdash; or trigger one above to see it flow through live.'}</div>`; return; }
     wrap.innerHTML = `
       <table class="log">
         <thead><tr><th>Customer</th><th>Amount</th><th>Received</th><th>In Response To</th><th>Job Status</th><th>Response Summary</th><th>Response</th></tr></thead>
@@ -4732,10 +4933,60 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   /* ============================================================
      ESCALATIONS
      ============================================================ */
+  // Escalations: a summary strip plus search and filters (city, business,
+  // payer, notified) and sort, so the escalated accounts a manager wants are
+  // one click away. Kept in state; inputs only rewritten when they differ.
+  const ESC_SORTS = { 'balance-desc': 1, 'days-desc': 1, 'age-desc': 1, 'name-asc': 1, 'followups-desc': 1 };
+  function escFilters(){ return state.escFilters || (state.escFilters = { search: '', office: 'all', dept: 'all', payer: 'all', notified: 'all', sort: 'balance-desc' }); }
+  function setEscFilter(key, v){ const f = escFilters(); f[key] = key === 'sort' ? (ESC_SORTS[v] ? v : 'balance-desc') : String(v == null ? '' : v); saveState(); renderEscalations(); }
+  function clearEscFilters(){ state.escFilters = { search: '', office: 'all', dept: 'all', payer: 'all', notified: 'all', sort: escFilters().sort }; const b = document.getElementById('esc-search'); if (b) b.value = ''; saveState(); renderEscalations(); }
+  function syncEscControls(){
+    const f = escFilters();
+    const box = document.getElementById('esc-search');
+    if (box) { if (document.activeElement === box) f.search = box.value; else if (box.value !== f.search) box.value = f.search; }
+    const off = document.getElementById('esc-office');
+    if (off) { const want = `<option value="all">${TENANT_DEPTS_CUSTOM ? 'City' : 'Office'}: All</option>` + OFFICE_LOCATIONS.map(o => `<option value="${hEsc(o)}">${hEsc(OFFICE_LABELS[o] || o)}</option>`).join(''); if (off.innerHTML !== want) off.innerHTML = want; if (off.value !== f.office) off.value = OFFICE_LABELS[f.office] ? f.office : 'all'; }
+    const dep = document.getElementById('esc-dept');
+    if (dep) { const want = `<option value="all">${TENANT_DEPTS_CUSTOM ? 'Business' : 'Department'}: All</option>` + Object.keys(DEPARTMENT_LABELS).map(d => `<option value="${hEsc(d)}">${hEsc(DEPARTMENT_LABELS[d] || d)}</option>`).join(''); if (dep.innerHTML !== want) dep.innerHTML = want; if (dep.value !== f.dept) dep.value = DEPARTMENT_LABELS[f.dept] ? f.dept : 'all'; }
+    [['esc-payer', 'payer'], ['esc-notified', 'notified'], ['esc-sort', 'sort']].forEach(function(pair){ const el = document.getElementById(pair[0]); if (el && el.value !== f[pair[1]]) el.value = f[pair[1]]; });
+    const clear = document.getElementById('esc-clear'); if (clear) clear.style.display = (f.search || f.office !== 'all' || f.dept !== 'all' || f.payer !== 'all' || f.notified !== 'all') ? '' : 'none';
+  }
   function renderEscalations(){
     const wrap = document.getElementById('escalations-wrap');
-    const items = visibleInvoices().filter(i=>i.escalated);
-    if(items.length === 0){ wrap.innerHTML = `<div class="empty">No escalations right now. Use "Manage &rarr; Escalate" on any invoice to pull it out of the autonomous cadence.</div>`; return; }
+    const all = visibleInvoices().filter(i=>i.escalated);
+    syncEscControls();
+    const f = escFilters(); const q = f.search.trim().toLowerCase();
+    const kpis = document.getElementById('esc-kpis');
+    if (kpis) {
+      const owed = all.reduce((sum, i) => sum + balanceDue(i), 0);
+      const notified = all.filter(i => !!i.notifiedName).length;
+      const oldest = all.length ? Math.max.apply(null, all.map(i => invoiceAgeDays(i))) : 0;
+      kpis.innerHTML = `
+        <div class="kpi"><div class="label">Escalated</div><div class="value">${all.length}</div><div class="sub">account${all.length === 1 ? '' : 's'} out of the cadence</div></div>
+        <div class="kpi"><div class="label">Balance at stake</div><div class="value">${money2(owed)}</div><div class="sub">still due across escalated accounts</div></div>
+        <div class="kpi"><div class="label">Manager notified</div><div class="value">${notified}/${all.length}</div><div class="sub">${all.length - notified} waiting on a notification</div></div>
+        <div class="kpi"><div class="label">Oldest invoice</div><div class="value">${oldest} day${oldest === 1 ? '' : 's'}</div><div class="sub">since invoiced</div></div>`;
+    }
+    const items = all.filter(inv => {
+      if (q && [inv.name, inv.invoiceNumber, inv.meta, inv.contact, inv.contactInfo, inv.notifiedName, inv.claimNumber].map(x => String(x || '').toLowerCase()).join(' ').indexOf(q) === -1) return false;
+      if (f.office !== 'all' && inv.officeLocation !== f.office) return false;
+      if (f.dept !== 'all' && inv.department !== f.dept) return false;
+      if (f.payer !== 'all' && inv.payer !== f.payer) return false;
+      if (f.notified === 'yes' && !inv.notifiedName) return false;
+      if (f.notified === 'no' && inv.notifiedName) return false;
+      return true;
+    }).sort((a, b) => {
+      const byName = String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+      switch (f.sort) {
+        case 'days-desc': return (b.days - a.days) || byName;
+        case 'age-desc': return (invoiceAgeDays(b) - invoiceAgeDays(a)) || byName;
+        case 'name-asc': return byName;
+        case 'followups-desc': return ((b.followups || 0) - (a.followups || 0)) || byName;
+        default: return (balanceDue(b) - balanceDue(a)) || byName;
+      }
+    });
+    const countEl = document.getElementById('esc-count'); if (countEl) countEl.textContent = items.length === all.length ? (items.length + ' escalated') : (items.length + ' of ' + all.length + ' escalated');
+    if(items.length === 0){ wrap.innerHTML = `<div class="empty">${all.length ? 'No escalated accounts match your search or filters.' : 'No escalations right now. Use "Manage &rarr; Escalate" on any invoice to pull it out of the autonomous cadence.'}</div>`; return; }
     wrap.innerHTML = items.map(inv => `
       <div class="card">
         <div class="who">
@@ -4958,7 +5209,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
   function hEsc(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   // Source systems are shown generically: any CRM connector (Salesforce, Dash, etc.) reads as CRM.
-  function hSourceLabel(src){ if(src == null || src === '') return src == null ? null : src; const k = String(src).toLowerCase(); if(/^(salesforce|sf|sfdc|dash|crm)$/.test(k)) return 'CRM'; return String(src); }
+  function hSourceLabel(src){ if(src == null || src === '') return src == null ? null : src; const k = String(src).toLowerCase(); if(/^(salesforce|sf|sfdc|dash|crm)$/.test(k)) return sysLabel(); return String(src); }
   function hMoney(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   // Demo activity stamps look like "Sep 7, 2:15 PM" (no year); the Date parser
   // turns those into 2001, so anything before 2015 is treated as unparsable and
@@ -5065,7 +5316,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
   function responseSourceLabel(r){
     if(r.source === 'automation') return 'Captured automatically from the reply';
-    if(r.source === 'crm') return 'Synced from your CRM';
+    if(r.source === 'crm') return 'Synced from ' + (sysLabel() === 'CRM' ? 'your CRM' : sysLabel());
     return 'Logged by your team';
   }
   function openResponseSeen(id){
@@ -5211,7 +5462,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     if(to) rows.push('<b>To</b><span>' + hEsc(to) + '</span>');
     if(m.subject) rows.push('<b>Subject</b><span class="msg-subject">' + hEsc(m.subject) + '</span>');
     rows.push('<b>Status</b><span>' + hEsc(msgStatusLabel(m.status)) + (m.error ? (' — ' + hEsc(m.error)) : '') + '</span>');
-    rows.push('<b>Sent by</b><span>' + (m.source === 'automation' ? 'Automated Reach Outs' + (m.cadenceDay ? (' · Day ' + m.cadenceDay + ' checkpoint') : '') : (m.source === 'crm' ? 'Your CRM' : 'A team member')) + '</span>');
+    rows.push('<b>Sent by</b><span>' + (m.source === 'automation' ? 'Automated Reach Outs' + (m.cadenceDay ? (' · Day ' + m.cadenceDay + ' checkpoint') : '') : (m.source === 'crm' ? (sysLabel() === 'CRM' ? 'Your CRM' : sysLabel()) : 'A team member')) + '</span>');
     cur.innerHTML =
       '<div class="msg-card">' +
         '<div class="msg-head">' +
@@ -5222,7 +5473,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         (m.body
           ? '<div class="msg-body">' + hEsc(m.body) + '</div>'
           : '<div class="msg-body empty">' + (m.source === 'crm'
-              ? 'This send was recorded by your CRM, so clAIms has the record but not the message body.'
+              ? 'This send was recorded by ' + (sysLabel() === 'CRM' ? 'your CRM' : sysLabel()) + ', so clAIms has the record but not the message body.'
               : 'This message was sent before clAIms began keeping message bodies, so only the record of the send is available.') + '</div>') +
       '</div>';
 
@@ -5362,14 +5613,109 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     return { ok: true, account: account, comms: comms, activity: [], payments: payments, documents: documents, notes: notes, related: related, timeline: timeline };
   }
 
+  var __histLast = null;
+  // Click-to-edit on the Account History tiles. The tile keeps its look; a
+  // click swaps the value for the matching control, Save writes it through
+  // the same setters the Manage drawer and the ledger use (so every tab and
+  // the server see it), and the tile is redrawn with the new value.
+  const HIST_EDIT_SPECS = {
+    lastContact: { kind: 'date', label: 'Last contact' },
+    followups: { kind: 'number', label: 'Follow-ups sent' },
+    waSignedDate: { kind: 'date', label: 'Work Authorization signed' },
+    cosSignedDate: { kind: 'date', label: 'COS signed' },
+    noilSent: { kind: 'choice', label: 'NOIL sent', options: [['', 'Not yet'], ['1', 'Sent']] },
+    lienFiled: { kind: 'choice', label: 'Lien filed', options: [['', 'No'], ['1', 'Yes']] },
+    projectedPaymentDate: { kind: 'date', label: 'Projected payment' },
+    currentlyWith: { kind: 'choice', label: 'Currently with', options: function(){ return Object.keys(CURRENTLY_WITH_LABELS).map(function(k){ return [k, CURRENTLY_WITH_LABELS[k]]; }); } },
+    contact: { kind: 'contact', label: 'Contact' },
+    contactInfo: { kind: 'text', label: 'Point of contact', placeholder: 'Name, email, phone\u2026' },
+    paymentType: { kind: 'choice', label: 'Payment type', options: [['', '\u2014 Select \u2014'], ['payment_link', 'Payment Link'], ['check', 'Check'], ['ach', 'ACH'], ['credit_card', 'Credit Card'], ['wire', 'Wire/Direct Deposit']] },
+    note: { kind: 'text', label: 'Notes', placeholder: 'Notes\u2026' },
+    doNotContact: { kind: 'choice', label: 'Sent to collections', options: [['', 'No'], ['1', 'Yes \u2014 DO NOT CONTACT']] },
+    escalated: { kind: 'choice', label: 'Escalated', options: [['', 'No'], ['1', 'Yes \u2014 out of the cadence']] },
+    responseSummary: { kind: 'text', label: 'Last response', placeholder: 'What the customer said\u2026' }
+  };
+  function histEditValue(inv, field){
+    switch (field) {
+      case 'noilSent': return inv.noilSent ? '1' : '';
+      case 'lienFiled': return inv.lienFiled ? '1' : '';
+      case 'doNotContact': return inv.doNotContact ? '1' : '';
+      case 'escalated': return inv.escalated ? '1' : '';
+      case 'followups': return String(inv.followups || 0);
+      default: return inv[field] == null ? '' : String(inv[field]);
+    }
+  }
+  function histEditStart(tileEl, field){
+    if(!__histLast || !tileEl || tileEl.classList.contains('editing')) return;
+    const inv = __histLast.inv; const spec = HIST_EDIT_SPECS[field]; if(!inv || !spec) return;
+    const other = tileEl.parentElement && tileEl.parentElement.querySelector('.hist-kv.editing'); if(other) histEditCancel(other);
+    tileEl.classList.add('editing');
+    const v = tileEl.querySelector('.v'); if(!v) return;
+    tileEl.dataset.prev = v.outerHTML;
+    const cur = histEditValue(inv, field);
+    let control = '';
+    if (spec.kind === 'date') control = '<input type="date" id="hist-edit-input" value="' + hEsc(cur ? String(cur).slice(0, 10) : '') + '">';
+    else if (spec.kind === 'number') control = '<input type="number" min="0" step="1" id="hist-edit-input" value="' + hEsc(cur) + '">';
+    else if (spec.kind === 'choice') { const opts = typeof spec.options === 'function' ? spec.options() : spec.options; control = '<select id="hist-edit-input">' + opts.map(function(o){ return '<option value="' + hEsc(o[0]) + '"' + (String(o[0]) === String(cur) ? ' selected' : '') + '>' + hEsc(o[1]) + '</option>'; }).join('') + '</select>'; }
+    else if (spec.kind === 'contact') control = '<input type="text" id="hist-edit-input" placeholder="Contact name" value="' + hEsc(inv.contact || '') + '"><input type="email" id="hist-edit-email" placeholder="Email address" value="' + hEsc(inv.contactEmail || '') + '">';
+    else control = '<textarea id="hist-edit-input" placeholder="' + hEsc(spec.placeholder || '') + '">' + hEsc(cur) + '</textarea>';
+    v.outerHTML = '<div class="v"><div class="hist-edit" onclick="event.stopPropagation()">' + control +
+      '<div class="row"><button type="button" class="btn-primary btn-small" onclick="histEditSave(this.closest(\'.hist-kv\'), \'' + field + '\')">Save</button><button type="button" class="btn-small" onclick="histEditCancel(this.closest(\'.hist-kv\'))">Cancel</button></div></div></div>';
+    const input = tileEl.querySelector('#hist-edit-input'); if(input){ try { input.focus(); } catch(e) {} }
+    tileEl.addEventListener('keydown', function(e){ if(e.key === 'Escape'){ e.stopPropagation(); histEditCancel(tileEl); } else if(e.key === 'Enter' && e.target && e.target.tagName !== 'TEXTAREA'){ e.preventDefault(); histEditSave(tileEl, field); } });
+  }
+  function histEditCancel(tileEl){
+    if(!tileEl || !tileEl.classList.contains('editing')) return;
+    const v = tileEl.querySelector('.v'); if(v && tileEl.dataset.prev) v.outerHTML = tileEl.dataset.prev;
+    tileEl.classList.remove('editing'); delete tileEl.dataset.prev;
+  }
+  async function histEditSave(tileEl, field){
+    if(!__histLast) return;
+    const inv = __histLast.inv; const data = __histLast.data; const spec = HIST_EDIT_SPECS[field]; if(!inv || !spec) return;
+    const input = tileEl.querySelector('#hist-edit-input'); if(!input) return;
+    const raw = String(input.value || '').trim();
+    switch (field) {
+      case 'lastContact': inv.lastContact = raw || null; persistInvoice(inv, ['lastContact']); addActivity(inv, raw ? ('Last contact date set to ' + fmtDate(raw) + '.') : 'Last contact date cleared.', 'manual', 'update'); break;
+      case 'followups': inv.followups = Math.max(0, parseInt(raw, 10) || 0); persistInvoice(inv, ['followups']); addActivity(inv, 'Follow-ups sent set to ' + inv.followups + '.', 'manual', 'update'); break;
+      case 'waSignedDate': case 'cosSignedDate': setSignatureDate(inv.id, field, raw); break;
+      case 'noilSent': inv.noilSent = raw === '1'; inv.noilSentAt = inv.noilSent ? (inv.noilSentAt || localDay()) : null; persistInvoice(inv, ['noilSent']); addActivity(inv, inv.noilSent ? 'NOIL marked as sent.' : 'NOIL marked as not sent.', 'manual', 'update'); break;
+      case 'lienFiled': inv.lienFiled = raw === '1'; persistInvoice(inv, ['lienFiled']); addActivity(inv, inv.lienFiled ? 'Lien marked as filed.' : 'Lien marked as not filed.', 'manual', 'update'); break;
+      case 'projectedPaymentDate': setProjectedDate(inv.id, raw); break;
+      case 'currentlyWith': inv.currentlyWith = raw || inv.currentlyWith; persistInvoice(inv, ['currentlyWith']); addActivity(inv, 'File moved to ' + (CURRENTLY_WITH_LABELS[inv.currentlyWith] || inv.currentlyWith) + '.', 'manual', 'update'); break;
+      case 'contact': { const em = tileEl.querySelector('#hist-edit-email'); const email = em ? String(em.value || '').trim() : ''; if(email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ showToast('Enter a valid email address.'); return; } inv.contact = raw || inv.contact; inv.contactEmail = email || null; persistInvoice(inv, ['contact', 'contactEmail']); addActivity(inv, 'Contact updated to ' + (inv.contact || '\u2014') + (inv.contactEmail ? ' (' + inv.contactEmail + ')' : '') + '.', 'manual', 'update'); break; }
+      case 'contactInfo': case 'note': case 'responseSummary': setTrackerText(inv.id, field, raw); break;
+      case 'paymentType': setPaymentType(inv.id, raw); break;
+      case 'doNotContact': { const on = raw === '1'; if(on !== !!inv.doNotContact) await setDoNotContact(inv.id, on); break; }
+      case 'escalated': { const on = raw === '1'; if(on && !inv.escalated) escalateInvoice(inv.id); else if(!on && inv.escalated) unescalateInvoice(inv.id); break; }
+      default: return;
+    }
+    saveState();
+    // Redraw the tiles from the account as it now is, and let every tab catch up.
+    const a = (data && data.account) || {};
+    Object.assign(a, { lastContact: inv.lastContact, followUpCount: inv.followups, waSignedAt: inv.waSignedDate, cosSignedAt: inv.cosSignedDate, noilSentAt: inv.noilSentAt || (inv.noilSent ? localDay() : null),
+      lienFiled: !!inv.lienFiled, projectedPaymentDate: inv.projectedPaymentDate, currentlyWith: inv.currentlyWith, contact: inv.contact, contactEmail: inv.contactEmail, contactInfo: inv.contactInfo,
+      paymentType: inv.paymentType, note: inv.note, doNotContact: !!inv.doNotContact, doNotContactBy: inv.doNotContactBy, doNotContactAt: inv.doNotContactAt, escalated: !!inv.escalated, notifiedName: inv.notifiedName,
+      responded: inv.responded, responseSummary: inv.responseSummary });
+    historyInvalidate(inv.id);
+    renderAccountHistory(inv, data);
+    quietRender(renderAll);
+    showToast(spec.label + ' saved.');
+  }
   function renderAccountHistory(inv, data){
     const a = data.account || {};
     const paid = Number(a.paidAmount || 0);
     const balance = Math.max(0, Number(a.amount || 0) - paid);
     const lastDay = a.lastDayOnSite || null;
     const lastDayDays = hDaysSince(lastDay);
-    const tile = function(k, v, cls){ return '<div class="hist-kv"><div class="k">' + k + '</div><div class="v ' + (cls || '') + '">' + v + '</div></div>'; };
-    const dateTile = function(k, v){ return tile(k, v ? hDate(v) : 'Not yet', v ? '' : 'muted'); };
+    __histLast = { inv: inv, data: data };
+    // Tiles that can be changed here carry the field name; clicking one swaps
+    // the value for the right control (date, choice, text) in place.
+    const canEdit = isRemoteInvoice(inv) ? !!state.currentUser : true;
+    const tile = function(k, v, cls, edit){
+      const ed = canEdit && edit;
+      return '<div class="hist-kv' + (ed ? ' editable' : '') + '"' + (ed ? (' data-edit="' + edit + '" title="Click to edit" onclick="histEditStart(this, \'' + edit + '\')"') : '') + '><div class="k">' + k + '</div><div class="v ' + (cls || '') + '">' + v + '</div></div>';
+    };
+    const dateTile = function(k, v, edit){ return tile(k, v ? hDate(v) : 'Not yet', v ? '' : 'muted', edit); };
     const editable = canEditLastDay();
     const lastDayTile = '<div class="hist-kv"><div class="k">Last day on site</div>' +
       (editable
@@ -5382,33 +5728,33 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Balance due', hMoney(balance), balance > 0 ? '' : 'muted') +
       tile('Status', hEsc(STATUS_LABELS[a.status] || a.status || '—')) +
       tile('Invoice date', hDate(a.invoicedAt) + (a.invoicedAt ? (' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.invoicedAt) + 'd)</span>') : '')) +
-      tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>') : 'None yet', a.lastContact ? '' : 'muted') +
-      tile('Follow-ups sent', String(a.followUpCount || 0)) +
+      tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>') : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
+      tile('Follow-ups sent', String(a.followUpCount || 0), '', 'followups') +
       lastDayTile +
-      (TENANT_DEPTS_CUSTOM ? waSignedTile(inv) : dateTile('Work Authorization signed', a.waSignedAt)) +
-      dateTile('COS signed', a.cosSignedAt) +
+      (TENANT_DEPTS_CUSTOM ? waSignedTile(inv) : dateTile('Work Authorization signed', a.waSignedAt, 'waSignedDate')) +
+      dateTile('COS signed', a.cosSignedAt, 'cosSignedDate') +
       dateTile('Demand letter sent', a.demandLetterSentAt) +
-      dateTile('NOIL sent', a.noilSentAt) +
-      tile('Lien filed', a.lienFiled ? 'Yes' : 'No', a.lienFiled ? '' : 'muted') +
-      dateTile('Projected payment', a.projectedPaymentDate) +
-      tile('Currently with', hEsc(CURRENTLY_WITH_LABELS[a.currentlyWith] || a.currentlyWith || '—')) +
+      dateTile('NOIL sent', a.noilSentAt, 'noilSent') +
+      tile('Lien filed', a.lienFiled ? 'Yes' : 'No', a.lienFiled ? '' : 'muted', 'lienFiled') +
+      dateTile('Projected payment', a.projectedPaymentDate, 'projectedPaymentDate') +
+      tile('Currently with', hEsc(CURRENTLY_WITH_LABELS[a.currentlyWith] || a.currentlyWith || '—'), '', 'currentlyWith') +
       tile('Payer', hEsc(PAYER_LABELS[a.payer] || a.payer || '—') + (a.pa ? ' <span class="tl-badge">PA</span>' : '')) +
-      tile('Contact', hEsc(a.contact || '—') + (a.contactEmail ? ('<div style="font-weight:400;font-size:12px;">' + hEsc(a.contactEmail) + '</div>') : '')) +
+      tile('Contact', hEsc(a.contact || '—') + (a.contactEmail ? ('<div style="font-weight:400;font-size:12px;">' + hEsc(a.contactEmail) + '</div>') : ''), '', 'contact') +
       (TENANT_DEPTS_CUSTOM ? (
-        tile('Point of contact', a.contactInfo ? hEsc(a.contactInfo).replace(/\n/g, '<br>') : 'Not on file', a.contactInfo ? '' : 'muted') +
+        tile('Point of contact', a.contactInfo ? hEsc(a.contactInfo).replace(/\n/g, '<br>') : 'Not on file', a.contactInfo ? '' : 'muted', 'contactInfo') +
         tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(a.lastFollowUpBy) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted') +
-        tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted') +
-        tile('Notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted') +
-        tile('Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted')
+        tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted', 'paymentType') +
+        tile('Notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted', 'note') +
+        tile('Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted', 'doNotContact')
       ) : '') +
-      tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted') +
-      (a.responded && a.responded !== 'none' ? tile('Last response', hEsc(a.responseSummary || a.responded)) : '');
+      tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted', 'escalated') +
+      tile('Last response', (a.responded && a.responded !== 'none' && a.responseSummary) ? hEsc(a.responseSummary) : 'None yet', (a.responded && a.responded !== 'none' && a.responseSummary) ? '' : 'muted', 'responseSummary');
 
     const tl = data.timeline || [];
     document.getElementById('hist-timeline-count').textContent = tl.length ? ('· ' + tl.length + ' event' + (tl.length === 1 ? '' : 's')) : '';
     document.getElementById('hist-timeline').innerHTML = tl.length
       ? ('<div class="tl">' + tl.map(function(t){
-          return '<div class="tl-item ' + hEsc(t.type || '') + '"><div class="tl-when">' + hEsc(hDateTime(t.at)) + '</div><div class="tl-title">' + hEsc(t.title) + (t.source ? ('<span class="tl-badge">' + hEsc(String(hSourceLabel(t.source)).toUpperCase()) + '</span>') : '') + '</div>' + (t.detail ? ('<div class="tl-detail">' + hEsc(String(t.detail).replace(/^by (salesforce|sfdc|sf|dash)$/i, 'by CRM')) + '</div>') : '') + '</div>';
+          return '<div class="tl-item ' + hEsc(t.type || '') + '"><div class="tl-when">' + hEsc(hDateTime(t.at)) + '</div><div class="tl-title">' + hEsc(t.title) + (t.source ? ('<span class="tl-badge">' + hEsc(String(hSourceLabel(t.source)).toUpperCase()) + '</span>') : '') + '</div>' + (t.detail ? ('<div class="tl-detail">' + hEsc(String(t.detail).replace(/^by (salesforce|sfdc|sf|dash)$/i, 'by ' + sysLabel())) + '</div>') : '') + '</div>';
         }).join('') + '</div>')
       : '<div class="hist-empty">Nothing recorded on this account yet.</div>';
 
@@ -5431,7 +5777,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('hist-docs').innerHTML = docs.length
       ? ('<table class="hist-table"><thead><tr><th>Type</th><th>File</th><th>Added</th><th></th></tr></thead><tbody>' + docs.map(function(d){
           const remote = d.remote === undefined ? !!d.createdAt : !!d.remote;
-          return '<tr><td>' + hEsc(d.kind || 'Document') + '</td><td>' + (d.label ? (hEsc(d.label) + ' · ') : '') + hEsc(d.name || '') + '</td><td style="white-space:nowrap;">' + hEsc(d.createdAt ? hDate(d.createdAt) : '—') + '</td><td>' + (remote ? ('<span class="hist-link" onclick="openHistoryDoc(\'' + hEsc(String(d.id)) + '\')">Open</span>') : '') + '</td></tr>';
+          return '<tr><td>' + hEsc(({ WorkAuth: 'Work Authorization', COS: 'Certificate of Satisfaction', MoistureLog: 'Moisture Log', COI: 'COI', W9: 'W-9' })[d.kind] || d.kind || 'Document') + '</td><td>' + (d.label ? (hEsc(d.label) + ' · ') : '') + hEsc(d.name || '') + '</td><td style="white-space:nowrap;">' + hEsc(d.createdAt ? hDate(d.createdAt) : '—') + '</td><td>' + (remote ? ('<span class="hist-link" onclick="openHistoryDoc(\'' + hEsc(String(d.id)) + '\')">Open</span>') : '') + '</td></tr>';
         }).join('') + '</tbody></table>')
       : '<div class="hist-empty">No documents attached.</div>';
 
@@ -5831,7 +6177,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const wrap = document.getElementById('detail-activity');
     if(!inv.activity || inv.activity.length === 0){ wrap.innerHTML = `<div class="empty" style="padding:16px;">No account activity yet.</div>`; return; }
     wrap.innerHTML = `<div class="activity-feed">${inv.activity.map(a => `
-      <div class="activity-item"><div class="txt"><span class="sf-tag">CRM NOTE</span>${a.text}</div><div class="ts">${a.ts}</div></div>
+      <div class="activity-item"><div class="txt"><span class="sf-tag">${sysLabel()} NOTE</span>${a.text}</div><div class="ts">${a.ts}</div></div>
     `).join('')}</div>`;
   }
 
@@ -5962,6 +6308,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     WorkAuth: (n) => `Work Authorization.pdf`,
     COS: (n) => `Certificate of Satisfaction.pdf`,
     MoistureLog: (n) => `Moisture Log ${n}.pdf`,
+    COI: (n) => `Certificate of Insurance.pdf`,
+    W9: (n) => `W-9.pdf`,
     Other: (n) => `Document ${n}.pdf`
   };
 
@@ -6093,15 +6441,15 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const oldStatus = inv.jobStatus;
     inv.jobStatus = newStatus;
     if(oldStatus !== newStatus){
-      addActivity(inv, `Status synced from your CRM: ${STATUS_LABELS[oldStatus]} \u2192 ${STATUS_LABELS[newStatus]}.`, 'automation');
+      addActivity(inv, `Status synced from ${sysLabel() === 'CRM' ? 'your CRM' : sysLabel()}: ${STATUS_LABELS[oldStatus]} \u2192 ${STATUS_LABELS[newStatus]}.`, 'automation');
     }
     if(alsoDocs && !inv.docsComplete){
       inv.docsComplete = true;
-      addActivity(inv, 'Supporting documentation marked complete (synced from your CRM).', 'automation');
+      addActivity(inv, 'Supporting documentation marked complete (synced from ' + (sysLabel() === 'CRM' ? 'your CRM' : sysLabel()) + ').', 'automation');
     }
     runAutomationChecks(inv);
     saveState(); renderAll();
-    showToast(`CRM update applied to ${inv.name}`);
+    showToast(`${sysLabel()} update applied to ${inv.name}`);
   }
 
   function runAutomationChecks(inv){
@@ -6137,9 +6485,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       ...state.automationLog.filter(a=>invoiceDeptMatches(a.invoiceId)).map(a => ({ ts:a.sentAt, txt: `<b>${a.type}</b> sent for ${acctLink(a.invoiceId, a.invoiceName)}` })),
       ...state.commsLog.filter(c=>c.source==='automation' && invoiceDeptMatches(c.invoiceId)).map(c => ({ ts:c.sentAt, txt: `<b>${c.draftType}</b> autonomously sent for ${acctLink(c.invoiceId, c.invoiceName)}` }))
     ];
-    if(combined.length === 0){ el.innerHTML = `<div class="activity-item"><div class="txt">No autonomous sends yet${state.deptFilter!=='all' ? ' for this department' : ''}. ${window.__CLMS_REAL ? 'They start automatically as invoices reach each cadence checkpoint.' : 'Advance the demo clock or push a CRM status update to trigger one.'}</div></div>`; return; }
+    if(combined.length === 0){ el.innerHTML = `<div class="activity-item"><div class="txt">No autonomous sends yet${state.deptFilter!=='all' ? ' for this department' : ''}. ${window.__CLMS_REAL ? 'They start automatically as invoices reach each cadence checkpoint.' : 'Advance the demo clock or push a ' + sysLabel() + ' status update to trigger one.'}</div></div>`; return; }
     el.innerHTML = combined.slice(0,30).map(a => `
-      <div class="activity-item"><div class="txt"><span class="sf-tag">CRM NOTE</span>${a.txt}</div><div class="ts">${a.ts}</div></div>
+      <div class="activity-item"><div class="txt"><span class="sf-tag">${sysLabel()} NOTE</span>${a.txt}</div><div class="ts">${a.ts}</div></div>
     `).join('');
   }
 
@@ -6213,6 +6561,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       WorkAuth: 'Work Authorization (signed by the customer, authorizes the scope of work)',
       COS: 'Certificate of Satisfaction (signed by the customer confirming the work was completed and accepted)',
       MoistureLog: 'Moisture log (drying documentation)',
+      COI: 'Certificate of Insurance (proof of coverage)',
+      W9: 'W-9 (taxpayer identification form)',
       Other: 'Supporting document'
     };
     const docsList = (docs || []).map(d => {
@@ -6381,7 +6731,7 @@ Do not invent facts beyond what's given.`;
     let msg = '', bad = false;
     if(!list.length){
       bad = !!state.currentUser;
-      msg = el.value.trim() ? 'Enter at least one valid email address.' : (onFile ? '' : (state.currentUser ? 'No contact email on file for this account \u2014 type one here or add it in your CRM.' : 'Contact email on file for this account'));
+      msg = el.value.trim() ? 'Enter at least one valid email address.' : (onFile ? '' : (state.currentUser ? 'No contact email on file for this account \u2014 type one here or add it in ' + (sysLabel() === 'CRM' ? 'your CRM' : sysLabel()) + '.' : 'Contact email on file for this account'));
     } else if(list.length > 1){
       msg = 'Sending to ' + list.length + ' people: ' + list.join(', ');
     } else if(changed && onFile){
