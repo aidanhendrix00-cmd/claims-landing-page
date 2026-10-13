@@ -7286,7 +7286,7 @@ integs +
 '<div class="msg" id="uemsg-'+i+'"></div>' +
 '</div>' +
 '<div class="box"><h3>Demo data</h3>' +
-'<div class="note">Seeds 10 invoices per department across the offices, plus 5 demo employees with a month of activity, so the workspace has something to show before the real books connect. Remove it any time; a production QuickBooks connection clears it automatically.</div>' +
+'<div class="note">Seeds 10 invoices per department across the offices, plus 14 demo employees with a month of activity, so the workspace has something to show before the real books connect. Remove it any time; a production QuickBooks connection clears it automatically.</div>' +
 '<button class="act" onclick="__demo('+i+',\\'seed\\')">Seed demo data</button> <button class="act ghost" onclick="__demo('+i+',\\'remove\\')">Remove demo data</button>' +
 '<div class="msg" id="demomsg-'+i+'"></div>' +
 '</div>' +
@@ -7461,7 +7461,7 @@ return !!(env.ADMIN_EXPORT_KEY && key === env.ADMIN_EXPORT_KEY);
 /* ---------------------------------------------------------------------------
    Demo data for a company workspace (internal onboarding page)
    Seeds 10 invoices per department (operating company), spread across the
-   company's offices, plus 5 demo employees with a month of realistic activity,
+   company's offices, plus 14 demo employees with a month of realistic activity,
    so a new workspace has something to show before the real books connect.
    Everything is tagged so "Remove demo data" takes it all out again, and a
    production QuickBooks connection clears it automatically.
@@ -7509,8 +7509,13 @@ function demoProfileFor(deptLabel) {
 const key = String(deptLabel || '').toLowerCase().replace(/&amp;/g, '&');
 return DEMO_BUSINESS_PROFILES.find(function (p) { return p.match.some(function (m) { return key.indexOf(m) !== -1; }); }) || null;
 }
+// Fourteen demo employees, one per office in a workspace that size (they cycle
+// through the offices, so smaller workspaces get a few per city). About a third
+// are managers so both the manager and the employee view have someone in them.
 const DEMO_EMPLOYEES = [
-['Jordan Hale', 'manager'], ['Alexis Moreno', 'user'], ['Taylor Brooks', 'user'], ['Casey Nwosu', 'user'], ['Riley Thompson', 'manager']
+['Jordan Hale', 'manager'], ['Alexis Moreno', 'user'], ['Taylor Brooks', 'user'], ['Casey Nwosu', 'user'], ['Riley Thompson', 'manager'],
+['Morgan Castillo', 'user'], ['Devin Okafor', 'manager'], ['Priya Raman', 'user'], ['Sam Delgado', 'user'], ['Jamie Whitfield', 'manager'],
+['Avery Lindqvist', 'user'], ['Marcus Bell', 'user'], ['Elena Petrova', 'manager'], ['Chris Yamamoto', 'user']
 ];
 function demoRand(seed) { let x = seed % 2147483647; if (x <= 0) x += 2147483646; return function () { x = (x * 16807) % 2147483647; return (x - 1) / 2147483646; }; }
 function demoEmail(name) { return 'demo.' + name.toLowerCase().replace(/[^a-z]+/g, '.') + '@' + DEMO_EMAIL_DOMAIN; }
@@ -7618,13 +7623,14 @@ const rnd = demoRand(Number(tenant.id) * 7919 + 13);
 const offices = resolveOffices(tenant.offices); const officeKeys = Object.keys(offices);
 const departments = resolveDepartments(tenant.departments); const deptKeys = Object.keys(departments);
 const nowMs = Date.now();
-// Five demo employees across the offices (status 'active' so the Team tab and
-// Employees Activity list them; a random password hash so nobody can sign in).
+// Demo employees spread across the offices (status 'active' so the Team tab and
+// Employees Activity list them). The stored "hash" is random bytes that no
+// password derives to, so nobody can sign in as them - and skipping the key
+// derivation keeps the seed fast however many employees there are.
 const userRows = [];
 for (let i = 0; i < DEMO_EMPLOYEES.length; i++) {
 const [name, role] = DEMO_EMPLOYEES[i];
-const salt = randomSalt();
-userRows.push({ tenant_id: tenant.id, email: demoEmail(name), password_hash: await hashPassword(randomToken(), salt), salt: salt,
+userRows.push({ tenant_id: tenant.id, email: demoEmail(name), password_hash: randomToken(), salt: randomSalt(),
 role: role, email_verified: true, status: 'active', full_name: name, office: officeKeys[i % officeKeys.length] || null });
 }
 // Bulk inserts: one request per table keeps this well inside a single
