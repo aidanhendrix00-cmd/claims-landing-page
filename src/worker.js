@@ -707,6 +707,274 @@ const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-
   '</div>' +
   '</body></html>';
 
+// The Reports tab's own script (My Account): kept apart from the page string
+// so it reads as plain JavaScript. Backslashes are doubled for the template
+// literal, so the page receives them as written above.
+const ACCOUNT_REPORTS_SCRIPT = `<script>
+(function(){
+  // Reports: every dashboard tab as a downloadable PDF or spreadsheet, cut by
+  // city, business, payer, status and a date range. Everything is read from
+  // the same endpoints the dashboard uses, so a report always matches the
+  // screen at the moment it is run.
+  var R = { me: null, accounts: null, payments: null, comms: null, activity: null, loading: null, lastRows: null, lastCols: null, lastTitle: '' };
+  var EM = '—';
+  function $(id){ return document.getElementById(id); }
+  function esc(v){ return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function money(n){ var x = Number(n || 0); return '$' + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function day(v){ if(!v) return ''; var s = String(v); if(/^\\d{4}-\\d{2}-\\d{2}/.test(s)) return s.slice(0, 10); var d = new Date(s); return isNaN(d.getTime()) ? '' : (d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0')); }
+  function fmtDay(v){ var s = day(v); if(!s) return ''; var d = new Date(s + 'T12:00:00'); return isNaN(d.getTime()) ? s : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); }
+  function fmtWhen(v){ if(!v) return ''; var d = new Date(v); return isNaN(d.getTime()) ? String(v) : d.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+  function localDay(d){ var x = d || new Date(); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+  function today(){ return localDay(); }
+  function custom(){ return !!(R.me && R.me.departments && Object.keys(R.me.departments).length && R.me.integrationMode); }
+  function cityWord(){ return R.me && R.me.integrationMode === 'quickbooks' ? 'City' : 'Office'; }
+  function bizWord(){ return R.me && R.me.integrationMode === 'quickbooks' ? 'Business' : 'Department'; }
+  function officeLabel(k){ var o = (R.me && R.me.offices) || {}; return o[k] || (k ? String(k).replace(/_/g, ' ') : ''); }
+  function deptLabel(k){ var d = (R.me && R.me.departments) || {}; return d[k] || (k ? String(k).replace(/_/g, ' ') : ''); }
+  var PAYER = { insurance: 'Insurance', pm: 'Commercial or Property Management', private: 'Private Pay' };
+  var STATUS = { in_progress: 'In Progress', work_completed: 'Work Completed', in_ar: 'In A/R', paid: 'Paid', ar_sent: 'In A/R', completed: 'Work Completed' };
+  var CW = { adjuster: 'Adjuster', pm: 'Property Manager', homeowner: 'Homeowner' };
+  var PT = { payment_link: 'Payment Link', check: 'Check', ach: 'ACH', credit_card: 'Credit Card', wire: 'Wire/Direct Deposit', integration: 'Accounting system' };
+  function statusLabel(a){ if(isPaid(a)) return 'Paid'; return STATUS[a.jobStatus] || (a.jobStatus ? String(a.jobStatus).replace(/_/g,' ') : 'Open'); }
+  function isPaid(a){ var amt = Number(a.amount || 0), paid = a.paidAmount == null ? null : Number(a.paidAmount || 0); return String(a.jobStatus || '') === 'paid' || (amt > 0 && paid != null && paid + 0.005 >= amt) || (!!a.paidDate && (paid == null || paid + 0.005 >= amt)); }
+  function balance(a){ return Math.max(0, Number(a.amount || 0) - Number(a.paidAmount || 0)); }
+  function ageDays(a){ var d = day(a.invoicedDate); if(!d) return Number(a.days || 0); return Math.max(0, Math.round((Date.now() - new Date(d + 'T12:00:00').getTime()) / 86400000)); }
+  function followUpDay(ts){ return day(ts); }
+
+  var REPORTS = {
+    queue: { label: 'Invoice Queue', dateField: 'Invoice date', needs: ['accounts'] },
+    ar: { label: 'Accounts Receivable', dateField: 'Invoice date', needs: ['accounts'] },
+    mtd: { label: 'Invoiced (by invoice date)', dateField: 'Invoice date', needs: ['accounts'] },
+    collected: { label: 'Collected (payments)', dateField: 'Payment date', needs: ['accounts', 'payments'] },
+    aging: { label: 'Aging Report', dateField: 'Invoice date', needs: ['accounts'] },
+    responses: { label: 'Response Received', dateField: 'Last contact', needs: ['accounts'] },
+    escalations: { label: 'Escalations', dateField: 'Invoice date', needs: ['accounts'] },
+    comms: { label: 'Comms Log', dateField: 'Sent', needs: ['accounts', 'comms'] },
+    activity: { label: 'Employee Activity', dateField: 'When', needs: ['accounts', 'activity'], adminOnly: true }
+  };
+
+  function load(kind){
+    if(R[kind]) return Promise.resolve(R[kind]);
+    var url = { accounts: '/api/accounts', payments: '/api/invoices/payments', comms: '/api/invoices/comms?limit=1000', activity: '/api/team/activity?days=365' }[kind];
+    return fetch(url, { credentials: 'same-origin', cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
+      if(!d || !d.ok) throw new Error((d && d.error) || ('Could not load ' + kind + '.'));
+      R[kind] = kind === 'accounts' ? (d.accounts || []) : kind === 'payments' ? (d.payments || []) : kind === 'comms' ? (d.comms || []) : (d.activity || []);
+      return R[kind];
+    });
+  }
+  function msg(t, ok){ var el = $('rptMsg'); if(!el) return; el.style.display = t ? 'block' : 'none'; el.style.color = ok ? '#1F5346' : '#8A1C13'; el.textContent = t || ''; }
+
+  function fillSelects(){
+    var me = R.me || {};
+    var city = $('rptCity'), biz = $('rptBiz');
+    var cityWordV = cityWord(), bizWordV = bizWord();
+    $('rptCityLabel').textContent = cityWordV; $('rptBizLabel').textContent = bizWordV;
+    city.innerHTML = '<option value="all">All ' + esc(cityWordV.toLowerCase() === 'city' ? 'cities' : 'offices') + '</option>' + Object.keys(me.offices || {}).map(function(k){ return '<option value="' + esc(k) + '">' + esc(me.offices[k]) + '</option>'; }).join('');
+    biz.innerHTML = '<option value="all">All ' + esc(bizWordV.toLowerCase() === 'business' ? 'businesses' : 'departments') + '</option>' + Object.keys(me.departments || {}).map(function(k){ return '<option value="' + esc(k) + '">' + esc(me.departments[k]) + '</option>'; }).join('');
+    var type = $('rptType');
+    type.innerHTML = Object.keys(REPORTS).filter(function(k){ return !REPORTS[k].adminOnly || (me.role === 'admin'); }).map(function(k){ return '<option value="' + k + '">' + esc(REPORTS[k].label) + '</option>'; }).join('');
+    syncDateLabel();
+  }
+  function syncDateLabel(){ var k = $('rptType').value; var el = $('rptDateLabel'); if(el) el.textContent = (REPORTS[k] && REPORTS[k].dateField) || 'Date'; }
+  function filters(){
+    return { type: $('rptType').value, city: $('rptCity').value, biz: $('rptBiz').value, payer: $('rptPayer').value, status: $('rptStatus').value, from: $('rptFrom').value, to: $('rptTo').value };
+  }
+  function inRange(d, f){ var s = day(d); if(f.from && (!s || s < f.from)) return false; if(f.to && (!s || s > f.to)) return false; return true; }
+  function accountMatches(a, f){
+    if(f.city !== 'all' && String(a.officeLocation || '') !== f.city) return false;
+    if(f.biz !== 'all' && String(a.department || '') !== f.biz) return false;
+    if(f.payer !== 'all' && String(a.payer || '') !== f.payer) return false;
+    return true;
+  }
+  function statusMatches(a, f){
+    var paid = isPaid(a);
+    if(f.status === 'open' && paid) return false;
+    if(f.status === 'paid' && !paid) return false;
+    if(f.status === 'collections' && !a.doNotContact) return false;
+    if(f.status === 'escalated' && !a.escalated) return false;
+    if(f.status === 'replied' && a.responded !== 'replied') return false;
+    return true;
+  }
+  function byName(a, b){ return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }); }
+
+  function baseCols(){ return ['Account', 'Invoice #', 'Invoice date', 'Days', cityWord(), bizWord(), 'Payer', 'Status', 'Invoiced', 'Paid', 'Balance due']; }
+  function baseRow(a){ return [a.name, a.invoiceNumber || '', fmtDay(a.invoicedDate), ageDays(a), officeLabel(a.officeLocation), deptLabel(a.department), PAYER[a.payer] || a.payer || '', statusLabel(a), money(a.amount), money(a.paidAmount), money(balance(a))]; }
+
+  function build(f){
+    var accts = (R.accounts || []).filter(function(a){ return accountMatches(a, f); });
+    var byId = {}; (R.accounts || []).forEach(function(a){ byId[String(a.id)] = a; });
+    var cols, rows, title = REPORTS[f.type].label, foot = null;
+    if(f.type === 'queue' || f.type === 'mtd'){
+      var list = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f === 'queue' ? f : f); });
+      if(f.type === 'queue' && f.status === 'all') list = list.filter(function(a){ return !isPaid(a); });
+      list.sort(byName);
+      cols = baseCols().concat(['Follow-ups', 'Last contact', 'Responded?', 'Currently with']);
+      rows = list.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), CW[a.currentlyWith] || a.currentlyWith || '']); });
+      foot = totals(list);
+    } else if(f.type === 'ar'){
+      var ar = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f); });
+      if(f.status === 'all') ar = ar.filter(function(a){ return !isPaid(a); });
+      ar.sort(byName);
+      cols = baseCols().concat(['Contact', 'Contact email', 'Point of contact', 'Last contact', 'Responded?', 'Response summary', 'Notes', 'Last follow-up', 'Follow-up by', 'Projected payment', 'Payment type', 'Sent to collections', 'Escalated']);
+      rows = ar.map(function(a){ return baseRow(a).concat([a.contact || '', a.contactEmail || '', a.contactInfo || '', fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), a.responseSummary || '', a.note || '', fmtDay(followUpDay(a.lastFollowUpAt)), a.lastFollowUpBy || '', fmtDay(a.projectedPaymentDate), PT[a.paymentType] || a.paymentType || '', a.doNotContact ? 'Yes' : 'No', a.escalated ? 'Yes' : 'No']); });
+      foot = totals(ar);
+    } else if(f.type === 'collected'){
+      var pays = (R.payments || []).map(function(p){ return { p: p, a: byId[String(p.account_id)] }; }).filter(function(x){ return x.a && accountMatches(x.a, f) && inRange(x.p.deposited_on || x.p.created_at, f); });
+      pays.sort(function(x, y){ return String(y.p.deposited_on || y.p.created_at || '').localeCompare(String(x.p.deposited_on || x.p.created_at || '')) || byName(x.a, y.a); });
+      cols = ['Payment date', 'Account', 'Invoice #', cityWord(), bizWord(), 'Payer', 'Amount', 'Method', 'Reference', 'Payer name', 'Bank', 'Memo', 'Source'];
+      rows = pays.map(function(x){ return [fmtDay(x.p.deposited_on || x.p.created_at), x.a.name, x.a.invoiceNumber || '', officeLabel(x.a.officeLocation), deptLabel(x.a.department), PAYER[x.a.payer] || '', money(x.p.amount), PT[x.p.method] || x.p.method || '', x.p.reference || '', x.p.payer_name || '', x.p.bank_name || '', x.p.memo || '', x.p.source || (x.p.recorded_by ? 'manual' : 'integration')]; });
+      var tot = pays.reduce(function(s, x){ return s + Number(x.p.amount || 0); }, 0);
+      foot = pays.length + ' payment' + (pays.length === 1 ? '' : 's') + ' · ' + money(tot) + ' collected';
+    } else if(f.type === 'aging'){
+      var open = accts.filter(function(a){ return !isPaid(a) && inRange(a.invoicedDate, f) && balance(a) > 0; });
+      var buckets = ['0–30', '31–60', '61–90', '90+'];
+      function bucket(a){ var d = ageDays(a); return d <= 30 ? 0 : d <= 60 ? 1 : d <= 90 ? 2 : 3; }
+      var groups = {};
+      open.forEach(function(a){ var k = officeLabel(a.officeLocation) + ' · ' + deptLabel(a.department); (groups[k] = groups[k] || { n: 0, b: [0,0,0,0], total: 0 }); groups[k].n++; groups[k].b[bucket(a)] += balance(a); groups[k].total += balance(a); });
+      cols = [cityWord() + ' · ' + bizWord(), 'Open invoices', 'Balance ' + buckets[0] + ' days', 'Balance ' + buckets[1] + ' days', 'Balance ' + buckets[2] + ' days', 'Balance ' + buckets[3] + ' days', 'Total balance'];
+      rows = Object.keys(groups).sort().map(function(k){ var g = groups[k]; return [k, g.n, money(g.b[0]), money(g.b[1]), money(g.b[2]), money(g.b[3]), money(g.total)]; });
+      var all = [0,0,0,0]; open.forEach(function(a){ all[bucket(a)] += balance(a); });
+      rows.push(['Total', open.length, money(all[0]), money(all[1]), money(all[2]), money(all[3]), money(all.reduce(function(s, x){ return s + x; }, 0))]);
+      // Then every open account, oldest first, so the detail sits under the summary.
+      rows.push(['', '', '', '', '', '', '']);
+      rows.push(['Account', 'Invoice #', 'Invoice date', 'Days', 'Bucket', 'Payer', 'Balance due']);
+      open.slice().sort(function(a, b){ return ageDays(b) - ageDays(a) || byName(a, b); }).forEach(function(a){ rows.push([a.name, a.invoiceNumber || '', fmtDay(a.invoicedDate), ageDays(a), buckets[bucket(a)] + ' days', PAYER[a.payer] || '', money(balance(a))]); });
+    } else if(f.type === 'responses'){
+      var rep = accts.filter(function(a){ return a.responded === 'replied' && a.responseSummary && inRange(a.lastContact, f) && statusMatches(a, f); });
+      rep.sort(function(a, b){ return String(day(b.lastContact)).localeCompare(String(day(a.lastContact))) || byName(a, b); });
+      cols = ['Account', 'Invoice #', cityWord(), bizWord(), 'Payer', 'Status', 'Balance due', 'Received', 'Last follow-up type', 'Response summary'];
+      rows = rep.map(function(a){ return [a.name, a.invoiceNumber || '', officeLabel(a.officeLocation), deptLabel(a.department), PAYER[a.payer] || '', statusLabel(a), money(balance(a)), fmtDay(a.lastContact), ({ followup: 'Follow-up', demand: 'Demand letter', demand_letter: 'Demand letter', noil: 'NOIL' })[a.lastFollowUpKind] || (a.lastFollowUpKind || ''), a.responseSummary || '']; });
+      foot = rep.length + ' response' + (rep.length === 1 ? '' : 's');
+    } else if(f.type === 'escalations'){
+      var escd = accts.filter(function(a){ return a.escalated && inRange(a.invoicedDate, f) && statusMatches(a, f); }).sort(function(a, b){ return balance(b) - balance(a) || byName(a, b); });
+      cols = baseCols().concat(['Follow-ups', 'Last contact', 'Manager notified', 'Contact', 'Notes']);
+      rows = escd.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.notifiedName || 'Not yet', [a.contact, a.contactEmail].filter(Boolean).join(' · '), a.note || '']); });
+      foot = totals(escd);
+    } else if(f.type === 'comms'){
+      var cm = (R.comms || []).map(function(c){ return { c: c, a: byId[String(c.accountId)] }; }).filter(function(x){ return (!x.a || accountMatches(x.a, f)) && inRange(x.c.at, f); });
+      cm.sort(function(x, y){ return String(y.c.at || '').localeCompare(String(x.c.at || '')); });
+      cols = ['Sent', 'Account', 'Invoice #', cityWord(), bizWord(), 'Type', 'To', 'Subject', 'Status', 'Source', 'Sent by'];
+      rows = cm.map(function(x){ var c = x.c; return [fmtWhen(c.at), c.accountName || (x.a && x.a.name) || '', c.invoiceNumber || (x.a && x.a.invoiceNumber) || '', officeLabel(c.office || (x.a && x.a.officeLocation)), deptLabel(c.department || (x.a && x.a.department)), c.label || c.kind || '', [c.recipientRole, c.recipientEmail].filter(Boolean).join(' · '), c.subject || '', String(c.status || '').replace(/_/g, ' '), c.source === 'automation' ? 'Automated' : 'Manual', c.senderName || c.sentBy || (c.source === 'automation' ? 'clAIms automation' : '')]; });
+      foot = cm.length + ' message' + (cm.length === 1 ? '' : 's');
+    } else if(f.type === 'activity'){
+      var act = (R.activity || []).filter(function(r){ var a = r.accountId ? byId[String(r.accountId)] : null; if(f.city !== 'all' && String(r.office || (a && a.officeLocation) || '') !== f.city) return false; if(f.biz !== 'all' && (!a || String(a.department || '') !== f.biz)) return false; if(f.payer !== 'all' && (!a || String(a.payer || '') !== f.payer)) return false; return inRange(r.at, f); });
+      act.sort(function(x, y){ return String(y.at || '').localeCompare(String(x.at || '')); });
+      cols = ['When', 'Who', 'Role', cityWord(), 'Type', 'Account', 'Invoice #', 'What happened'];
+      rows = act.map(function(r){ return [fmtWhen(r.at), r.actor || '', r.role || '', officeLabel(r.office), String(r.type || '').replace(/_/g, ' '), r.customer || '', r.invoiceNumber || '', r.summary || '']; });
+      foot = act.length + ' entr' + (act.length === 1 ? 'y' : 'ies');
+    }
+    return { title: title, cols: cols, rows: rows, foot: foot };
+  }
+  function totals(list){ var inv = 0, paid = 0, due = 0; list.forEach(function(a){ inv += Number(a.amount || 0); paid += Number(a.paidAmount || 0); due += balance(a); }); return list.length + ' invoice' + (list.length === 1 ? '' : 's') + ' · ' + money(inv) + ' invoiced · ' + money(paid) + ' paid · ' + money(due) + ' still due'; }
+  function subtitle(f){
+    var bits = [];
+    bits.push(f.city === 'all' ? ('All ' + (cityWord() === 'City' ? 'cities' : 'offices')) : officeLabel(f.city));
+    bits.push(f.biz === 'all' ? ('All ' + (bizWord() === 'Business' ? 'businesses' : 'departments')) : deptLabel(f.biz));
+    if(f.payer !== 'all') bits.push(PAYER[f.payer] || f.payer);
+    if(f.status !== 'all') bits.push({ open: 'Open only', paid: 'Paid only', collections: 'Sent to collections', escalated: 'Escalated', replied: 'Replied' }[f.status] || f.status);
+    if(f.from || f.to) bits.push((REPORTS[f.type].dateField || 'Date') + ' ' + (f.from ? fmtDay(f.from) : 'start') + ' – ' + (f.to ? fmtDay(f.to) : 'today'));
+    return bits.join(' · ');
+  }
+  function companyName(){ return (R.me && R.me.companyName) || 'clAIms'; }
+
+  function run(){
+    var f = filters(); var spec = REPORTS[f.type]; if(!spec) return;
+    msg('');
+    var btn = $('rptRun'); btn.disabled = true; btn.textContent = 'Running…';
+    Promise.all(spec.needs.map(load)).then(function(){
+      var out = build(f);
+      R.lastRows = out.rows; R.lastCols = out.cols; R.lastTitle = out.title; R.lastSub = subtitle(f); R.lastFoot = out.foot;
+      renderPreview(out);
+      $('rptExports').style.display = out.rows.length ? 'flex' : 'none';
+    }).catch(function(e){ msg(String((e && e.message) || e), false); }).then(function(){ btn.disabled = false; btn.textContent = 'Run report'; });
+  }
+  function renderPreview(out){
+    var box = $('rptPreview'); if(!box) return;
+    if(!out.rows.length){ box.innerHTML = '<div class="restricted-box">Nothing matches those filters. Widen the date range or pick a different ' + esc(cityWord().toLowerCase()) + ' or ' + esc(bizWord().toLowerCase()) + '.</div>'; return; }
+    var show = out.rows.slice(0, 200);
+    box.innerHTML = '<div class="rpt-head"><div><b>' + esc(out.title) + '</b><div class="acct-card-sub" style="margin:2px 0 0;">' + esc(R.lastSub) + ' · ' + esc(companyName()) + ' · run ' + esc(fmtDay(today())) + '</div></div><div class="rpt-count">' + out.rows.length + ' row' + (out.rows.length === 1 ? '' : 's') + (out.rows.length > show.length ? ' (first ' + show.length + ' shown; the download has all of them)' : '') + '</div></div>' +
+      '<div class="table-scroll"><table class="acct-table rpt-table"><thead><tr>' + out.cols.map(function(c){ return '<th>' + esc(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      show.map(function(r){ return '<tr>' + r.map(function(v){ return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' +
+      (out.foot ? '<div class="rpt-foot">' + esc(out.foot) + '</div>' : '');
+  }
+  function fileBase(){ return (R.lastTitle || 'report').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() + '-' + today(); }
+  function downloadBlob(blob, name){ var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
+  function loadScript(src){ return new Promise(function(res, rej){ var s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = function(){ rej(new Error('Could not load ' + src)); }; document.head.appendChild(s); }); }
+  function exportCsv(){
+    if(!R.lastRows) return;
+    var lines = [[R.lastTitle], [R.lastSub + ' · ' + companyName() + ' · run ' + fmtDay(today())], []].concat([R.lastCols]).concat(R.lastRows);
+    if(R.lastFoot) lines.push([], [R.lastFoot]);
+    var csv = lines.map(function(r){ return r.map(function(v){ var s = String(v == null ? '' : v); return /[",\\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(','); }).join('\\r\\n');
+    downloadBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), fileBase() + '.csv');
+  }
+  function exportXlsx(){
+    if(!R.lastRows) return;
+    var b = $('rptXlsx'); b.disabled = true; b.textContent = 'Building…';
+    (window.XLSX ? Promise.resolve() : loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')).then(function(){
+      var data = [[R.lastTitle], [R.lastSub + ' · ' + companyName() + ' · run ' + fmtDay(today())], []].concat([R.lastCols]).concat(R.lastRows.map(function(r){ return r.map(function(v){ if(typeof v === 'string' && /^\\$[\\d,]+\\.\\d{2}$/.test(v)) return Number(v.replace(/[$,]/g, '')); return v; }); }));
+      if(R.lastFoot) data.push([], [R.lastFoot]);
+      var ws = XLSX.utils.aoa_to_sheet(data);
+      ws['!cols'] = R.lastCols.map(function(c, i){ var w = Math.max(String(c).length, 8); R.lastRows.slice(0, 300).forEach(function(r){ w = Math.max(w, Math.min(60, String(r[i] == null ? '' : r[i]).length)); }); return { wch: w + 2 }; });
+      var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, (R.lastTitle || 'Report').slice(0, 31));
+      XLSX.writeFile(wb, fileBase() + '.xlsx');
+    }).catch(function(){ exportCsv(); msg('The spreadsheet library could not load, so a CSV was downloaded instead (opens in Excel).', false); })
+    .then(function(){ b.disabled = false; b.textContent = 'Spreadsheet (.xlsx)'; });
+  }
+  function exportPdf(){
+    if(!R.lastRows) return;
+    var b = $('rptPdf'); b.disabled = true; b.textContent = 'Building…';
+    var need = [];
+    if(!(window.jspdf && window.jspdf.jsPDF)) need.push('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    need.reduce(function(p, src){ return p.then(function(){ return loadScript(src); }); }, Promise.resolve())
+      .then(function(){ if(!(window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable)) return loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'); })
+      .then(function(){
+        var wide = R.lastCols.length > 9;
+        var doc = new window.jspdf.jsPDF({ orientation: wide ? 'landscape' : 'portrait', unit: 'pt', format: 'letter' });
+        var W = doc.internal.pageSize.getWidth();
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text(R.lastTitle, 40, 44);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(97, 93, 83);
+        doc.text(R.lastSub + '  ·  ' + companyName() + '  ·  run ' + fmtDay(today()), 40, 60);
+        doc.setTextColor(23, 23, 23);
+        doc.autoTable({ head: [R.lastCols], body: R.lastRows.map(function(r){ return r.map(function(v){ return String(v == null ? '' : v); }); }), startY: 72, margin: { left: 40, right: 40 },
+          styles: { fontSize: wide ? 6.5 : 8, cellPadding: 3, overflow: 'linebreak', textColor: [23, 23, 23] }, headStyles: { fillColor: [23, 23, 23], textColor: 255, fontStyle: 'bold' }, alternateRowStyles: { fillColor: [247, 245, 239] },
+          didDrawPage: function(){ doc.setFontSize(8); doc.setTextColor(138, 133, 120); doc.text(companyName() + ' · clAIms · page ' + doc.internal.getNumberOfPages(), W - 40, doc.internal.pageSize.getHeight() - 20, { align: 'right' }); doc.setTextColor(23, 23, 23); } });
+        if(R.lastFoot){ var y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 80) + 16; doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.text(R.lastFoot, 40, y); }
+        doc.save(fileBase() + '.pdf');
+      })
+      .catch(function(){ printFallback(); })
+      .then(function(){ b.disabled = false; b.textContent = 'PDF'; });
+  }
+  function printFallback(){
+    var w = window.open('', '_blank'); if(!w){ msg('Allow pop-ups to print this report.', false); return; }
+    w.document.write('<!doctype html><html><head><title>' + esc(R.lastTitle) + '</title><style>body{font-family:Arial,sans-serif;color:#171717;padding:24px;}h1{font-size:18px;margin:0 0 4px;}.sub{color:#615D53;font-size:12px;margin-bottom:14px;}table{border-collapse:collapse;width:100%;font-size:10.5px;}th,td{border:1px solid #ddd;padding:4px 6px;text-align:left;vertical-align:top;}th{background:#171717;color:#fff;}tr:nth-child(even) td{background:#F7F5EF;}.foot{margin-top:10px;font-weight:700;font-size:12px;}@page{size:landscape;margin:14mm;}</style></head><body><h1>' + esc(R.lastTitle) + '</h1><div class="sub">' + esc(R.lastSub) + ' · ' + esc(companyName()) + ' · run ' + esc(fmtDay(today())) + '</div><table><thead><tr>' + R.lastCols.map(function(c){ return '<th>' + esc(c) + '</th>'; }).join('') + '</tr></thead><tbody>' + R.lastRows.map(function(r){ return '<tr>' + r.map(function(v){ return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>' + (R.lastFoot ? '<div class="foot">' + esc(R.lastFoot) + '</div>' : '') + '</body></html>');
+    w.document.close(); setTimeout(function(){ try { w.focus(); w.print(); } catch(e) {} }, 400);
+    msg('The PDF library could not load, so the report opened in a print window: choose "Save as PDF" there.', false);
+  }
+  function presetRange(which){
+    var now = new Date(); var from = '', to = today();
+    if(which === 'month'){ from = localDay(new Date(now.getFullYear(), now.getMonth(), 1)); }
+    else if(which === 'last-month'){ from = localDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)); to = localDay(new Date(now.getFullYear(), now.getMonth(), 0)); }
+    else if(which === 'quarter'){ from = localDay(new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)); }
+    else if(which === 'year'){ from = now.getFullYear() + '-01-01'; }
+    else if(which === '30'){ from = localDay(new Date(now.getTime() - 30 * 86400000)); }
+    else { from = ''; to = ''; }
+    $('rptFrom').value = from; $('rptTo').value = to;
+  }
+  function init(){
+    if(!$('rptType')) return;
+    $('rptType').addEventListener('change', syncDateLabel);
+    $('rptRun').addEventListener('click', run);
+    $('rptCsv').addEventListener('click', exportCsv);
+    $('rptXlsx').addEventListener('click', exportXlsx);
+    $('rptPdf').addEventListener('click', exportPdf);
+    document.querySelectorAll('[data-rpt-range]').forEach(function(b){ b.addEventListener('click', function(){ presetRange(b.getAttribute('data-rpt-range')); }); });
+    fetch('/api/me', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){ if(d && d.ok){ R.me = d; fillSelects(); } }).catch(function(){});
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  window.__clmsReports = { run: run, build: build, filters: filters, _R: R };
+})();
+</script>`;
+
 const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-8"> ' +
   '<meta name="viewport" content="width=device-width, initial-scale=1"> ' +
   '<title>My Account — clAIms</title> ' +
@@ -758,6 +1026,20 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   'table.acct-table td{padding:12px 12px;border-bottom:1px solid #F0EDE3;vertical-align:middle;} ' +
   'table.acct-table tr:last-child td{border-bottom:none;} ' +
   '.filters-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;} ' +
+  '.rpt-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 20px;} ' +
+  '.rpt-select{width:100%;font:inherit;font-size:13.5px;padding:8px 10px;border:1px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
+  '.rpt-range{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} ' +
+  '.rpt-range input{font:inherit;font-size:13px;padding:7px 9px;border:1px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
+  '.rpt-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;} ' +
+  '.rpt-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:18px;} ' +
+  '#rptExports{display:flex;gap:8px;align-items:center;font-size:12.5px;color:#615D53;} ' +
+  '.rpt-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;} ' +
+  '.rpt-count{font-size:12px;color:#615D53;} ' +
+  '.rpt-table{font-size:12px;min-width:900px;} ' +
+  '.rpt-table th,.rpt-table td{padding:7px 9px;white-space:nowrap;} ' +
+  '.rpt-table td{max-width:320px;overflow:hidden;text-overflow:ellipsis;} ' +
+  '.rpt-foot{margin-top:10px;font-weight:700;font-size:13px;} ' +
+  '@media (max-width:760px){.rpt-grid{grid-template-columns:1fr;}} ' +
   '.filters-row select{font-family:inherit;font-size:13px;padding:9px 12px;border:1.5px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
   '.team-name-cell{display:flex;align-items:center;gap:10px;} ' +
   '.team-avatar{width:32px;height:32px;border-radius:50%;background:#F0EDE3;color:#615D53;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;} ' +
@@ -830,6 +1112,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<button class="acct-tab" data-tab="team">My Team</button> ' +
   '<button class="acct-tab" data-tab="frequency">Contact Frequency</button> ' +
   '<button class="acct-tab" data-tab="settings">Settings &amp; Permissions</button> ' +
+  '<button class="acct-tab" data-tab="reports">Reports</button> ' +
   '</div> ' +
   ' ' +
   '<div id="acctLoading" class="loading-state">Loading your account…</div> ' +
@@ -995,6 +1278,24 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div style="margin-top:14px;"><button class="btn-outline btn-sm" onclick="openManageIntegrations()">Manage integrations</button></div> ' +
   '</div> ' +
   '</div> ' +
+  '</div> ' +
+  ' ' +
+  '<div class="acct-panel" id="panel-reports"> ' +
+  '<div class="acct-card"> ' +
+  '<h3>Reports</h3> ' +
+  '<div class="acct-card-sub">Run any dashboard tab as a report, narrowed to a city, business, payer, status and date range, then download it as a PDF or a spreadsheet. Reports read the same live data the dashboard shows.</div> ' +
+  '<div class="rpt-grid"> ' +
+  '<div class="acct-field"><label>Report</label><select id="rptType" class="rpt-select"></select></div> ' +
+  '<div class="acct-field"><label id="rptCityLabel">City</label><select id="rptCity" class="rpt-select"><option value="all">All</option></select></div> ' +
+  '<div class="acct-field"><label id="rptBizLabel">Business</label><select id="rptBiz" class="rpt-select"><option value="all">All</option></select></div> ' +
+  '<div class="acct-field"><label>Payer</label><select id="rptPayer" class="rpt-select"><option value="all">All payers</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="private">Private Pay</option></select></div> ' +
+  '<div class="acct-field"><label>Status</label><select id="rptStatus" class="rpt-select"><option value="all">Default for the report</option><option value="open">Open only</option><option value="paid">Paid only</option><option value="collections">Sent to collections</option><option value="escalated">Escalated</option><option value="replied">Replied</option></select></div> ' +
+  '<div class="acct-field"><label><span id="rptDateLabel">Date</span> range</label><div class="rpt-range"><input type="date" id="rptFrom"><span>to</span><input type="date" id="rptTo"></div><div class="rpt-presets"><button type="button" class="btn-outline btn-sm" data-rpt-range="month">This month</button><button type="button" class="btn-outline btn-sm" data-rpt-range="last-month">Last month</button><button type="button" class="btn-outline btn-sm" data-rpt-range="quarter">This quarter</button><button type="button" class="btn-outline btn-sm" data-rpt-range="year">This year</button><button type="button" class="btn-outline btn-sm" data-rpt-range="30">Last 30 days</button><button type="button" class="btn-outline btn-sm" data-rpt-range="all">All time</button></div></div> ' +
+  '</div> ' +
+  '<div class="rpt-actions"><button class="btn-dark" id="rptRun">Run report</button><div id="rptExports" style="display:none;"><span>Download:</span><button type="button" class="btn-outline btn-sm" id="rptPdf">PDF</button><button type="button" class="btn-outline btn-sm" id="rptXlsx">Spreadsheet (.xlsx)</button><button type="button" class="btn-outline btn-sm" id="rptCsv">CSV</button></div></div> ' +
+  '<div id="rptMsg" style="display:none;font-size:12.5px;margin-top:10px;"></div> ' +
+  '</div> ' +
+  '<div class="acct-card"><div id="rptPreview"><div class="restricted-box">Pick a report above and press <b>Run report</b>. The result shows here first, then download it in the format you need.</div></div></div> ' +
   '</div> ' +
   ' ' +
   '</div> ' +
@@ -1405,6 +1706,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '})(); ' +
   '</script> ' +
   '<script>(function(){fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){var chip=document.getElementById("acctUserChip");if(chip){chip.textContent=(d&&d.ok)?((d.email||"Account")+(d.role?(" ("+d.role+")"):"")):"Account";}}).catch(function(){var chip=document.getElementById("acctUserChip");if(chip){chip.textContent="Account";}});})();</script> ' +
+  ACCOUNT_REPORTS_SCRIPT +
   '</body></html> ' +
   ' ';
 
@@ -4324,7 +4626,7 @@ else if (centralHour === QBO_NIGHTLY_HOUR_CENTRAL) await qboRunStep(env, conn, {
    --------------------------------------------------------------------------- */
 const DOC_BUCKET = 'documents';
 const DOC_MAX_BYTES = 25 * 1024 * 1024;
-const DOC_KINDS = ['Estimate','Photos','Invoice','Contract','WorkAuth','COS','MoistureLog','Other'];
+const DOC_KINDS = ['Estimate','Photos','Invoice','Contract','WorkAuth','COS','MoistureLog','COI','W9','Other'];
 
 function safeFileName(name) {
 const base = String(name || 'file').split('/').pop().split('\\').pop();
