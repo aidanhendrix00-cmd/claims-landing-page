@@ -7279,6 +7279,12 @@ integs +
 '<button class="act" onclick="__mfaSkip('+i+',\\'skip\\')">Skip code</button> <button class="act ghost" onclick="__mfaSkip('+i+',\\'clear\\')">Re-enable</button></div>' +
 '<div class="msg" id="mfamsg-'+i+'"></div>' +
 '</div>' +
+'<div class="box"><h3>Change a user\\'s email</h3>' +
+'<div class="note">The address they sign in with and receive sign-in codes, reports and replies at. Their password, role, office and history stay as they are.</div>' +
+'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><input type="text" id="uefrom-'+i+'" placeholder="current@company.com" style="margin:0;max-width:240px;"> &rarr; <input type="text" id="ueto-'+i+'" placeholder="new@company.com" style="margin:0;max-width:240px;"> ' +
+'<button class="act" onclick="__userEmail('+i+')">Change email</button></div>' +
+'<div class="msg" id="uemsg-'+i+'"></div>' +
+'</div>' +
 '<div class="box"><h3>Demo data</h3>' +
 '<div class="note">Seeds 10 invoices per department across the offices, plus 5 demo employees with a month of activity, so the workspace has something to show before the real books connect. Remove it any time; a production QuickBooks connection clears it automatically.</div>' +
 '<button class="act" onclick="__demo('+i+',\\'seed\\')">Seed demo data</button> <button class="act ghost" onclick="__demo('+i+',\\'remove\\')">Remove demo data</button>' +
@@ -7353,6 +7359,14 @@ var c = DATA[i]; var email = (document.getElementById('mfaemail-'+i).value||'').
 if(!email){ setMsg('mfamsg-'+i,'Enter the user\\'s email first.',false); return; }
 post('/api/admin/onboarding/mfa-skip', { tenantId: c.tenantId, email: email, minutes: minutes, action: action }, 'mfamsg-'+i, function(d){
 setMsg('mfamsg-'+i, action==='clear' ? ('Sign-in code required again for '+d.user+'.') : ('Code waived for '+d.user+' for '+d.minutes+' min (until '+new Date(d.until).toLocaleTimeString()+'). Password alone signs them in.'), true);
+});
+};
+window.__userEmail = function(i){
+var c = DATA[i]; var from = (document.getElementById('uefrom-'+i).value||'').trim(); var to = (document.getElementById('ueto-'+i).value||'').trim();
+if(!from || !to){ setMsg('uemsg-'+i,'Enter the current and the new email.',false); return; }
+if(!confirm('Change '+from+' to '+to+'? They will sign in with the new address from now on.')) return;
+post('/api/admin/onboarding/user-email', { tenantId: c.tenantId, from: from, to: to }, 'uemsg-'+i, function(d){
+setMsg('uemsg-'+i, (d.user.name||d.user.from)+' now signs in as '+d.user.to+'. Sign-in codes go to that inbox.', true);
 });
 };
 window.__demo = function(i, action){
@@ -8228,6 +8242,27 @@ await pgInsert(env, 'oauth_states', { state: 'mfa-skip-' + user.id + '-' + rando
 return json({ ok: true, user: user.email, minutes: minutes, until: String(body.action) === 'clear' ? null : until });
 }
 
+// Change the address a user signs in with (and receives codes, reports and
+// replies at). Everything else hangs off the user id, so this is the one row.
+async function handleAdminOnboardingUserEmail(request, env) {
+if (!adminKeyOk(request, env)) return json({ ok: false, error: 'Not authorized' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid body' }, 400); }
+const tenantId = parseInt(body.tenantId, 10);
+const from = String(body.from || '').trim().toLowerCase();
+const to = String(body.to || '').trim().toLowerCase();
+if (!tenantId || !from || !to) return json({ ok: false, error: 'Company, current email and new email are required.' }, 400);
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return json({ ok: false, error: 'The new email address is not valid.' }, 400);
+const user = await pgSelectOne(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=ilike.' + encodeURIComponent(likeEscape(from)) + '&select=id,email,full_name,role');
+if (!user) return json({ ok: false, error: 'No user with that email in this company.' }, 404);
+const taken = await pgSelectOne(env, 'users', 'email=ilike.' + encodeURIComponent(likeEscape(to)) + '&select=id');
+if (taken && String(taken.id) !== String(user.id)) return json({ ok: false, error: 'Another account already uses ' + to + '.' }, 409);
+await pgUpdate(env, 'users', 'id=' + pgEq(user.id), { email: to, email_verified: true });
+// Any one-time sign-in code already issued was addressed to the old inbox.
+try { await pgDelete(env, 'oauth_states', 'user_id=' + pgEq(user.id) + '&state=like.' + encodeURIComponent('mfa-*') + '&provider=neq.mfa_skip'); } catch (e) {}
+return json({ ok: true, user: { id: user.id, name: user.full_name, role: user.role, from: user.email, to: to } });
+}
+
 /* ---------------------------------------------------------------------------
    Two-step sign-in (email one-time code)
    After a correct password the user gets a six-digit code by email and must
@@ -8751,6 +8786,9 @@ return handleAdminOnboardingPage();
 }
 if (url.pathname === '/api/admin/onboarding' && request.method === 'GET') {
 return handleAdminOnboardingData(request, env);
+}
+if (url.pathname === '/api/admin/onboarding/user-email' && request.method === 'POST') {
+return handleAdminOnboardingUserEmail(request, env);
 }
 if (url.pathname === '/api/admin/onboarding/mfa-skip' && request.method === 'POST') {
 return handleAdminOnboardingMfaSkip(request, env);
