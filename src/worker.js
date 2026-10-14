@@ -4750,11 +4750,23 @@ const rows = await pgSelect(env, 'documents', 'account_id=' + pgEq(accountId) + 
 return json({ ok: true, documents: (rows || []).map(documentToJson) });
 }
 
-async function handleDocumentUpload(request, env) {
-const user = await getSessionUser(request, env);
+// Bookkeeping that nobody waits for (outbox, activity, the change probe)
+// runs after the response has gone out, so an upload is answered as soon as
+// the file is stored and its row is written.
+function afterResponse(ctx, work) {
+const p = Promise.resolve().then(work).catch(function () {});
+if (ctx && ctx.waitUntil) { ctx.waitUntil(p); return Promise.resolve(); }
+return p;
+}
+async function handleDocumentUpload(request, env, ctx) {
+// The session lookup and the form parse do not depend on each other.
+const [user, formOrErr] = await Promise.all([
+getSessionUser(request, env),
+request.formData().then(function (f) { return { form: f }; }, function () { return { error: true }; })
+]);
 if (!user) return json({ ok: false }, 401);
-let form;
-try { form = await request.formData(); } catch (e) { return json({ ok: false, error: 'Expected a file upload.' }, 400); }
+if (formOrErr.error) return json({ ok: false, error: 'Expected a file upload.' }, 400);
+const form = formOrErr.form;
 const file = form.get('file');
 if (!file || typeof file === 'string' || !file.arrayBuffer) return json({ ok: false, error: 'Please choose a file to upload.' }, 400);
 const accountId = String(form.get('accountId') || '').trim();
@@ -4790,11 +4802,13 @@ uploaded_by: user.id
 await storageDelete(env, path);
 return json({ ok: false, error: 'Could not save that document.' }, 500);
 }
-await enqueueOutbox(env, user.tenant_id, account.id, 'document', row && row.id, {
-name: cleanName, kind: kind, label: label || null, contentType: file.type || null, size: size
+await afterResponse(ctx, function () {
+return Promise.all([
+enqueueOutbox(env, user.tenant_id, account.id, 'document', row && row.id, { name: cleanName, kind: kind, label: label || null, contentType: file.type || null, size: size }),
+logUserActivity(env, user, account, 'document', 'Uploaded ' + kind + (label ? ' (' + label + ')' : '') + ': ' + cleanName),
+touchAccount(env, accountId)
+]);
 });
-await logUserActivity(env, user, account, 'document', 'Uploaded ' + kind + (label ? ' (' + label + ')' : '') + ': ' + cleanName);
-await touchAccount(env, accountId);
 return json({ ok: true, document: documentToJson(row) });
 }
 
@@ -4811,16 +4825,20 @@ if (!signed) return json({ ok: false, error: 'Could not open that document.' }, 
 return json({ ok: true, url: signed, name: row.file_name });
 }
 
-async function handleDocumentDelete(request, env) {
-const user = await getSessionUser(request, env);
+async function handleDocumentDelete(request, env, ctx) {
+const [user, bodyOrErr] = await Promise.all([
+getSessionUser(request, env),
+request.json().then(function (b) { return { body: b }; }, function () { return { error: true }; })
+]);
 if (!user) return json({ ok: false }, 401);
-let body;
-try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+if (bodyOrErr.error) return json({ ok: false, error: 'Invalid request body' }, 400);
+const body = bodyOrErr.body;
 const row = await pgSelectOne(env, 'documents', 'id=' + pgEq(body.id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=*');
 if (!row) return json({ ok: false, error: 'Document not found' }, 404);
-await storageDelete(env, row.storage_path);
+// The row goes first (the list is right at once); the object and the change
+// probe follow after the response.
 await pgDelete(env, 'documents', 'id=' + pgEq(row.id));
-await touchAccount(env, row.account_id);
+await afterResponse(ctx, function () { return Promise.all([storageDelete(env, row.storage_path), touchAccount(env, row.account_id)]); });
 return json({ ok: true });
 }
 
@@ -9226,13 +9244,13 @@ if (url.pathname === '/api/documents' && request.method === 'GET') {
 return handleDocumentList(request, env);
 }
 if (url.pathname === '/api/documents/upload' && request.method === 'POST') {
-return handleDocumentUpload(request, env);
+return handleDocumentUpload(request, env, ctx);
 }
 if (url.pathname === '/api/documents/download' && request.method === 'GET') {
 return handleDocumentDownload(request, env);
 }
 if (url.pathname === '/api/documents/delete' && request.method === 'POST') {
-return handleDocumentDelete(request, env);
+return handleDocumentDelete(request, env, ctx);
 }
 if (url.pathname === '/api/admin/accounts-export' && request.method === 'GET') {
 return handleAdminAccountsExport(request, env);
