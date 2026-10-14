@@ -6868,23 +6868,28 @@ Do not invent facts beyond what's given.`;
     const btn = document.getElementById('draft-upload-btn');
     const note = document.getElementById('draft-upload-note');
     if(btn){ btn.disabled = true; btn.textContent = 'Uploading\u2026'; }
-    let done = 0, failed = 0;
-    const next = function(){
-      if(!files.length){
-        if(btn){ btn.disabled = false; btn.innerHTML = '&#8679; Upload documents'; }
-        if(note) note.textContent = (done ? done + ' document' + (done === 1 ? '' : 's') + ' uploaded and attached.' : '') + (failed ? ' ' + failed + ' failed.' : '');
-        renderDraftDocs();
-        if(currentDetailId === inv.id) renderDetailDocs(inv);
-        return;
-      }
-      const file = files.shift();
-      if(note) note.textContent = 'Uploading ' + file.name + '\u2026';
+    const total = files.length;
+    let done = 0, failed = 0, started = 0;
+    const tooBig = files.filter(function(f){ return f.size > 25 * 1024 * 1024; });
+    const queue = files.filter(function(f){ return f.size <= 25 * 1024 * 1024; });
+    failed += tooBig.length;
+    const progress = function(){ if(note) note.textContent = 'Uploading ' + Math.min(total, done + failed + 1) + ' of ' + total + '\u2026' + (done ? ' (' + done + ' done)' : ''); };
+    const finish = function(){
+      if(btn){ btn.disabled = false; btn.innerHTML = '&#8679; Upload documents'; }
+      if(note) note.textContent = (done ? done + ' document' + (done === 1 ? '' : 's') + ' uploaded and attached.' : '') + (failed ? ' ' + failed + ' failed' + (tooBig.length ? ' (files must be 25 MB or smaller)' : '') + '.' : '');
+      renderDraftDocs();
+      if(currentDetailId === inv.id) renderDetailDocs(inv);
+      try { fileEl.value = ''; } catch(e) {}
+    };
+    // Several files go up at once (three at a time) rather than one after
+    // another, and each one is attached the moment it lands.
+    const uploadOne = function(file){
       const fd = new FormData();
       fd.append('file', file);
       fd.append('accountId', inv.id);
       fd.append('kind', 'Other');
       fd.append('label', file.name.replace(/\.[a-z0-9]+$/i, ''));
-      fetch('/api/documents/upload', { method: 'POST', credentials: 'same-origin', body: fd })
+      return fetch('/api/documents/upload', { method: 'POST', credentials: 'same-origin', body: fd })
         .then(function(r){ return r.json(); })
         .then(function(res){
           if(res && res.ok && res.document){
@@ -6893,12 +6898,19 @@ Do not invent facts beyond what's given.`;
             addActivity(inv, (res.document.label || res.document.name) + ' uploaded.', 'manual', 'skip');
             saveState();
             done++;
+            renderDraftDocs();
           } else failed++;
         })
         .catch(function(){ failed++; })
-        .then(next);
+        .then(function(){ progress(); });
     };
-    next();
+    const pump = function(){
+      if(!queue.length) return Promise.resolve();
+      const file = queue.shift(); started++;
+      return uploadOne(file).then(pump);
+    };
+    progress();
+    Promise.all([pump(), pump(), pump()]).then(finish, finish);
   }
   function selectedDocs(){
     if(!currentInvoice) return [];
