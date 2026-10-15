@@ -1373,8 +1373,9 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
 '<script>(function(){ ' +
   'function ready(fn){if(document.readyState!=="loading"){fn();}else{document.addEventListener("DOMContentLoaded",fn);}} ' +
   ' ' +
-  'var ROLE_RANK={admin:0,manager:1,employee:2}; ' +
-  'var ROLE_LABEL={admin:"Admin",manager:"Manager",employee:"Employee"}; ' +
+  'var ROLE_RANK={admin:0,manager:1,employee:2,user:2}; ' +
+  'function roleRank(r){ var v=ROLE_RANK[String(r||"").toLowerCase()]; return (v===undefined)?9:v; } ' +
+  'var ROLE_LABEL={admin:"Admin",manager:"Manager",employee:"Employee",user:"User"}; ' +
  'var INTEGRATION_CATEGORIES=["Accounting","CRM","ERP","Estimating","E-Signature","Payments","Storage","Other"]; ' +
  'var INTEGRATIONS_CATALOG=[{id:"quickbooks",name:"QuickBooks",category:"Accounting",connected:false},{id:"salesforce",name:"Salesforce",category:"CRM",connected:false},{id:"netsuite",name:"NetSuite",category:"ERP",connected:false},{id:"xactimate",name:"Xactimate",category:"Estimating",connected:false},{id:"docusign",name:"DocuSign",category:"E-Signature",connected:false}]; ' +
   ' ' +
@@ -1422,7 +1423,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      if(typeVal&&u.role!==typeVal) return false; ' +
   '      return true; ' +
   '    }).sort(function(a,b){ ' +
-  '      if(ROLE_RANK[a.role]!==ROLE_RANK[b.role]) return (ROLE_RANK[a.role]||9)-(ROLE_RANK[b.role]||9); ' +
+  '      if(roleRank(a.role)!==roleRank(b.role)) return roleRank(a.role)-roleRank(b.role); ' +
   '      return a.name.localeCompare(b.name); ' +
   '    }); ' +
   '    var tbody=document.getElementById("teamRows"); ' +
@@ -1430,8 +1431,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    if(!rows.length){ var er=document.createElement("tr"); er.innerHTML="<td colspan=\\"7\\" style=\\"color:#8a8a8a;\\">"+(state.team.length?"No teammates match those filters.":"No team members yet.")+"</td>"; tbody.appendChild(er); } ' +
   '    var lastRank=-1; ' +
   '    rows.forEach(function(u){ ' +
-  '      if(ROLE_RANK[u.role]!==lastRank){ ' +
-  '        lastRank=ROLE_RANK[u.role]; ' +
+  '      if(roleRank(u.role)!==lastRank){ ' +
+  '        lastRank=roleRank(u.role); ' +
   '        var divider=document.createElement("tr"); ' +
   '        var colCount=5+(canEdit?2:0); ' +
   '        divider.innerHTML="<td colspan=\\""+colCount+"\\" class=\\"section-divider\\">"+(ROLE_LABEL[u.role]||titleCase(u.role))+"s</td>"; ' +
