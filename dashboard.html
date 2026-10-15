@@ -376,6 +376,12 @@
   .wf-box input:checked::before{transform:scale(1);}
   .wf-box.on{border-color:var(--ink);background:#F5F6F8;color:var(--ink);}
   table.sheet tfoot td{position:sticky;bottom:0;background:var(--panel);border-top:2px solid var(--ink);padding:12px 10px;vertical-align:top;}
+  table.sheet tfoot tr.sheet-sub td{position:static;border-top:1px dashed var(--line);padding:6px 10px;background:#FBFAF7;}
+  table.sheet tfoot tr.sheet-sub:first-child td{border-top:2px solid var(--ink);}
+  table.sheet tfoot tr.sheet-sub + tr.sheet-total:not(.sheet-sub) td{border-top:1px solid var(--ink);}
+  table.sheet .sheet-sub .tot-group{font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate-soft);display:inline-block;min-width:88px;}
+  table.sheet .sheet-sub .tot-name{font-weight:600;font-size:12.5px;color:var(--ink);}
+  table.sheet .sheet-sub .tot-main{font-size:12.5px;font-weight:600;}
   table.sheet .sheet-total .tot-label{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--ink);display:block;}
   table.sheet .sheet-total .tot-main{font-family:var(--font-mono);font-weight:700;font-size:14px;color:var(--ink);display:block;white-space:nowrap;}
   table.sheet .sheet-total .tot-sub{display:block;font-size:11px;color:var(--slate-soft);margin-top:2px;white-space:nowrap;}
@@ -3352,15 +3358,18 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     const w = weekWindows();
     return !dateInWindow(dateStr, w.thisStart, w.follEnd);
   }
+  const WEEK_LABELS = { this_week: 'This week', next_week: 'Next week', following_week: 'Following week' };
+  function invoiceInWeek(inv, key, ww){
+    ww = ww || weekWindows();
+    if(key === 'this_week') return dateInWindow(inv.projectedPaymentDate, ww.thisStart, ww.thisEnd);
+    if(key === 'next_week') return dateInWindow(inv.projectedPaymentDate, ww.nextStart, ww.nextEnd);
+    return dateInWindow(inv.projectedPaymentDate, ww.follStart, ww.follEnd);
+  }
   function matchesPaymentDateFilter(inv){
     const weeks = paymentWeeksSelected();
     if(weeks.length){
       const ww = weekWindows();
-      return weeks.some(function(k){
-        if(k === 'this_week') return dateInWindow(inv.projectedPaymentDate, ww.thisStart, ww.thisEnd);
-        if(k === 'next_week') return dateInWindow(inv.projectedPaymentDate, ww.nextStart, ww.nextEnd);
-        return dateInWindow(inv.projectedPaymentDate, ww.follStart, ww.follEnd);
-      });
+      return weeks.some(function(k){ return invoiceInWeek(inv, k, ww); });
     }
     if(!state.paymentDateFilter || state.paymentDateFilter === 'all') return true;
     const w = weekWindows();
@@ -3940,6 +3949,24 @@ saveState(); renderAll();
       }
     });
   }
+  // When more than one city, business or expected-payment week is selected,
+  // the total splits into one line per pick so each dollar amount is
+  // attributable. Only the rows on screen are counted, like the total itself.
+  function sheetBreakdownRows(rows, before, colCount, weeksOn){
+    const cityWord = TENANT_DEPTS_CUSTOM ? 'City' : 'Office', bizWord = TENANT_DEPTS_CUSTOM ? 'Business' : 'Department';
+    const line = function(group, name, sub){
+      const invoiced = sub.reduce(function(sum, i){ return sum + (Number(i.amount) || 0); }, 0);
+      const due = sub.reduce(function(sum, i){ return sum + balanceDue(i); }, 0);
+      return '<tr class="sheet-total sheet-sub"><td colspan="' + before + '"><span class="tot-group">' + hEsc(group) + '</span> <span class="tot-name">' + hEsc(name) + '</span> <span class="tot-sub" style="display:inline;margin-left:6px;">' + sub.length + ' invoice' + (sub.length === 1 ? '' : 's') + '</span></td>' +
+        '<td class="amt"><span class="tot-main">' + money2(invoiced) + '</span><span class="tot-sub">' + (Math.abs(invoiced - due) > 0.005 ? money2(due) + ' still due' : 'invoiced') + '</span></td><td colspan="' + (colCount - before - 1) + '"></td></tr>';
+    };
+    let out = '';
+    const offices = scopeOffices(), depts = scopeDepts();
+    if(offices.length > 1) offices.forEach(function(o){ out += line(cityWord, OFFICE_LABELS[o] || o, rows.filter(function(i){ return i.officeLocation === o; })); });
+    if(depts.length > 1) depts.forEach(function(d){ out += line(bizWord, DEPARTMENT_LABELS[d] || d, rows.filter(function(i){ return i.department === d; })); });
+    if(weeksOn && weeksOn.length > 1){ const ww = weekWindows(); ['this_week', 'next_week', 'following_week'].filter(function(k){ return weeksOn.indexOf(k) !== -1; }).forEach(function(k){ out += line('Expected', WEEK_LABELS[k], rows.filter(function(i){ return invoiceInWeek(i, k, ww); })); }); }
+    return out;
+  }
   function renderSheet(){
     const body = document.getElementById('sheet-body');
     const head = document.getElementById('sheet-head');
@@ -3973,7 +4000,7 @@ saveState(); renderAll();
       const totalPaid = rows.reduce(function(sum, i){ return sum + paidAmt(i); }, 0);
       const totalDue = rows.reduce(function(sum, i){ return sum + balanceDue(i); }, 0);
       const before = tracker ? 6 : 7;
-      foot.innerHTML = `<tr class="sheet-total">
+      foot.innerHTML = sheetBreakdownRows(rows, before, colCount, weeksOn) + `<tr class="sheet-total">
         <td colspan="${before}"><span class="tot-label">Total</span><span class="tot-sub">${rows.length} invoice${rows.length === 1 ? '' : 's'}${weeksOn.length ? ' \u00b7 expected ' + weeksOn.map(function(k){ return k === 'this_week' ? 'this week' : (k === 'next_week' ? 'next week' : 'the following week'); }).join(', ') : ''}</span></td>
         <td class="amt"><span class="tot-main" id="sheet-total-invoiced">${money2(totalInvoiced)}</span><span class="tot-sub">invoiced${totalPaid > 0.005 ? ' \u00b7 ' + money2(totalPaid) + ' paid \u00b7 ' + money2(totalDue) + ' still due' : ''}</span></td>
         <td colspan="${colCount - before - 1}"></td>
