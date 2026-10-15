@@ -919,13 +919,17 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       R.lastRows = out.rows; R.lastCols = out.cols; R.lastTitle = out.title; R.lastSub = subtitle(f); R.lastFoot = out.foot;
       renderPreview(out);
       $('rptExports').style.display = out.rows.length ? 'flex' : 'none';
+      try { var pv = $('rptPreview'); if(pv && out.rows.length) pv.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(e) {}
     }).catch(function(e){ msg(String((e && e.message) || e), false); }).then(function(){ btn.disabled = false; btn.textContent = 'Run report'; });
   }
   function renderPreview(out){
     var box = $('rptPreview'); if(!box) return;
     if(!out.rows.length){ box.innerHTML = '<div class="restricted-box">Nothing matches those filters. Widen the date range or pick a different ' + esc(cityWord().toLowerCase()) + ' or ' + esc(bizWord().toLowerCase()) + '.</div>'; return; }
     var show = out.rows.slice(0, 200);
-    box.innerHTML = '<div class="rpt-head"><div><b>' + esc(out.title) + '</b><div class="acct-card-sub" style="margin:2px 0 0;">' + esc(R.lastSub) + ' · ' + esc(companyName()) + ' · run ' + esc(fmtDay(today())) + '</div></div><div class="rpt-count">' + out.rows.length + ' row' + (out.rows.length === 1 ? '' : 's') + (out.rows.length > show.length ? ' (first ' + show.length + ' shown; the download has all of them)' : '') + '</div></div>' +
+    // The download sits right on the result: one dark button for the PDF,
+    // the spreadsheet and CSV beside it, so there is nothing to scroll back to.
+    box.innerHTML = '<div class="rpt-head"><div><b>' + esc(out.title) + '</b><div class="acct-card-sub" style="margin:2px 0 0;">' + esc(R.lastSub) + ' · ' + esc(companyName()) + ' · run ' + esc(fmtDay(today())) + '</div><div class="rpt-count" style="margin-top:4px;">' + out.rows.length + ' row' + (out.rows.length === 1 ? '' : 's') + (out.rows.length > show.length ? ' (first ' + show.length + ' shown; the download has all of them)' : '') + '</div></div>' +
+      '<div class="rpt-dl"><button type="button" class="btn-dark" data-dl="pdf">\\u2B07 Download report (PDF)</button><button type="button" class="btn-outline btn-sm" data-dl="xlsx">Spreadsheet (.xlsx)</button><button type="button" class="btn-outline btn-sm" data-dl="csv">CSV</button></div></div>' +
       '<div class="table-scroll"><table class="acct-table rpt-table"><thead><tr>' + out.cols.map(function(c){ return '<th>' + esc(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
       show.map(function(r){ return '<tr>' + r.map(function(v){ return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' +
       (out.foot ? '<div class="rpt-foot">' + esc(out.foot) + '</div>' : '');
@@ -942,7 +946,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   }
   function exportXlsx(){
     if(!R.lastRows) return;
-    var b = $('rptXlsx'); b.disabled = true; b.textContent = 'Building…';
+    var b = $('rptXlsx'); b.disabled = true; b.textContent = 'Building…'; busy('xlsx', true);
     (window.XLSX ? Promise.resolve() : loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')).then(function(){
       var data = [[R.lastTitle], [R.lastSub + ' · ' + companyName() + ' · run ' + fmtDay(today())], []].concat([R.lastCols]).concat(R.lastRows.map(function(r){ return r.map(function(v){ if(typeof v === 'string' && /^\\$[\\d,]+\\.\\d{2}$/.test(v)) return Number(v.replace(/[$,]/g, '')); return v; }); }));
       if(R.lastFoot) data.push([], [R.lastFoot]);
@@ -951,35 +955,99 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, (R.lastTitle || 'Report').slice(0, 31));
       XLSX.writeFile(wb, fileBase() + '.xlsx');
     }).catch(function(){ exportCsv(); msg('The spreadsheet library could not load, so a CSV was downloaded instead (opens in Excel).', false); })
-    .then(function(){ b.disabled = false; b.textContent = 'Spreadsheet (.xlsx)'; });
+    .then(function(){ b.disabled = false; b.textContent = 'Spreadsheet (.xlsx)'; busy('xlsx', false); });
+  }
+  // Lays the columns out for a letter page. Each column gets a width from its
+  // own content (long text like Notes wraps inside a capped width), and when a
+  // report is wider than the page its columns are split into groups, each
+  // group a table of its own with Account and Invoice # repeated, so nothing
+  // is ever squeezed to a letter per line.
+  function planColumns(cols, rows, avail, charW){
+    var MIN = 54, CAP = 200;
+    var longText = /summary|notes|point of contact|what happened|subject|contact$|memo|city · business|·/i;
+    var chars = cols.map(function(c, i){
+      var m = Math.min(String(c).length, 18);
+      rows.slice(0, 500).forEach(function(r){ var s = String(r[i] == null ? '' : r[i]); m = Math.max(m, Math.min(s.length, longText.test(String(c)) ? 48 : 30)); });
+      return m;
+    });
+    var pts = chars.map(function(ch, i){ var bold = i < 2 && /Account|Invoice #/.test(String(cols[i])); return Math.min(Math.max(ch * charW * (bold ? 1.12 : 1) + 14, MIN), longText.test(String(cols[i])) ? CAP : 150); });
+    var keyCount = cols[0] === 'Account' ? (cols[1] === 'Invoice #' ? 2 : 1) : (cols[1] === 'Account' ? 2 : 0);
+    var keyW = pts.slice(0, keyCount).reduce(function(s, x){ return s + x; }, 0);
+    var groups = [], cur = [], curW = keyW;
+    for(var i = keyCount; i < cols.length; i++){
+      if(cur.length && curW + pts[i] > avail){ groups.push(cur); cur = []; curW = keyW; }
+      cur.push(i); curW += pts[i];
+    }
+    if(cur.length || !groups.length) groups.push(cur);
+    return groups.map(function(ix){
+      var idx = []; for(var k = 0; k < keyCount; k++) idx.push(k);
+      idx = idx.concat(ix);
+      var total = idx.reduce(function(s, i){ return s + pts[i]; }, 0);
+      var scale = Math.min(1.35, avail / total);
+      return { idx: idx, widths: idx.map(function(i){ return pts[i] * scale; }), keyCount: keyCount };
+    });
   }
   function exportPdf(){
     if(!R.lastRows) return;
-    var b = $('rptPdf'); b.disabled = true; b.textContent = 'Building…';
+    var b = $('rptPdf'); b.disabled = true; b.textContent = 'Building…'; busy('pdf', true);
     var need = [];
     if(!(window.jspdf && window.jspdf.jsPDF)) need.push('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
     need.reduce(function(p, src){ return p.then(function(){ return loadScript(src); }); }, Promise.resolve())
       .then(function(){ if(!(window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable)) return loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'); })
       .then(function(){
-        var wide = R.lastCols.length > 9;
-        var doc = new window.jspdf.jsPDF({ orientation: wide ? 'landscape' : 'portrait', unit: 'pt', format: 'letter' });
-        var W = doc.internal.pageSize.getWidth();
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text(R.lastTitle, 40, 44);
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(97, 93, 83);
-        doc.text(R.lastSub + '  ·  ' + companyName() + '  ·  run ' + fmtDay(today()), 40, 60);
-        doc.setTextColor(23, 23, 23);
-        doc.autoTable({ head: [R.lastCols], body: R.lastRows.map(function(r){ return r.map(function(v){ return String(v == null ? '' : v); }); }), startY: 72, margin: { left: 40, right: 40 },
-          styles: { fontSize: wide ? 6.5 : 8, cellPadding: 3, overflow: 'linebreak', textColor: [23, 23, 23] }, headStyles: { fillColor: [23, 23, 23], textColor: 255, fontStyle: 'bold' }, alternateRowStyles: { fillColor: [247, 245, 239] },
-          didDrawPage: function(){ doc.setFontSize(8); doc.setTextColor(138, 133, 120); doc.text(companyName() + ' · clAIms · page ' + doc.internal.getNumberOfPages(), W - 40, doc.internal.pageSize.getHeight() - 20, { align: 'right' }); doc.setTextColor(23, 23, 23); } });
-        if(R.lastFoot){ var y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 80) + 16; doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.text(R.lastFoot, 40, y); }
+        var cols = R.lastCols, rows = R.lastRows.map(function(r){ return r.map(function(v){ return String(v == null ? '' : v); }); });
+        var landscape = cols.length > 6;
+        var doc = new window.jspdf.jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'pt', format: 'letter' });
+        var W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 36;
+        var fontSize = cols.length > 12 ? 7.5 : (cols.length > 8 ? 8 : 9);
+        var charW = fontSize * 0.6;
+        var groups = planColumns(cols, rows, W - 2 * M, charW);
+        var header = function(first){
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(23, 23, 23); doc.text(R.lastTitle, M, 42);
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(97, 93, 83);
+          doc.text(R.lastSub + '  ·  ' + companyName() + '  ·  run ' + fmtDay(today()), M, 57, { maxWidth: W - 2 * M });
+          doc.setTextColor(23, 23, 23);
+        };
+        var footer = function(){ doc.setFontSize(8); doc.setTextColor(138, 133, 120); doc.text(companyName() + ' · clAIms · page ' + doc.internal.getNumberOfPages(), W - M, H - 18, { align: 'right' }); doc.setTextColor(23, 23, 23); };
+        groups.forEach(function(g, gi){
+          if(gi > 0) doc.addPage();
+          header(gi === 0);
+          var y = 68;
+          if(groups.length > 1){
+            doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(97, 93, 83);
+            doc.text('Columns ' + (gi + 1) + ' of ' + groups.length + ' - ' + cols[g.idx[g.keyCount]] + ' to ' + cols[g.idx[g.idx.length - 1]] + (g.keyCount ? ' (' + cols.slice(0, g.keyCount).join(' and ') + ' repeated)' : ''), M, y);
+            doc.setTextColor(23, 23, 23); doc.setFont('helvetica', 'normal'); y += 10;
+          }
+          var columnStyles = {}; g.widths.forEach(function(w, i){ columnStyles[i] = { cellWidth: w }; });
+          var moneyCols = {}; g.idx.forEach(function(ci, i){ if(/^\\$|^(Invoiced|Paid|Balance|Amount|Total)/.test(String(cols[ci])) || /^\\$[\\d,]+\\.\\d{2}$/.test(String(rows[0] ? rows[0][ci] : ''))) moneyCols[i] = true; });
+          doc.autoTable({
+            head: [g.idx.map(function(ci){ return cols[ci]; })],
+            body: rows.map(function(r){ return g.idx.map(function(ci){ return r[ci]; }); }),
+            startY: y, margin: { left: M, right: M, bottom: 30 }, tableWidth: 'wrap', columnStyles: columnStyles,
+            styles: { fontSize: fontSize, cellPadding: { top: 3, right: 4, bottom: 3, left: 4 }, overflow: 'linebreak', valign: 'top', textColor: [23, 23, 23], lineColor: [229, 224, 210], lineWidth: 0.4 },
+            headStyles: { fillColor: [23, 23, 23], textColor: 255, fontStyle: 'bold', fontSize: fontSize - 0.5 },
+            alternateRowStyles: { fillColor: [247, 245, 239] },
+            didParseCell: function(d){ if(d.section === 'body' && moneyCols[d.column.index]) d.cell.styles.halign = 'right'; if(d.section === 'body' && d.column.index < g.keyCount) d.cell.styles.fontStyle = 'bold'; },
+            didDrawPage: function(d){ if(d.pageNumber > 1 || gi > 0) { /* repeat the title on continuation pages */ } footer(); }
+          });
+          if(gi === groups.length - 1 && R.lastFoot){ var fy = (doc.lastAutoTable ? doc.lastAutoTable.finalY : y) + 16; if(fy > H - 40){ doc.addPage(); footer(); fy = 50; } doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.text(R.lastFoot, M, fy); }
+        });
         doc.save(fileBase() + '.pdf');
       })
       .catch(function(){ printFallback(); })
-      .then(function(){ b.disabled = false; b.textContent = 'PDF'; });
+      .then(function(){ b.disabled = false; b.textContent = 'PDF'; busy('pdf', false); });
   }
+  function busy(kind, on){ document.querySelectorAll('#rptPreview [data-dl="' + kind + '"]').forEach(function(el){ el.disabled = !!on; if(kind === 'pdf') el.textContent = on ? 'Building your PDF…' : '⬇ Download report (PDF)'; }); }
   function printFallback(){
     var w = window.open('', '_blank'); if(!w){ msg('Allow pop-ups to print this report.', false); return; }
-    w.document.write('<!doctype html><html><head><title>' + esc(R.lastTitle) + '</title><style>body{font-family:Arial,sans-serif;color:#171717;padding:24px;}h1{font-size:18px;margin:0 0 4px;}.sub{color:#615D53;font-size:12px;margin-bottom:14px;}table{border-collapse:collapse;width:100%;font-size:10.5px;}th,td{border:1px solid #ddd;padding:4px 6px;text-align:left;vertical-align:top;}th{background:#171717;color:#fff;}tr:nth-child(even) td{background:#F7F5EF;}.foot{margin-top:10px;font-weight:700;font-size:12px;}@page{size:landscape;margin:14mm;}</style></head><body><h1>' + esc(R.lastTitle) + '</h1><div class="sub">' + esc(R.lastSub) + ' · ' + esc(companyName()) + ' · run ' + esc(fmtDay(today())) + '</div><table><thead><tr>' + R.lastCols.map(function(c){ return '<th>' + esc(c) + '</th>'; }).join('') + '</tr></thead><tbody>' + R.lastRows.map(function(r){ return '<tr>' + r.map(function(v){ return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>' + (R.lastFoot ? '<div class="foot">' + esc(R.lastFoot) + '</div>' : '') + '</body></html>');
+    var cols = R.lastCols, rows = R.lastRows;
+    var groups = planColumns(cols, rows, 1000, 5.2);
+    var tables = groups.map(function(g, gi){
+      return (groups.length > 1 ? '<div class="grp">Columns ' + (gi + 1) + ' of ' + groups.length + (g.keyCount ? ' (' + cols.slice(0, g.keyCount).join(' and ') + ' repeated)' : '') + '</div>' : '') +
+        '<table><colgroup>' + g.widths.map(function(wd){ return '<col style="width:' + (wd / 10).toFixed(1) + '%">'; }).join('') + '</colgroup><thead><tr>' + g.idx.map(function(ci){ return '<th>' + esc(cols[ci]) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        rows.map(function(r){ return '<tr>' + g.idx.map(function(ci){ return '<td>' + esc(r[ci]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>';
+    }).join('');
+    w.document.write('<!doctype html><html><head><title>' + esc(R.lastTitle) + '</title><style>body{font-family:Arial,sans-serif;color:#171717;padding:24px;}h1{font-size:18px;margin:0 0 4px;}.sub{color:#615D53;font-size:12px;margin-bottom:14px;}.grp{font-size:11px;font-weight:700;color:#615D53;margin:14px 0 6px;page-break-before:always;}.grp:first-of-type{page-break-before:auto;}table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:10px;margin-bottom:10px;}th,td{border:1px solid #ddd;padding:4px 6px;text-align:left;vertical-align:top;word-wrap:break-word;overflow-wrap:anywhere;}th{background:#171717;color:#fff;}tr:nth-child(even) td{background:#F7F5EF;}.foot{margin-top:10px;font-weight:700;font-size:12px;}@page{size:' + (cols.length > 6 ? 'landscape' : 'portrait') + ';margin:12mm;}</style></head><body><h1>' + esc(R.lastTitle) + '</h1><div class="sub">' + esc(R.lastSub) + ' · ' + esc(companyName()) + ' · run ' + esc(fmtDay(today())) + '</div>' + tables + (R.lastFoot ? '<div class="foot">' + esc(R.lastFoot) + '</div>' : '') + '</body></html>');
     w.document.close(); setTimeout(function(){ try { w.focus(); w.print(); } catch(e) {} }, 400);
     msg('The PDF library could not load, so the report opened in a print window: choose "Save as PDF" there.', false);
   }
@@ -1000,11 +1068,15 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     $('rptCsv').addEventListener('click', exportCsv);
     $('rptXlsx').addEventListener('click', exportXlsx);
     $('rptPdf').addEventListener('click', exportPdf);
+    // The download buttons drawn on each result.
+    $('rptPreview').addEventListener('click', function(e){ var b = e.target && e.target.closest ? e.target.closest('[data-dl]') : null; if(!b) return; var k = b.getAttribute('data-dl'); if(k === 'pdf') exportPdf(); else if(k === 'xlsx') exportXlsx(); else exportCsv(); });
+    // Arriving from the dashboard's Reports link opens this tab directly.
+    if(window.location.hash === '#reports'){ var tab = document.querySelector('.acct-tab[data-tab="reports"]'); if(tab) setTimeout(function(){ tab.click(); }, 0); }
     document.querySelectorAll('[data-rpt-range]').forEach(function(b){ b.addEventListener('click', function(){ presetRange(b.getAttribute('data-rpt-range')); }); });
     fetch('/api/me', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){ if(d && d.ok){ R.me = d; fillSelects(); } }).catch(function(){});
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-  window.__clmsReports = { run: run, build: build, filters: filters, pick: pick, _R: R, _SEL: SEL };
+  window.__clmsReports = { run: run, build: build, filters: filters, pick: pick, planColumns: planColumns, _R: R, _SEL: SEL };
 })();
 </script>`;
 
@@ -1070,7 +1142,9 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '.rpt-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;} ' +
   '.rpt-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:18px;} ' +
   '#rptExports{display:flex;gap:8px;align-items:center;font-size:12.5px;color:#615D53;} ' +
-  '.rpt-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;} ' +
+  '.rpt-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;} ' +
+  '.rpt-dl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} ' +
+  '.rpt-dl .btn-dark{font-size:13.5px;padding:10px 16px;} ' +
   '.rpt-count{font-size:12px;color:#615D53;} ' +
   '.rpt-table{font-size:12px;min-width:900px;} ' +
   '.rpt-table th,.rpt-table td{padding:7px 9px;white-space:nowrap;} ' +

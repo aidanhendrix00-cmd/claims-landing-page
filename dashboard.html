@@ -701,6 +701,7 @@
       <button class="nav-item" data-view="escalations"><span class="left"><span class="ic">E</span> Escalations</span><span class="count" id="nav-count-esc"></span></button>
       <button class="nav-item" data-view="automations"><span class="left"><span class="ic">A</span> Automations</span></button>
       <button class="nav-item" data-view="integrations"><span class="left"><span class="ic">I</span> Integrations</span></button>
+      <a class="nav-item" href="/account#reports" title="Run any tab as a report and download it as a PDF or spreadsheet" style="text-decoration:none;"><span class="left"><span class="ic">D</span> Reports</span><span class="count" style="font-size:9.5px;">PDF / XLSX</span></a>
       <button class="nav-item" data-view="team" data-admin-only="1"><span class="left"><span class="ic">T</span> Team</span></button>
       <button class="nav-item" data-view="activity" data-admin-only="1"><span class="left"><span class="ic">U</span> Employees Activity</span><span class="count" id="nav-count-activity"></span></button>
     </nav>
@@ -3134,6 +3135,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   document.getElementById('nav').addEventListener('click', (e) => {
     const btn = e.target.closest('.nav-item');
     if(!btn) return;
+    if(!btn.dataset.view) return;   // a plain link (Reports lives on My Account): let the browser follow it
     if(document.body.classList.contains('nav-open')) toggleMobileNav(false);
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     btn.classList.add('active');
