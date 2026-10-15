@@ -818,9 +818,14 @@
           <option value="name-desc">Sort: Z–A</option>
           <option value="date-desc">Sort: Invoice date (newest)</option>
           <option value="date-asc">Sort: Invoice date (oldest)</option>
-          <option value="amount-desc">Sort: Balance (high–low)</option>
-          <option value="days-desc">Sort: Days outstanding</option>
+          <option value="amount-desc">Sort: Balance (high → low)</option>
+          <option value="amount-asc">Sort: Balance (low → high)</option>
+          <option value="days-desc">Sort: Days outstanding (most → fewest)</option>
+          <option value="days-asc">Sort: Days outstanding (fewest → most)</option>
+          <option value="followup-desc">Sort: Last follow-up (newest)</option>
+          <option value="followup-asc">Sort: Last follow-up (oldest first)</option>
           <option value="collections">Sort: Sent to collections first</option>
+          <option value="collections-last">Sort: Sent to collections last</option>
         </select>
         <select class="sort" id="sheet-show" onchange="setSheetShow(this.value)" title="Which invoices to show">
           <option value="all">Show: All open</option>
@@ -3813,7 +3818,7 @@ saveState(); renderAll();
   // Accounts Receivable search / invoice-date range / sort / show. Kept in
   // state so they survive a refresh; the inputs are only written when they
   // differ, so typing is never interrupted by a background render.
-  const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'days-desc': 1, 'collections': 1 };
+  const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'days-desc': 1, 'days-asc': 1, 'followup-desc': 1, 'followup-asc': 1, 'collections': 1, 'collections-last': 1 };
   const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1 };
   function sheetSearchValue(){
     const box = document.getElementById('sheet-search');
@@ -3864,14 +3869,28 @@ saveState(); renderAll();
     const mode = SHEET_SORTS[state.sheetSort] ? state.sheetSort : 'name-asc';
     const byName = function(a, b){ return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }); };
     const byDate = function(a, b){ return String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || '')); };
+    // Last follow-up as a sortable timestamp; invoices never followed up sort last in both directions.
+    const fuTime = function(inv){ const t = inv.lastFollowUpAt ? new Date(inv.lastFollowUpAt).getTime() : NaN; return isNaN(t) ? null : t; };
+    const byFollowUp = function(a, b, newestFirst){
+      const ta = fuTime(a), tb = fuTime(b);
+      if (ta === null && tb === null) return 0;
+      if (ta === null) return 1;
+      if (tb === null) return -1;
+      return newestFirst ? (tb - ta) : (ta - tb);
+    };
     return rows.slice().sort(function(a, b){
       switch (mode) {
         case 'name-desc': return byName(b, a) || byDate(b, a);
         case 'date-desc': return byDate(b, a) || byName(a, b);
         case 'date-asc': return byDate(a, b) || byName(a, b);
         case 'amount-desc': return (balanceDue(b) - balanceDue(a)) || byName(a, b);
+        case 'amount-asc': return (balanceDue(a) - balanceDue(b)) || byName(a, b);
         case 'days-desc': return (agingDays(b) - agingDays(a)) || byName(a, b);
+        case 'days-asc': return (agingDays(a) - agingDays(b)) || byName(a, b);
+        case 'followup-desc': return byFollowUp(a, b, true) || byName(a, b);
+        case 'followup-asc': return byFollowUp(a, b, false) || byName(a, b);
         case 'collections': return ((isDoNotContact(b) ? 1 : 0) - (isDoNotContact(a) ? 1 : 0)) || byName(a, b);
+        case 'collections-last': return ((isDoNotContact(a) ? 1 : 0) - (isDoNotContact(b) ? 1 : 0)) || byName(a, b);
         default: return byName(a, b) || byDate(b, a);
       }
     });
