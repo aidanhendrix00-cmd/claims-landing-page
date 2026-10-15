@@ -768,8 +768,13 @@
           <input class="search" id="search" type="search" name="queue-search" placeholder="Search customer or property..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="renderQueue()">
           <select class="sort" id="sort" onchange="renderQueue()">
             <option value="days-desc">Sort: Days (High-Low)</option>
+            <option value="days-asc">Sort: Days (Low-High)</option>
             <option value="amount-desc">Sort: Amount (High-Low)</option>
+            <option value="amount-asc">Sort: Amount (Low-High)</option>
             <option value="name-asc">Sort: Name (A-Z)</option>
+            <option value="name-desc">Sort: Name (Z-A)</option>
+            <option value="date-desc">Sort: Invoice Date (Newest)</option>
+            <option value="date-asc">Sort: Invoice Date (Oldest)</option>
           </select>
           <div class="chips" id="chips">
             <div class="chip active" data-payer="all">All</div>
@@ -3604,11 +3609,19 @@ function todoRowHTML(item, num, priority){
       const matchesPayer = payerFilter === 'all' || inv.payer === payerFilter;
       return matchesSearch && matchesPayer;
     });
+    const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true });
+    const byDate = (a, b) => String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || ''));
     items = items.slice().sort((a,b) => {
-      if(sortVal === 'days-desc') return b.days - a.days;
-      if(sortVal === 'amount-desc') return balanceDue(b) - balanceDue(a);
-      if(sortVal === 'name-asc') return a.name.localeCompare(b.name);
-      return 0;
+      switch (sortVal) {
+        case 'days-asc': return (a.days - b.days) || byName(a, b);
+        case 'amount-desc': return (balanceDue(b) - balanceDue(a)) || byName(a, b);
+        case 'amount-asc': return (balanceDue(a) - balanceDue(b)) || byName(a, b);
+        case 'name-asc': return byName(a, b);
+        case 'name-desc': return byName(b, a);
+        case 'date-desc': return byDate(b, a) || byName(a, b);
+        case 'date-asc': return byDate(a, b) || byName(a, b);
+        default: return (b.days - a.days) || byName(a, b);
+      }
     });
 
     if(items.length === 0){ el.innerHTML = `<div class="empty">${realEmptyQueueMessage() || 'No invoices match your current filters.'}</div>`; return; }
