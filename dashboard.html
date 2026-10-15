@@ -714,7 +714,7 @@
         <option value="contents">Contents</option>
         <option value="reconstruction">Reconstruction</option>
       </select>
-      <div class="dept-filter-hint">Applies across every tab &#8212; queue, spreadsheet, reports, logs, and escalations.</div>
+      <div class="dept-filter-hint">Applies across every tab &#8212; queue, spreadsheet, reports, logs, and escalations. Pick several at once from the chips on any tab.</div>
     </div>
 
     <div class="dept-filter-box" id="officeFilterBox">
@@ -752,6 +752,7 @@
         </div>
       </div>
 
+      <div class="mtd-filters" data-scope-panel="queue"></div>
       <div class="kpis" id="kpis"></div>
 
       <div class="todo-card" id="todo-card">
@@ -791,16 +792,10 @@
     <!-- ===================== ACCOUNTS RECEIVABLE VIEW ===================== -->
     <section class="view" id="view-sheet">
       <div class="topbar"><div><h1>Accounts Receivable</h1><p>Your full A/R ledger with autonomous contact tracking</p></div></div>
+      <div class="mtd-filters" data-scope-panel="sheet"></div>
       <div class="section-head">
         <h2>Ledger</h2>
         <div class="toolbar">
-          <div class="chips" id="sheet-office-chips">
-            <div class="chip" data-office="all">All Offices</div>
-            <div class="chip" data-office="arizona">Arizona</div>
-            <div class="chip" data-office="dallas">Dallas</div>
-            <div class="chip" data-office="houston">Houston</div>
-            <div class="chip" data-office="hill_country">Hill Country</div>
-          </div>
           <div class="week-filter" id="payment-week-filter" title="Show invoices whose projected payment date falls in the checked week(s)">
             <span class="wf-label">Expected payment</span>
             <label class="wf-box"><input type="checkbox" value="this_week" onchange="togglePaymentWeek(this.value, this.checked)"><span>This Week</span></label>
@@ -858,6 +853,7 @@
     <!-- ===================== REPORT VIEW ===================== -->
     <section class="view" id="view-report">
       <div class="topbar"><div><h1>Aging Report</h1><p>Outstanding receivables by age bucket and by office / business &#8212; and every account that still carries a balance, by office and department</p></div></div>
+      <div class="mtd-filters" data-scope-panel="report"></div>
       <div class="report-grid">
         <div class="report-card"><h3>By Age Bucket</h3><div id="report-age"></div></div>
         <div class="report-card" id="report-payer-card"><div class="report-card-head"><h3>By Office / Business</h3><div class="report-card-tools"><button type="button" class="rc-btn" id="report-payer-min" title="Minimize" aria-label="Minimize" onclick="reportBoxSize('report-payer', 'min')">&#8211;</button><button type="button" class="rc-btn" id="report-payer-max" title="Maximize" aria-label="Maximize" onclick="reportBoxSize('report-payer', 'max')">&#9633;</button></div></div><div id="report-payer" class="report-body"></div></div>
@@ -870,11 +866,7 @@
     <section class="view" id="view-invoicedmtd">
       <div class="topbar"><div><h1>Invoiced Month to Date</h1><p>Synced automatically from NetSuite &amp; your CRM &#8212; sorted by office location, broken down by department</p></div></div>
       <div class="kpis" id="mtd-kpis"></div>
-      <div class="mtd-filters" id="mtd-filters">
-        <div class="mtd-filter-group"><span class="wf-label" id="mtd-city-label">Cities</span><div class="chips" id="mtd-city-chips"></div></div>
-        <div class="mtd-filter-group"><span class="wf-label" id="mtd-dept-label">Businesses</span><div class="chips" id="mtd-dept-chips"></div></div>
-        <div class="hint" style="margin:0;">Pick any number of cities and businesses (or click the bars). The charts, the breakdown and the list below follow the selection.</div>
-      </div>
+      <div class="mtd-filters" id="mtd-filters" data-scope-panel="mtd" data-scope-bars="1"></div>
       <div class="report-card" style="margin-bottom:18px;">
         <h3 id="mtd-chart-title">By City</h3>
         <div class="office-chart" id="mtd-chart"></div>
@@ -893,9 +885,10 @@
     <!-- ===================== COLLECTED THIS MONTH VIEW ===================== -->
     <section class="view" id="view-collectedmtd">
       <div class="topbar"><div><h1>Collected This Month</h1><p>Updates in real time as NetSuite posts and applies payments to each account</p></div></div>
+      <div class="mtd-filters" data-scope-panel="collectedmtd" data-scope-bars="1"></div>
       <div class="kpis" id="collected-kpis"></div>
       <div class="report-card" style="margin-bottom:18px;">
-        <h3>By Office Location</h3>
+        <h3 id="collected-chart-title">By Office Location</h3>
         <div class="office-chart" id="collected-chart"></div>
       </div>
       <div class="report-grid">
@@ -908,7 +901,8 @@
 
     <!-- ===================== COLLECTED (ALL-TIME) VIEW ===================== -->
     <section class="view" id="view-collected">
-      <div class="topbar"><div><h1>Collected</h1><p>Payments received, newest month first &#8212; narrow to a month or a date range here, and by office and department via the sidebar</p></div></div>
+      <div class="topbar"><div><h1>Collected</h1><p>Payments received, newest month first &#8212; narrow to a month or a date range, and to any cities and businesses</p></div></div>
+      <div class="mtd-filters" data-scope-panel="collected"></div>
       <div class="collected-filter" id="collected-filter">
         <label>Period <select id="collected-period" onchange="setCollectedPeriod(this.value)"><option value="all">All time</option></select></label>
         <label>From <input type="date" id="collected-from" onchange="setCollectedRange()" title="Pick one date in both boxes to see a single day"></label>
@@ -923,12 +917,14 @@
     <!-- ===================== COMMS LOG VIEW ===================== -->
     <section class="view" id="view-sent">
       <div class="topbar"><div><h1>Comms Log</h1><p>Every follow-up, demand letter, and NOIL sent &#8212; manual or autonomous</p></div></div>
+      <div class="mtd-filters" data-scope-panel="sent"></div>
       <div id="sent-wrap"></div>
     </section>
 
     <!-- ===================== RESPONSE RECEIVED VIEW ===================== -->
     <section class="view" id="view-responses">
       <div class="topbar"><div><h1>Response Received</h1><p>Replies logged autonomously the moment an invoice's status flips to "replied" &#8212; and reflected immediately in the Response Summary column on Accounts Receivable</p></div></div>
+      <div class="mtd-filters" data-scope-panel="responses"></div>
 
       <div class="sf-sim-card" data-demo-only="1">
         <h3>Simulate an Incoming Response</h3>
@@ -964,12 +960,11 @@
     <!-- ===================== ESCALATIONS VIEW ===================== -->
     <section class="view" id="view-escalations">
       <div class="topbar"><div><h1>Escalations</h1><p>Invoices pulled out of the autonomous cadence for manager attention</p></div></div>
+      <div class="mtd-filters" data-scope-panel="escalations"></div>
       <div class="kpis" id="esc-kpis"></div>
       <div class="section-head"><h2>Escalated accounts</h2>
         <div class="toolbar" id="esc-tools">
           <input class="search" id="esc-search" type="search" name="escalations-search" placeholder="Search escalated accounts\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="setEscFilter('search', this.value)">
-          <select class="sort" id="esc-office" onchange="setEscFilter('office', this.value)"></select>
-          <select class="sort" id="esc-dept" onchange="setEscFilter('dept', this.value)"></select>
           <select class="sort" id="esc-payer" onchange="setEscFilter('payer', this.value)"><option value="all">Payer: All</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="private">Private Pay</option></select>
           <select class="sort" id="esc-notified" onchange="setEscFilter('notified', this.value)"><option value="all">Notified: Any</option><option value="yes">Manager notified</option><option value="no">Not yet notified</option></select>
           <select class="sort" id="esc-sort" onchange="setEscFilter('sort', this.value)">
@@ -2327,7 +2322,7 @@ qbInit();
       // The server already scopes managers and employees to their office, so no
       // office filter applies (a stale one would blank the whole dashboard).
       state.officeFilter = 'all';
-      const chips = document.getElementById('sheet-office-chips'); if (chips) chips.style.display = 'none';
+      SCOPE_HIDE_OFFICES = true;
       const box = document.getElementById('officeFilterBox'); if (box) box.style.display = 'none';
     }
     const isAdminUser = state.currentUser.role === 'admin';
@@ -2579,10 +2574,6 @@ function rebuildOfficeUI(){
     for (var i = 0; i < sel.options.length; i++){ if (sel.options[i].value === cur){ ok = true; break; } }
     sel.value = ok ? cur : 'all';
   }
-  var chips = document.getElementById('sheet-office-chips');
-  if (chips){
-    chips.innerHTML = '<div class="chip" data-office="all">All Offices</div>' + OFFICE_LOCATIONS.map(function(k){ return '<div class="chip" data-office="' + k + '">' + OFFICE_LABELS[k] + '</div>'; }).join('');
-  }
   var dsel = document.getElementById('dept-filter');
   if (dsel){
     if (TENANT_DEPTS_CUSTOM){
@@ -2638,7 +2629,7 @@ function applyTenantConfig(me){
           DEPT_COLOR_SHADES[k] = [CUSTOM_DEPT_PALETTE[i % CUSTOM_DEPT_PALETTE.length]];
         });
         TENANT_DEPTS_CUSTOM = true;
-        if (typeof state !== 'undefined' && state && state.deptFilter && state.deptFilter !== 'all' && !DEPARTMENT_LABELS[state.deptFilter]) state.deptFilter = 'all';
+        if (typeof state !== 'undefined' && state && state.deptFilter) state.deptFilter = scopeDepts().join(',') || 'all';
       }
     }
     if (me.offices && typeof me.offices === 'object'){
@@ -2650,7 +2641,7 @@ function applyTenantConfig(me){
         OFFICE_LOCATIONS.length = 0;
         keys.forEach(function(k){ OFFICE_LOCATIONS.push(k); });
         TENANT_CONFIG_APPLIED = true;
-        if (typeof state !== 'undefined' && state && state.officeFilter && state.officeFilter !== 'all' && !OFFICE_LABELS[state.officeFilter]) state.officeFilter = 'all';
+        if (typeof state !== 'undefined' && state && state.officeFilter) state.officeFilter = scopeOffices().join(',') || 'all';
       }
     }
     rebuildOfficeUI();
@@ -3108,7 +3099,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
 
   function renderAll(){
     const steps = [
-      renderKpis, renderTodoList, renderQueue, renderSheet, renderReport, renderSent, renderResponses,
+      renderScopePanels, renderKpis, renderTodoList, renderQueue, renderSheet, renderReport, renderSent, renderResponses,
       renderEscalations, renderAutomationsFeed, renderNavCounts, renderSfSimOptions,
       renderCustomIntegrations, renderRespSimOptions, renderNotifications,
       renderInvoicedMTD, renderCollectedMTD, renderCollectedAll, renderNetSuitePaymentOptions, renderMoneyPanel,
@@ -3125,8 +3116,8 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       setChecked('auto-pay', state.automationSettings.pay);
       setChecked('auto-cadence', state.automationSettings.autoCadence);
       setChecked('auto-review', state.automationSettings.requireReview);
-      setValue('dept-filter', state.deptFilter || 'all');
-      setValue('office-filter', state.officeFilter || 'all');
+      syncScopeSelect('dept-filter', scopeDepts(), DEPARTMENT_LABELS);
+      syncScopeSelect('office-filter', scopeOffices(), OFFICE_LABELS);
     }catch(e){ console.error('renderAll toggles failed:', e); }
   }
 
@@ -3257,9 +3248,68 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     return inv.days - last;
   }
   function isStale(inv){ return inv.jobStatus !== 'paid' && staleDaysCount(inv) >= 3; }
-  function deptMatches(inv){ return state.deptFilter === 'all' || inv.department === state.deptFilter; }
-  function officeMatches(inv){ return state.officeFilter === 'all' || inv.officeLocation === state.officeFilter; }
+  /* Dashboard-wide scope: any number of cities (offices) and businesses
+     (departments). state.officeFilter / state.deptFilter hold 'all' or a
+     comma-separated list of keys. The same chip panel sits on every list and
+     report tab, the sidebar drop-downs mirror it, and passesFilters() applies it. */
+  var SCOPE_HIDE_OFFICES = false;   // managers/employees are already scoped to their office by the server
+  function scopeList(v, valid){ if(!v || v === 'all') return []; return String(v).split(',').map(function(s){ return s.trim(); }).filter(function(k, i, a){ return k && (!valid || valid[k] !== undefined) && a.indexOf(k) === i; }); }
+  function scopeOffices(){ return scopeList(state.officeFilter, OFFICE_LABELS); }
+  function scopeDepts(){ return scopeList(state.deptFilter, DEPARTMENT_LABELS); }
+  function deptMatches(inv){ const s = scopeDepts(); return !s.length || s.indexOf(inv.department) !== -1; }
+  function officeMatches(inv){ const s = scopeOffices(); return !s.length || s.indexOf(inv.officeLocation) !== -1; }
   function passesFilters(inv){ return deptMatches(inv) && officeMatches(inv); }
+  function scopeSet(kind, list){ state[kind === 'office' ? 'officeFilter' : 'deptFilter'] = list.length ? list.join(',') : 'all'; saveState(); renderAll(); }
+  function scopeToggle(kind, key){
+    const cur = kind === 'office' ? scopeOffices() : scopeDepts();
+    const i = cur.indexOf(key);
+    if(i === -1) cur.push(key); else cur.splice(i, 1);
+    // The breakdown boxes (Invoiced MTD, Collected) show the bar picked last.
+    mtdLast = i === -1 ? { kind: kind, key: key } : (cur.length ? { kind: kind, key: cur[cur.length - 1] } : null);
+    scopeSet(kind, cur);
+  }
+  function scopeToggleOffice(k){ scopeToggle('office', k); }
+  function scopeToggleDept(k){ scopeToggle('dept', k); }
+  function scopeClear(kind){ if(mtdLast && mtdLast.kind === kind) mtdLast = null; scopeSet(kind, []); }
+  function scopeClearAll(){ mtdLast = null; state.officeFilter = 'all'; state.deptFilter = 'all'; saveState(); renderAll(); }
+  function scopeLabel(){
+    const o = scopeOffices().map(function(k){ return OFFICE_LABELS[k] || k; }), d = scopeDepts().map(function(k){ return DEPARTMENT_LABELS[k] || k; });
+    return [o.join(', '), d.join(', ')].filter(Boolean).join(' · ') || ('All ' + (TENANT_DEPTS_CUSTOM ? 'cities and businesses' : 'offices and departments'));
+  }
+  // Every [data-scope-panel] on the page gets the same two rows of chips.
+  // data-scope-bars="1" marks tabs whose bar charts can also be clicked.
+  function renderScopePanels(){
+    const offices = scopeOffices(), depts = scopeDepts();
+    const cityWord = TENANT_DEPTS_CUSTOM ? 'cities' : 'offices', bizWord = TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments';
+    const chip = function(key, label, on, fn){ return '<div class="chip multi' + (on ? ' active' : '') + '" data-key="' + hEsc(key) + '" onclick="' + fn + '(\'' + hEsc(key) + '\')" title="Click to ' + (on ? 'remove' : 'add') + '">' + hEsc(label) + '</div>'; };
+    document.querySelectorAll('[data-scope-panel]').forEach(function(panel){
+      const tab = panel.dataset.scopePanel, bars = panel.dataset.scopeBars === '1';
+      const cityRow = SCOPE_HIDE_OFFICES ? '' : '<div class="mtd-filter-group"><span class="wf-label">' + (TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices') + '</span><div class="chips" id="' + tab + '-city-chips">' +
+        '<div class="chip' + (offices.length ? '' : ' active') + '" onclick="scopeClear(\'office\')">All</div>' + OFFICE_LOCATIONS.map(function(o){ return chip(o, OFFICE_LABELS[o] || o, offices.indexOf(o) !== -1, 'scopeToggleOffice'); }).join('') + '</div></div>';
+      const deptRow = '<div class="mtd-filter-group"><span class="wf-label">' + (TENANT_DEPTS_CUSTOM ? 'Businesses' : 'Departments') + '</span><div class="chips" id="' + tab + '-dept-chips">' +
+        '<div class="chip' + (depts.length ? '' : ' active') + '" onclick="scopeClear(\'dept\')">All</div>' + Object.keys(DEPARTMENT_LABELS).map(function(d){ return chip(d, DEPARTMENT_LABELS[d] || d, depts.indexOf(d) !== -1, 'scopeToggleDept'); }).join('') + '</div></div>';
+      const hint = '<div class="hint" style="margin:0;font-size:12.5px;">Pick any number of ' + (SCOPE_HIDE_OFFICES ? bizWord : cityWord + ' and ' + bizWord) + (bars ? ' (or click the bars)' : '') + '. ' +
+        (bars ? 'The charts, the breakdown and the list below follow the selection' : 'Everything on this tab follows the selection') + ', and so does every other tab.' +
+        ((offices.length || depts.length) ? ' <a href="#" onclick="scopeClearAll(); return false;">Show everything</a>' : '') + '</div>';
+      panel.innerHTML = cityRow + deptRow + hint;
+    });
+  }
+  // The sidebar drop-downs show a single pick as before, or "N selected" when
+  // several cities or businesses are picked on a tab.
+  function syncScopeSelect(id, list, labels){
+    const sel = document.getElementById(id); if(!sel) return;
+    const extra = sel.querySelector('option[data-multi]');
+    if(list.length > 1){
+      const v = list.join(',');
+      const o = extra || document.createElement('option');
+      o.setAttribute('data-multi', '1'); o.value = v; o.textContent = list.length + ' selected: ' + list.map(function(k){ return labels[k] || k; }).join(', ');
+      if(!extra) sel.appendChild(o);
+      sel.value = v;
+    } else {
+      if(extra) extra.remove();
+      sel.value = list.length ? list[0] : 'all';
+    }
+  }
   function visibleInvoices(){ return state.invoices.filter(passesFilters); }
   function invoiceDeptMatches(invoiceId){ const inv = findInv(invoiceId); return inv ? passesFilters(inv) : true; }
   function setDeptFilter(val){ state.deptFilter = val; saveState(); renderAll(); }
@@ -3522,11 +3572,6 @@ function todoRowHTML(item, num, priority){
     renderQueue();
   });
 
-  document.getElementById('sheet-office-chips').addEventListener('click', (e) => {
-    const chip = e.target.closest('.chip');
-    if(!chip) return;
-    setOfficeFilter(chip.dataset.office);
-  });
 
   function gaugePct(days){ return Math.min(100, (days/90)*100); }
   function invoiceAgeDays(inv){
@@ -3909,9 +3954,6 @@ saveState(); renderAll();
     }
     const colCount = tracker ? TRACKER_COLS.length : 24;
 
-    document.querySelectorAll('#sheet-office-chips .chip').forEach(c => {
-      c.classList.toggle('active', c.dataset.office === (state.officeFilter || 'all'));
-    });
     const weeksOn = paymentWeeksSelected();
     document.querySelectorAll('#payment-week-filter input[type=checkbox]').forEach(function(cb){
       cb.checked = weeksOn.indexOf(cb.value) !== -1;
@@ -3984,24 +4026,6 @@ saveState(); renderAll();
     const verb = field === 'pa' ? (val ? 'involved' : 'not involved') : (field === 'lienFiled' ? (val ? 'filed' : 'not filed') : (val ? 'sent' : 'not sent'));
     addActivity(inv, `${labels[field]} marked ${verb} (manual edit via Accounts Receivable).`, 'manual', 'update');
     saveState(); renderAll();
-  }
-  // QuickBooks workspaces: Work Authorization is a yes/no the team ticks, not a
-  // date pulled in from the books. Ticking it records today's date behind the
-  // scenes (so reports and the timeline still have one); unticking clears it.
-  function waSignedTile(inv){
-    const signed = !!(inv && inv.waSignedDate);
-    return '<div class="hist-kv" id="hist-wa-tile"><div class="k">Work Authorization signed</div>' +
-      '<div class="v' + (signed ? '' : ' muted') + '"><label class="wf-box" style="margin:0;">' +
-      '<input type="checkbox"' + (signed ? ' checked' : '') + ' onchange="setWaSigned(' + inv.id + ', this.checked)"> ' +
-      (signed ? 'Signed' + (inv.waSignedDate ? ' <span style="font-weight:400;color:var(--slate-soft);">' + hEsc(fmtDate(inv.waSignedDate)) + '</span>' : '') : 'Not signed') +
-      '</label></div></div>';
-  }
-  function setWaSigned(id, checked){
-    const inv = findInv(id);
-    if(!inv) return;
-    setSignatureDate(id, 'waSignedDate', checked ? localDay() : '');
-    const tile = document.getElementById('hist-wa-tile');
-    if(tile){ const tmp = document.createElement('div'); tmp.innerHTML = waSignedTile(inv); tile.replaceWith(tmp.firstChild); }
   }
   // Aging report boxes can be minimized (header only), maximized (full width,
   // every row) or left at the default (scrolls past ~8 rows). Remembered per
@@ -4292,37 +4316,19 @@ saveState(); renderAll();
     document.getElementById(drillId).innerHTML = rows || `<div class="empty" style="padding:12px;">No activity this period.</div>`;
   }
   function renderMtdFilterChips(){
-    const cityLabel = document.getElementById('mtd-city-label'); if(cityLabel) cityLabel.textContent = TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices';
-    const deptLabelEl = document.getElementById('mtd-dept-label'); if(deptLabelEl) deptLabelEl.textContent = TENANT_DEPTS_CUSTOM ? 'Businesses' : 'Departments';
-    const chip = function(key, label, on, fn){ return `<div class="chip multi${on ? ' active' : ''}" onclick="${fn}('${hEsc(key)}')" title="Click to ${on ? 'remove' : 'add'}">${hEsc(label)}</div>`; };
-    const cities = document.getElementById('mtd-city-chips');
-    if(cities) cities.innerHTML = `<div class="chip${mtdSelectedOffices.length ? '' : ' active'}" onclick="mtdClearOffices()">All</div>` + OFFICE_LOCATIONS.map(o => chip(o, OFFICE_LABELS[o] || o, mtdSelectedOffices.indexOf(o) !== -1, 'mtdToggleOffice')).join('');
-    const depts = document.getElementById('mtd-dept-chips');
-    if(depts) depts.innerHTML = `<div class="chip${mtdSelectedDepts.length ? '' : ' active'}" onclick="mtdClearDepts()">All</div>` + mtdDeptKeys().map(d => chip(d, DEPARTMENT_LABELS[d] || d, mtdSelectedDepts.indexOf(d) !== -1, 'mtdToggleDept')).join('');
+    // The chips themselves are the shared scope panel (renderScopePanels); only the chart titles are set here.
     const ct = document.getElementById('mtd-chart-title'); if(ct) ct.textContent = (TENANT_DEPTS_CUSTOM ? 'By City' : 'By Office Location') + (mtdSelectedDepts.length ? ' \u2014 ' + mtdSelectedDepts.map(d => DEPARTMENT_LABELS[d] || d).join(', ') : '');
     const dt = document.getElementById('mtd-dept-chart-title'); if(dt) dt.textContent = (TENANT_DEPTS_CUSTOM ? 'By Business' : 'By Department') + (mtdSelectedOffices.length ? ' \u2014 ' + mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', ') : '');
   }
-  function mtdToggleOffice(office){
-    const i = mtdSelectedOffices.indexOf(office);
-    if(i === -1) mtdSelectedOffices.push(office); else mtdSelectedOffices.splice(i, 1);
-    mtdLast = i === -1 ? { kind: 'office', key: office } : (mtdSelectedOffices.length ? { kind: 'office', key: mtdSelectedOffices[mtdSelectedOffices.length - 1] } : null);
-    renderInvoicedMTD();
-  }
-  function mtdToggleDept(dept){
-    const i = mtdSelectedDepts.indexOf(dept);
-    if(i === -1) mtdSelectedDepts.push(dept); else mtdSelectedDepts.splice(i, 1);
-    mtdLast = i === -1 ? { kind: 'dept', key: dept } : (mtdSelectedDepts.length ? { kind: 'dept', key: mtdSelectedDepts[mtdSelectedDepts.length - 1] } : null);
-    renderInvoicedMTD();
-  }
-  function mtdMatches(inv){
-    return (!mtdSelectedOffices.length || mtdSelectedOffices.indexOf(inv.officeLocation) !== -1) && (!mtdSelectedDepts.length || mtdSelectedDepts.indexOf(inv.department) !== -1);
-  }
+  // The selection is the dashboard-wide scope (the same chips on every tab);
+  // these names are kept for the bar-click handlers and older callers.
+  function mtdToggleOffice(office){ scopeToggle('office', office); }
+  function mtdToggleDept(dept){ scopeToggle('dept', dept); }
+  function mtdMatches(inv){ return passesFilters(inv); }
   function renderInvoicedMTD(){
     const { start, end } = monthRange();
-    // Deliberately unfiltered by the sidebar dept/office filters -- this tab's
-    // whole purpose is the full cross-office, cross-department breakdown.
-    mtdSelectedOffices = mtdSelectedOffices.filter(o => OFFICE_LOCATIONS.indexOf(o) !== -1);
-    mtdSelectedDepts = mtdSelectedDepts.filter(d => !!DEPARTMENT_LABELS[d]);
+    mtdSelectedOffices = scopeOffices();
+    mtdSelectedDepts = scopeDepts();
     const toRecord = inv => ({ officeLocation: inv.officeLocation, department: inv.department, category: inv.category, amount: inv.amount });
     const monthInvoices = state.invoices.filter(inv => dateInRange(inv.invoiceDate, start, end));
     const records = monthInvoices.filter(mtdMatches).map(toRecord);
@@ -4354,9 +4360,9 @@ saveState(); renderAll();
   var mtdSelectedOffices = [];
   var mtdSelectedDepts = [];
   var mtdLast = null;
-  function mtdClearOffices(){ mtdSelectedOffices = []; if(mtdLast && mtdLast.kind === 'office') mtdLast = null; renderInvoicedMTD(); }
-  function mtdClearDepts(){ mtdSelectedDepts = []; if(mtdLast && mtdLast.kind === 'dept') mtdLast = null; renderInvoicedMTD(); }
-  function mtdClearAll(){ mtdSelectedOffices = []; mtdSelectedDepts = []; mtdLast = null; renderInvoicedMTD(); }
+  function mtdClearOffices(){ scopeClear('office'); }
+  function mtdClearDepts(){ scopeClear('dept'); }
+  function mtdClearAll(){ scopeClearAll(); }
   // Every invoice dated this month for the selected office(s), newest month
   // first and newest invoice first within a month - the same table the Aging
   // Report uses, so the two tabs read the same way.
@@ -4399,23 +4405,31 @@ saveState(); renderAll();
 
   function renderCollectedMTD(){
     const { start, end } = monthRange();
-    const payments = state.paymentsLog.filter(p => dateInRange(p.paidDate, start, end));
-    const records = payments.map(p => ({ officeLocation: p.officeLocation, department: p.department, category: p.category, amount: p.amount }));
+    const toRecord = p => ({ officeLocation: p.officeLocation, department: p.department, category: p.category, amount: p.amount });
+    const monthPayments = state.paymentsLog.filter(p => dateInRange(p.paidDate, start, end));
+    // KPIs and the table follow the full scope; the chart is narrowed by the
+    // chosen businesses only, so other cities' bars stay there to click.
+    const payments = monthPayments.filter(paymentPassesFilters);
+    const records = payments.map(toRecord);
+    const chartRecords = monthPayments.filter(deptMatches).map(toRecord);
     const total = records.reduce((s,r) => s + r.amount, 0);
+    const selectedOffices = scopeOffices();
     document.getElementById('collected-kpis').innerHTML = `
-      <div class="kpi"><div class="label">Collected &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${payments.length} payment${payments.length===1?'':'s'} applied this month</div></div>
+      <div class="kpi"><div class="label">Collected &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${payments.length} payment${payments.length===1?'':'s'} applied this month · ${hEsc(scopeLabel())}</div></div>
       <div class="kpi"><div class="label">Source</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Posts automatically when a payment is applied' : 'Not connected yet'}</div></div>
-      <div class="kpi"><div class="label">Offices Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${OFFICE_LOCATIONS.map(o => OFFICE_LABELS[o]).join(', ')}</div></div>
+      <div class="kpi"><div class="label">${TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${Object.keys(DEPARTMENT_LABELS).filter(d => records.some(r => r.department === d)).length}/${Object.keys(DEPARTMENT_LABELS).length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with payments</div></div>
     `;
-    renderOfficeChart('collected-chart', 'collected-legend', 'collected-drilldown', 'collected-drill-title', records);
-    document.getElementById('collected-drill-title').textContent = 'Click a bar for a breakdown';
-    document.getElementById('collected-drilldown').innerHTML = '';
+    const cct = document.getElementById('collected-chart-title'); if(cct) cct.textContent = (TENANT_DEPTS_CUSTOM ? 'By City' : 'By Office Location') + (scopeDepts().length ? ' \u2014 ' + scopeDepts().map(d => DEPARTMENT_LABELS[d] || d).join(', ') : '');
+    renderOfficeChart('collected-chart', 'collected-legend', 'collected-drilldown', 'collected-drill-title', chartRecords, function(office){ scopeToggle('office', office); }, selectedOffices);
+    const grouped = groupByOfficeDept(chartRecords);
+    if(mtdLast && mtdLast.kind === 'office' && selectedOffices.indexOf(mtdLast.key) !== -1 && grouped[mtdLast.key]) showOfficeDrilldown('collected-drilldown', 'collected-drill-title', mtdLast.key, grouped[mtdLast.key]);
+    else { document.getElementById('collected-drill-title').textContent = 'Click a bar for a breakdown'; document.getElementById('collected-drilldown').innerHTML = ''; }
     const navCount = document.getElementById('nav-count-collected');
     if(navCount) navCount.textContent = payments.length;
 
     const wrap = document.getElementById('collected-payments-wrap');
     if(payments.length === 0){
-      wrap.innerHTML = `<div class="empty">No payments recorded yet this month. ${window.__CLMS_REAL ? 'Payments posted in ' + hEsc(dataSourcesLabel()) + ' land here automatically, and you can record one from an invoice\'s Manage drawer.' : 'Use Integrations &rarr; "Simulate a NetSuite Payment" to test this.'}</div>`;
+      wrap.innerHTML = `<div class="empty">No payments recorded yet this month${(scopeOffices().length || scopeDepts().length) ? ' for ' + hEsc(scopeLabel()) : ''}. ${window.__CLMS_REAL ? 'Payments posted in ' + hEsc(dataSourcesLabel()) + ' land here automatically, and you can record one from an invoice\'s Manage drawer.' : 'Use Integrations &rarr; "Simulate a NetSuite Payment" to test this.'}</div>`;
     } else {
       wrap.innerHTML = `<table class="log"><thead><tr><th>Customer</th><th>Invoice #</th><th>Office</th><th>Department</th><th>Amount</th><th>Remaining</th><th>Method</th><th>Date Applied</th><th>Source</th></tr></thead><tbody>
         ${payments.slice().reverse().map(p => `<tr>
@@ -4433,10 +4447,7 @@ saveState(); renderAll();
     }
   }
 
-  function paymentPassesFilters(p){
-    return (state.officeFilter === 'all' || p.officeLocation === state.officeFilter)
-        && (state.deptFilter === 'all' || p.department === state.deptFilter);
-  }
+  function paymentPassesFilters(p){ return officeMatches(p) && deptMatches(p); }
   // A payment is "partial" when it left a balance on the invoice at the time it
   // was applied. If the invoice has since been paid in full, the remaining
   // column shows the live balance (zero) so the history stays honest.
@@ -5657,6 +5668,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     followups: { kind: 'number', label: 'Follow-ups sent' },
     waSignedDate: { kind: 'date', label: 'Work Authorization signed' },
     cosSignedDate: { kind: 'date', label: 'COS signed' },
+    demandLetterSentAt: { kind: 'date', label: 'Demand letter sent' },
+    lastFollowUpAt: { kind: 'date', label: 'Last follow-up' },
+    payer: { kind: 'choice', label: 'Payer', options: function(){ return [['', '\u2014 Select \u2014']].concat(Object.keys(PAYER_LABELS).map(function(k){ return [k, PAYER_LABELS[k]]; })); } },
     noilSent: { kind: 'choice', label: 'NOIL sent', options: [['', 'Not yet'], ['1', 'Sent']] },
     lienFiled: { kind: 'choice', label: 'Lien filed', options: [['', 'No'], ['1', 'Yes']] },
     projectedPaymentDate: { kind: 'date', label: 'Projected payment' },
@@ -5676,6 +5690,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       case 'doNotContact': return inv.doNotContact ? '1' : '';
       case 'escalated': return inv.escalated ? '1' : '';
       case 'followups': return String(inv.followups || 0);
+      case 'lastFollowUpAt': return inv.lastFollowUpAt ? followUpDay(inv.lastFollowUpAt) : '';
+      case 'demandLetterSentAt': return inv.demandLetterSentAt ? followUpDay(inv.demandLetterSentAt) : '';
       default: return inv[field] == null ? '' : String(inv[field]);
     }
   }
@@ -5712,6 +5728,15 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       case 'lastContact': inv.lastContact = raw || null; persistInvoice(inv, ['lastContact']); addActivity(inv, raw ? ('Last contact date set to ' + fmtDate(raw) + '.') : 'Last contact date cleared.', 'manual', 'update'); break;
       case 'followups': inv.followups = Math.max(0, parseInt(raw, 10) || 0); persistInvoice(inv, ['followups']); addActivity(inv, 'Follow-ups sent set to ' + inv.followups + '.', 'manual', 'update'); break;
       case 'waSignedDate': case 'cosSignedDate': setSignatureDate(inv.id, field, raw); break;
+      case 'demandLetterSentAt': inv.demandLetterSentAt = raw || null; persistInvoice(inv, ['demandLetterSentAt']); addActivity(inv, raw ? ('Demand letter marked as sent on ' + fmtDate(raw) + '.') : 'Demand letter sent date cleared.', 'manual', 'update'); break;
+      case 'lastFollowUpAt': {
+        // A day typed here is stored as noon UTC so it reads as that same day everywhere.
+        inv.lastFollowUpAt = raw ? (raw + 'T12:00:00.000Z') : null;
+        inv.lastFollowUpBy = raw ? ((state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || inv.lastFollowUpBy || null) : null;
+        inv.lastFollowUpKind = raw ? (inv.lastFollowUpKind || 'followup') : null;
+        persistInvoice(inv, ['lastFollowUpAt', 'lastFollowUpBy', 'lastFollowUpKind']);
+        addActivity(inv, raw ? ('Last follow-up date set to ' + fmtDate(raw) + '.') : 'Last follow-up cleared.', 'manual', 'update'); break; }
+      case 'payer': inv.payer = raw || null; persistInvoice(inv, ['payer']); addActivity(inv, 'Payer set to ' + (PAYER_LABELS[inv.payer] || 'none') + '.', 'manual', 'update'); break;
       case 'noilSent': inv.noilSent = raw === '1'; inv.noilSentAt = inv.noilSent ? (inv.noilSentAt || localDay()) : null; persistInvoice(inv, ['noilSent']); addActivity(inv, inv.noilSent ? 'NOIL marked as sent.' : 'NOIL marked as not sent.', 'manual', 'update'); break;
       case 'lienFiled': inv.lienFiled = raw === '1'; persistInvoice(inv, ['lienFiled']); addActivity(inv, inv.lienFiled ? 'Lien marked as filed.' : 'Lien marked as not filed.', 'manual', 'update'); break;
       case 'projectedPaymentDate': setProjectedDate(inv.id, raw); break;
@@ -5729,7 +5754,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     Object.assign(a, { lastContact: inv.lastContact, followUpCount: inv.followups, waSignedAt: inv.waSignedDate, cosSignedAt: inv.cosSignedDate, noilSentAt: inv.noilSentAt || (inv.noilSent ? localDay() : null),
       lienFiled: !!inv.lienFiled, projectedPaymentDate: inv.projectedPaymentDate, currentlyWith: inv.currentlyWith, contact: inv.contact, contactEmail: inv.contactEmail, contactInfo: inv.contactInfo,
       paymentType: inv.paymentType, note: inv.note, doNotContact: !!inv.doNotContact, doNotContactBy: inv.doNotContactBy, doNotContactAt: inv.doNotContactAt, escalated: !!inv.escalated, notifiedName: inv.notifiedName,
-      responded: inv.responded, responseSummary: inv.responseSummary });
+      responded: inv.responded, responseSummary: inv.responseSummary, demandLetterSentAt: inv.demandLetterSentAt, payer: inv.payer, pa: !!inv.pa,
+      lastFollowUpAt: inv.lastFollowUpAt, lastFollowUpBy: inv.lastFollowUpBy });
     historyInvalidate(inv.id);
     renderAccountHistory(inv, data);
     quietRender(renderAll);
@@ -5765,18 +5791,18 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>') : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
       tile('Follow-ups sent', String(a.followUpCount || 0), '', 'followups') +
       lastDayTile +
-      (TENANT_DEPTS_CUSTOM ? waSignedTile(inv) : dateTile('Work Authorization signed', a.waSignedAt, 'waSignedDate')) +
+      (TENANT_DEPTS_CUSTOM ? tile('Work Authorization signed', a.waSignedAt ? ('Signed <span style="font-weight:400;color:var(--slate-soft);">' + hDate(a.waSignedAt) + '</span>') : 'Not signed', a.waSignedAt ? '' : 'muted', 'waSignedDate') : dateTile('Work Authorization signed', a.waSignedAt, 'waSignedDate')) +
       dateTile('COS signed', a.cosSignedAt, 'cosSignedDate') +
-      dateTile('Demand letter sent', a.demandLetterSentAt) +
+      dateTile('Demand letter sent', a.demandLetterSentAt, 'demandLetterSentAt') +
       dateTile('NOIL sent', a.noilSentAt, 'noilSent') +
       tile('Lien filed', a.lienFiled ? 'Yes' : 'No', a.lienFiled ? '' : 'muted', 'lienFiled') +
       dateTile('Projected payment', a.projectedPaymentDate, 'projectedPaymentDate') +
       tile('Currently with', hEsc(CURRENTLY_WITH_LABELS[a.currentlyWith] || a.currentlyWith || '—'), '', 'currentlyWith') +
-      tile('Payer', hEsc(PAYER_LABELS[a.payer] || a.payer || '—') + (a.pa ? ' <span class="tl-badge">PA</span>' : '')) +
+      tile('Payer', hEsc(PAYER_LABELS[a.payer] || a.payer || '—') + (a.pa ? ' <span class="tl-badge">PA</span>' : ''), a.payer ? '' : 'muted', 'payer') +
       tile('Contact', hEsc(a.contact || '—') + (a.contactEmail ? ('<div style="font-weight:400;font-size:12px;">' + hEsc(a.contactEmail) + '</div>') : ''), '', 'contact') +
       (TENANT_DEPTS_CUSTOM ? (
         tile('Point of contact', a.contactInfo ? hEsc(a.contactInfo).replace(/\n/g, '<br>') : 'Not on file', a.contactInfo ? '' : 'muted', 'contactInfo') +
-        tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(a.lastFollowUpBy) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted') +
+        tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(a.lastFollowUpBy) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted', 'lastFollowUpAt') +
         tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted', 'paymentType') +
         tile('Notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted', 'note') +
         tile('Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted', 'doNotContact')

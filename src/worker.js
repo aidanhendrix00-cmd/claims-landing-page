@@ -4949,8 +4949,24 @@ lastDayOnSite: 'last_day_on_site',
 doNotContact: 'do_not_contact',
 contact: 'contact',
 contactEmail: 'contact_email',
-contactInfo: 'contact_info'
+contactInfo: 'contact_info',
+payer: 'payer',
+demandLetterSentAt: 'demand_letter_sent_at',
+lastFollowUpAt: 'last_follow_up_at',
+lastFollowUpBy: 'last_follow_up_by',
+lastFollowUpKind: 'last_follow_up_kind'
 };
+
+// A day typed into a date box becomes noon UTC, so it reads as that same
+// calendar day in every US time zone; a full timestamp is kept as given.
+function dayOrTimestamp(value) {
+if (value === null || value === undefined || value === '') return null;
+const s = String(value).trim();
+if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s + 'T12:00:00.000Z';
+const d = new Date(s);
+return isNaN(d.getTime()) ? null : d.toISOString();
+}
+const PAYER_KEYS = ['insurance', 'pm', 'private'];
 
 // "DO NOT CONTACT - Sent to Collections Agency". Once an account carries this
 // flag nothing goes out to the customer from clAIms: the cadence skips it and
@@ -4980,6 +4996,8 @@ let value = body[key];
 if (column === 'noil_sent_at') { patch[column] = value ? (normalizeDateOnly(body.noilSentAt) || new Date().toISOString()) : null; return; }
 if (column === 'wa_signed_at' || column === 'cos_signed_at' || column === 'projected_payment_date' || column === 'last_contact' || column === 'last_day_on_site') { patch[column] = normalizeDateOnly(value); return; }
 if (column === 'follow_up_count') { patch[column] = parseInt(value, 10) || 0; return; }
+if (column === 'demand_letter_sent_at' || column === 'last_follow_up_at') { patch[column] = dayOrTimestamp(value); return; }
+if (column === 'payer') { const p = String(value || '').trim().toLowerCase(); patch[column] = PAYER_KEYS.indexOf(p) === -1 ? null : p; return; }
 if (column === 'cadence_sent') { patch[column] = (value && typeof value === 'object') ? value : {}; return; }
 if (column === 'lien_filed' || column === 'wa_sent' || column === 'cos_sent' || column === 'docs_complete' || column === 'escalated' || column === 'pa') { patch[column] = !!value; return; }
 if (column === 'do_not_contact') {
@@ -4990,7 +5008,7 @@ return;
 }
 if (value === '' || value === null || value === undefined) { patch[column] = null; return; }
 if (typeof value === 'object') return;   // never write objects/arrays into text columns
-const LIMITS = { note: 4000, response_summary: 2000, responded: 40, payment_type: 40, currently_with: 40, notified_name: 160, contact: 120, contact_email: 200, contact_info: 1000 };
+const LIMITS = { note: 4000, response_summary: 2000, responded: 40, payment_type: 40, currently_with: 40, notified_name: 160, contact: 120, contact_email: 200, contact_info: 1000, last_follow_up_by: 160, last_follow_up_kind: 40 };
 if (column === 'notified_at') { const d = new Date(value); patch[column] = isNaN(d.getTime()) ? null : d.toISOString(); return; }
 patch[column] = String(value).trim().slice(0, LIMITS[column] || 500) || null;
 });
