@@ -267,8 +267,11 @@
   .bar-row .bl{width:110px;font-size:11.5px;color:var(--slate);flex-shrink:0;}
   .bar-track{flex:1;height:9px;border-radius:5px;background:#EEF1EF;overflow:hidden;}
   .bar-fill{height:100%;border-radius:5px;}
-  .note-stamp-row{margin-top:3px;min-height:0;}
-  .note-stamp{font-family:var(--font-mono);font-size:10px;letter-spacing:.02em;color:var(--slate-soft);white-space:nowrap;}
+  .note-stamp{font-family:var(--font-mono);font-size:11px;letter-spacing:.02em;color:var(--slate);white-space:nowrap;}
+  .sheet td.note-time{min-width:150px;white-space:nowrap;vertical-align:top;}
+  .sheet td.note-time .note-when{font-size:12px;color:var(--ink);}
+  .sheet td.note-time .note-who{font-size:11px;color:var(--slate);margin-top:2px;}
+  .sheet td.note-time .none{color:var(--slate-soft);}
   .bar-track.stacked{display:flex;height:12px;border-radius:6px;}
   .bar-track.stacked .bar-seg{height:100%;flex:0 0 auto;transition:width .2s ease;}
   .bar-track.stacked .bar-seg:first-child{border-radius:6px 0 0 6px;}
@@ -3818,7 +3821,7 @@ saveState(); renderAll();
   // Tracker columns for companies whose departments are operating companies
   // (QuickBooks-only workspaces): the ledger a collections desk actually works
   // from, with the free-text columns editable in place.
-  const TRACKER_COLS = ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?', 'Response Summary', 'Notes', 'Last Follow-Up', 'Projected Collection', 'Payment Type', 'Sent to Collections'];
+  const TRACKER_COLS = ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?', 'Response Summary', 'Notes', 'Note Time', 'Last Follow-Up', 'Projected Collection', 'Payment Type', 'Sent to Collections'];
   // A follow-up timestamp is shown on the calendar day it happened here (a
   // send at 10 pm Central is today, not tomorrow's UTC date).
   function followUpDay(ts){ const d = new Date(ts); return isNaN(d.getTime()) ? String(ts).slice(0, 10) : localDay(d); }
@@ -3853,7 +3856,8 @@ saveState(); renderAll();
         <td>${inv.lastContact ? fmtDate(inv.lastContact) : '\u2014'}</td>
         <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span></td>
         <td class="tracker-text qb-notes resp-cell" title="${hEsc(inv.responseSummary || '')}"><div class="resp-wrap">${inv.responseSummary ? '<div class="clamp">' + hEsc(inv.responseSummary) + '</div>' : '<span class="none">No reply yet</span>'}<button class="btn-small reply-btn" onclick="openReplyBox(${inv.id})" title="Paste the email you received \u2014 clAIms summarizes it here">${inv.responseSummary ? 'Log another reply' : 'Log reply'}</button></div></td>
-        <td class="tracker-text"><textarea rows="2" placeholder="Notes\u2026" onchange="setTrackerText(${inv.id}, 'note', this.value)">${hEsc(inv.note || '')}</textarea><div class="note-stamp-row" id="note-stamp-${inv.id}">${noteStampHTML(inv)}</div></td>
+        <td class="tracker-text"><textarea rows="2" placeholder="Notes\u2026" onchange="setTrackerText(${inv.id}, 'note', this.value)">${hEsc(inv.note || '')}</textarea></td>
+        <td class="note-time" id="note-stamp-${inv.id}">${noteStampHTML(inv, 'cell')}</td>
         <td>${lastFollowUpHTML(inv)}</td>
         <td><input type="date" value="${hEsc(inv.projectedPaymentDate || '')}" onchange="setProjectedDate(${inv.id}, this.value)"/>${paymentDateOutsideWindow(inv.projectedPaymentDate) ? ' <span class="pd-flag" title="Outside the 3-week window (This Week through Following Week)">*</span>' : ''}</td>
         <td>
@@ -3884,7 +3888,7 @@ saveState(); renderAll();
     saveState();
     // Re-render everything except the sheet so the textarea keeps focus order.
     renderNavCounts(); renderQueue();
-    if (field === 'note') { const stamp = document.getElementById('note-stamp-' + inv.id); if (stamp) stamp.innerHTML = noteStampHTML(inv); }
+    if (field === 'note') { const stamp = document.getElementById('note-stamp-' + inv.id); if (stamp) stamp.innerHTML = noteStampHTML(inv, 'cell'); }
   }
   // When (and by whom) the current note text was entered: the newest logged
   // note whose text matches what is in the box. Edited elsewhere = no stamp.
@@ -3897,9 +3901,13 @@ saveState(); renderAll();
     const when = (d && !isNaN(d.getTime())) ? d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : (hit.ts || '');
     return { when: when, author: hit.author || null };
   }
-  function noteStampHTML(inv){
+  // 'cell' = the Note Time column (date/time on one line, who on the next);
+  // otherwise a single "Added ... · who" line for the drawer and Account History.
+  function noteStampHTML(inv, style){
     const st = noteStamp(inv);
-    return st ? ('<span class="note-stamp">Added ' + hEsc(st.when) + (st.author ? ' \u00b7 ' + hEsc(st.author) : '') + '</span>') : '';
+    if (!st) return style === 'cell' ? '<span class="none">\u2014</span>' : '';
+    if (style === 'cell') return '<div class="note-when">' + hEsc(st.when) + '</div>' + (st.author ? '<div class="note-who">by ' + hEsc(st.author) + '</div>' : '');
+    return '<span class="note-stamp">Added ' + hEsc(st.when) + (st.author ? ' \u00b7 ' + hEsc(st.author) : '') + '</span>';
   }
   // Accounts Receivable search / invoice-date range / sort / show. Kept in
   // state so they survive a refresh; the inputs are only written when they
@@ -5306,7 +5314,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
           kv('Last follow-up', inv.lastFollowUpAt ? (fmtDate(followUpDay(inv.lastFollowUpAt)) + (inv.lastFollowUpBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.lastFollowUpBy) + '</div>' : '')) : 'None yet', !inv.lastFollowUpAt) +
           kv('Projected collection', inv.projectedPaymentDate ? fmtDate(inv.projectedPaymentDate) : 'Not set', !inv.projectedPaymentDate) +
           kv('Payment type', hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType || 'Not set'), !inv.paymentType) +
-          kv('Notes', inv.note ? (hEsc(inv.note).replace(/\n/g, '<br>') + (noteStamp(inv) ? '<div class="note-stamp-row">' + noteStampHTML(inv) + '</div>' : '')) : 'None', !inv.note);
+          kv('Notes', inv.note ? hEsc(inv.note).replace(/\n/g, '<br>') : 'None', !inv.note) +
+          kv('Note time', noteStamp(inv) ? noteStampHTML(inv) : 'No note on file', !noteStamp(inv));
         document.getElementById('detail-contact-info').value = inv.contactInfo || '';
         document.getElementById('detail-response-summary').value = inv.responseSummary || '';
       }
@@ -5879,7 +5888,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         tile('Point of contact', a.contactInfo ? hEsc(a.contactInfo).replace(/\n/g, '<br>') : 'Not on file', a.contactInfo ? '' : 'muted', 'contactInfo') +
         tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(a.lastFollowUpBy) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted', 'lastFollowUpAt') +
         tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted', 'paymentType') +
-        tile('Notes', a.note ? (hEsc(a.note).replace(/\n/g, '<br>') + (noteStamp(inv) ? '<div class="note-stamp-row">' + noteStampHTML(inv) + '</div>' : '')) : 'None', a.note ? '' : 'muted', 'note') +
+        tile('Notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted', 'note') +
+        tile('Note time', noteStamp(inv) ? noteStampHTML(inv) : 'No note on file', noteStamp(inv) ? '' : 'muted') +
         tile('Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted', 'doNotContact')
       ) : '') +
       tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted', 'escalated') +
