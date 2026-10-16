@@ -1035,15 +1035,6 @@
 
       <div class="rule-card">
         <div>
-          <div class="rname">Certificate of Satisfaction (COS) Auto-Send</div>
-          <div class="rdesc">Automatically emails a COS to the account owner the moment your CRM reports a job's status as <b>Work Completed</b>.</div>
-          <div class="rtrigger">TRIGGER: CRM Job Status &#8594; Work Completed</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="auto-cos" checked="" onchange="toggleAutomation('cos', this.checked)"><span class="slider"></span></label>
-      </div>
-
-      <div class="rule-card">
-        <div>
           <div class="rname">Payment Request Auto-Send</div>
           <div class="rdesc">Once your CRM reports a job as <b>In A/R</b> and supporting documentation is complete, automatically emails the homeowner the estimate, photos, invoice, and a payment link &#8212; on the first day both conditions are true.</div>
           <div class="rtrigger">TRIGGER: Job Status &#8594; In A/R + Docs Complete</div>
@@ -1951,7 +1942,7 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
       automationLog: [],
       paymentsLog: [],
       financialLog: [],
-      automationSettings: { wa: true, cos: true, pay: true, autoCadence: true, requireReview: false },
+      automationSettings: { wa: true, cos: false, pay: true, autoCadence: true, requireReview: false },
       deptFilter: 'all',
       officeFilter: 'all',
       paymentDateFilter: 'all',
@@ -3141,7 +3132,6 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       const setChecked = (id, val) => { const el = document.getElementById(id); if(el) el.checked = !!val; };
       const setValue = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
       setChecked('auto-wa', state.automationSettings.wa);
-      setChecked('auto-cos', state.automationSettings.cos);
       setChecked('auto-pay', state.automationSettings.pay);
       setChecked('auto-cadence', state.automationSettings.autoCadence);
       setChecked('auto-review', state.automationSettings.requireReview);
@@ -6620,12 +6610,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
 
   function runAutomationChecks(inv){
-    if(state.automationSettings.cos && inv.jobStatus === 'work_completed' && !inv.cosSent){
-      inv.cosSent = true;
-      inv.documents.push({ id:'auto'+(state.nextDocId++), name:'Certificate of Satisfaction.pdf', kind:'COS', auto:true });
-      addActivity(inv, 'Certificate of Satisfaction automatically emailed to account owner.', 'automation');
-      logAutomation(inv, 'Certificate of Satisfaction');
-    }
+    // COS auto-send was retired: the Certificate of Satisfaction is sent by the team, never automatically.
     if(state.automationSettings.pay && inv.jobStatus === 'in_ar' && inv.docsComplete && !inv.paymentEmailSent){
       inv.paymentEmailSent = true;
       addActivity(inv, 'Payment request email automatically sent with estimate, photos, invoice, and payment link.', 'automation');
