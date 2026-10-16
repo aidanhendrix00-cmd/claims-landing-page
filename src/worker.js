@@ -737,6 +737,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   var PAYER = { insurance: 'Insurance', pm: 'Commercial or Property Management', private: 'Private Pay' };
   var STATUS = { in_progress: 'In Progress', work_completed: 'Work Completed', in_ar: 'In A/R', paid: 'Paid', ar_sent: 'In A/R', completed: 'Work Completed' };
   var CW = { adjuster: 'Adjuster', pm: 'Property Manager', homeowner: 'Homeowner' };
+  // Same default the dashboard uses: a file nobody has moved sits with the payer.
+  function cwLabel(a){ var k = a.currentlyWith || (a.payer === 'insurance' ? 'adjuster' : (a.payer === 'pm' ? 'pm' : 'homeowner')); return CW[k] || k; }
   var PT = { payment_link: 'Payment Link', check: 'Check', ach: 'ACH', credit_card: 'Credit Card', wire: 'Wire/Direct Deposit', integration: 'Accounting system' };
   function statusLabel(a){ if(isPaid(a)) return 'Paid'; return STATUS[a.jobStatus] || (a.jobStatus ? String(a.jobStatus).replace(/_/g,' ') : 'Open'); }
   function isPaid(a){ var amt = Number(a.amount || 0), paid = a.paidAmount == null ? null : Number(a.paidAmount || 0); return String(a.jobStatus || '') === 'paid' || (amt > 0 && paid != null && paid + 0.005 >= amt) || (!!a.paidDate && (paid == null || paid + 0.005 >= amt)); }
@@ -842,7 +844,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       if(f.type === 'queue' && f.status === 'all') list = list.filter(function(a){ return !isPaid(a); });
       list.sort(byName);
       cols = baseCols().concat(['Follow-ups', 'Last contact', 'Responded?', 'Currently with']);
-      rows = list.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), CW[a.currentlyWith] || a.currentlyWith || '']); });
+      rows = list.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), cwLabel(a)]); });
       foot = totals(list);
     } else if(f.type === 'ar'){
       var ar = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f); });
