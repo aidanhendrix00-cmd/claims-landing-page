@@ -5881,7 +5881,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       dateTile('NOIL sent', a.noilSentAt, 'noilSent') +
       tile('Lien filed', a.lienFiled ? 'Yes' : 'No', a.lienFiled ? '' : 'muted', 'lienFiled') +
       dateTile('Projected payment', a.projectedPaymentDate, 'projectedPaymentDate') +
-      tile('Currently with', hEsc(CURRENTLY_WITH_LABELS[a.currentlyWith] || a.currentlyWith || '—'), '', 'currentlyWith') +
+      tile('Currently with', hEsc(CURRENTLY_WITH_LABELS[a.currentlyWith || inv.currentlyWith] || a.currentlyWith || inv.currentlyWith || '—'), '', 'currentlyWith') +
       tile('Payer', hEsc(PAYER_LABELS[a.payer] || a.payer || '—') + (a.pa ? ' <span class="tl-badge">PA</span>' : ''), a.payer ? '' : 'muted', 'payer') +
       tile('Contact', hEsc(a.contact || '—') + (a.contactEmail ? ('<div style="font-weight:400;font-size:12px;">' + hEsc(a.contactEmail) + '</div>') : ''), '', 'contact') +
       (TENANT_DEPTS_CUSTOM ? (
