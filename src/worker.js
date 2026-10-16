@@ -8103,16 +8103,16 @@ const employees = (await pgInsert(env, 'users', userRows) || []).map(function (u
 // least ten as well.
 let n = 0; let created = 0;
 const accountRows = []; const accountMeta = []; const perOffice = {};
-function addInvoice(dept, office, k) {
+function addInvoice(dept, office, k, openOnly) {
 const c = DEMO_CUSTOMERS[(n * 7 + k) % DEMO_CUSTOMERS.length];
 const profile = demoProfileFor(departments[dept]);
 const services = DEMO_SERVICES_BY_TYPE[profile ? profile.services : 'turns'] || DEMO_SERVICES;
 const days = [3, 9, 17, 26, 34, 48, 61, 75, 92, 118][k % 10];
 const amount = Math.round((350 + rnd() * 17800) * 100) / 100;
-const paidKind = k === 2 || k === 7 ? 'paid' : (k === 5 ? 'partial' : 'open');
+const paidKind = openOnly ? 'open' : (k === 2 || k === 7 ? 'paid' : (k === 5 ? 'partial' : 'open'));
 const paidAmount = paidKind === 'paid' ? amount : (paidKind === 'partial' ? Math.round(amount * 0.4 * 100) / 100 : 0);
 const invoicedAt = new Date(nowMs - days * 86400000);
-const invoiceNumber = 'DEMO-' + String(1040 + n * 10 + k);
+const invoiceNumber = 'DEMO-' + String(1041 + created);
 const paidAt = paidKind === 'paid' ? new Date(invoicedAt.getTime() + (4 + Math.floor(rnd() * 20)) * 86400000) : null;
 accountMeta.push({ days: days, paidKind: paidKind, paidAt: paidAt, paidAmount: paidAmount, payer: c[1], customer: c[0], seq: created + 1 });
 accountRows.push(Object.assign({
@@ -8149,6 +8149,27 @@ const serving = deptKeys.filter(function (d) { return officesFor(d).indexOf(offi
 const pool = serving.length ? serving : deptKeys;
 let k = 0;
 while ((perOffice[office] || 0) < 10 && k < 40) { addInvoice(pool[(n + k) % pool.length], office, k); k++; }
+n++;
+}
+// Even out the open balance per city so the Aging Report's bars all read
+// well: every city ends within about half of the heaviest one, topped up
+// with open invoices spread across the 30 / 60 / 90 buckets.
+function openBalanceByOffice() {
+const by = {};
+accountRows.forEach(function (r, i) { if (!r.office) return; const m = accountMeta[i]; if (m.paidKind === 'paid') return; by[r.office] = (by[r.office] || 0) + (Number(r.amount) - Number(m.paidAmount || 0)); });
+return by;
+}
+for (const office of officeKeys) {
+const serving = deptKeys.filter(function (d) { return officesFor(d).indexOf(office) !== -1; });
+const pool = serving.length ? serving : deptKeys;
+let guard = 0;
+while (guard < 40) {
+const by = openBalanceByOffice();
+const top = Math.max.apply(null, officeKeys.map(function (o) { return by[o] || 0; }));
+if ((by[office] || 0) >= top * 0.55) break;
+addInvoice(pool[(n + guard) % pool.length], office, guard, true);
+guard++;
+}
 n++;
 }
 const inserted = await pgInsert(env, 'accounts', accountRows) || [];
