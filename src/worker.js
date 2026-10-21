@@ -702,7 +702,7 @@ const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-
   '<div class="ty-card">' +
   '<div class="ty-mark">clAIms</div>' +
   '<h1>Thank you for your submission!</h1>' +
-  '<p>Please allow adequate time for the clAIms collection team to reach out to you to begin the setup process.</p>' +
+  '<p>Please allow adequate time for the clAIms Software team to reach out to you to begin the setup process.</p>' +
   '<a href="/">Back to home</a>' +
   '</div>' +
   '</body></html>';
