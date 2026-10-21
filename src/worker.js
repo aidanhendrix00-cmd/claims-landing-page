@@ -1839,9 +1839,9 @@ const PRICING_LINKS_SCRIPT = '<script>' +
   'var growImpl=tiersRow.querySelector(".tier.growth .tier-impl b");' +
   'if(growImpl){growImpl.textContent="$2,900–$3,750";}' +
   'var entPrice=tiersRow.querySelector(".tier.enterprise .tier-price");' +
-  'if(entPrice){entPrice.innerHTML="$1,650<span class=\\"per\\">/mo flat</span>";}' +
+  'if(entPrice){entPrice.innerHTML="$1,750+<span class=\\"per\\">/mo</span>";}' +
   'var entImpl=tiersRow.querySelector(".tier.enterprise .tier-impl b");' +
-  'if(entImpl){entImpl.textContent="$4,250";}' +
+  'if(entImpl){entImpl.textContent="$5,250+";}' +
   'var startFit=tiersRow.querySelector(".tier.starter .tier-fit");' +
   'if(startFit){startFit.textContent="Under $500K in annual revenue";}' +
   'var growFit=tiersRow.querySelector(".tier.growth .tier-fit");' +
