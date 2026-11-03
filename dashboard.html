@@ -5399,7 +5399,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
         <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>City</th><th>Total open</th><th>Avg age</th><th>Last contact</th><th></th></tr></thead>
         <tbody>
           ${groups.map(g => `
-            <tr class="acct-row" onclick="openAccountPanel(${JSON.stringify(g.key)})">
+            <tr class="acct-row" data-key="${hEsc(g.key)}" onclick="openAccountPanel(this.dataset.key)">
               <td><div class="acct-name">${hEsc(g.name)}</div><div class="acct-sub">${hEsc(g.contact || 'No contact on file')}${g.contactEmail ? ' · ' + hEsc(g.contactEmail) : ''}${g.escalated ? ' · <span style="color:var(--rust);font-weight:600;">' + g.escalated + ' escalated</span>' : ''}${g.dnc ? ' · <span style="color:var(--rust);font-weight:600;">Do not contact</span>' : ''}</div></td>
               <td><b>${f.includePaid ? g.count : g.openCount}</b>${f.includePaid && g.openCount !== g.count ? '<div class="acct-sub">' + g.openCount + ' open</div>' : ''}</td>
               <td>${hEsc(acctBizLabel(g))}</td>
@@ -5407,7 +5407,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
               <td class="amt">$${g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               <td>${g.openCount ? g.avgAge + ' days' : '—'}</td>
               <td>${g.lastContact ? fmtDate(g.lastContact) : '<span style="color:var(--slate-soft);">—</span>'}</td>
-              <td style="white-space:nowrap;"><button class="btn-small" onclick="event.stopPropagation(); openAccountPanel(${JSON.stringify(g.key)})">Open</button></td>
+              <td style="white-space:nowrap;"><button class="btn-small" data-key="${hEsc(g.key)}" onclick="event.stopPropagation(); openAccountPanel(this.dataset.key)">Open</button></td>
             </tr>`).join('')}
         </tbody>
         <tfoot><tr><td style="font-weight:600;padding:10px 16px;">${groups.length} account${groups.length === 1 ? '' : 's'}</td><td style="font-weight:600;">${totInv}</td><td></td><td></td><td class="amt" style="font-weight:600;">$${totOpen.toLocaleString(undefined,{minimumFractionDigits:2})}</td><td></td><td></td><td></td></tr></tfoot>
