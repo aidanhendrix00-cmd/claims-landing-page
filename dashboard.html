@@ -479,6 +479,29 @@
   .drawer-section h4{font-family:var(--font-display);font-size:12.5px;margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--slate);}
   .drawer-section .hint{font-size:11px;color:var(--slate-soft);margin-top:6px;line-height:1.5;}
 
+  .esc-opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:pointer;background:#fff;}
+  .esc-opt:hover{border-color:var(--slate-soft);}
+  .esc-opt.sel{border-color:var(--ink);background:#FAF8F2;}
+  .esc-opt input{margin-top:3px;accent-color:var(--ink);}
+  .esc-opt .t{font-size:13px;font-weight:600;color:var(--ink);}
+  .esc-opt .d{font-size:11.5px;color:var(--slate);margin-top:2px;}
+  .esc-opt select{margin-top:8px;width:100%;font-size:13px;padding:7px 9px;border-radius:7px;border:1px solid var(--line);font-family:var(--font-body);}
+  .ai-instruct{border:1px solid var(--line);border-radius:10px;padding:12px 12px 10px;background:#FAF8F2;margin:0 0 12px;}
+  .ai-instruct-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
+  .ai-instruct-head b{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);}
+  .ai-instruct-row{display:flex;gap:8px;align-items:stretch;}
+  .ai-instruct-row textarea{flex:1;min-height:44px;resize:vertical;font-size:13px;line-height:1.45;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-family:var(--font-body);color:var(--ink);background:#fff;}
+  .ai-instruct-row textarea:focus{outline:none;border-color:var(--ink);}
+  .ai-instruct-row .btn-primary:disabled{opacity:.55;cursor:default;}
+  .ai-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .ai-chip{font-size:11.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;font-family:var(--font-body);}
+  .ai-chip:hover{border-color:var(--ink);}
+  .ai-instruct-note{font-size:11px;color:var(--slate-soft);margin-top:7px;line-height:1.45;}
+  .sig-preview{margin-top:8px;border:1px dashed var(--line);border-radius:10px;padding:10px 14px;font-size:12.5px;line-height:1.5;background:#fff;}
+  .sig-preview .sig-head{display:flex;justify-content:space-between;gap:8px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--slate-soft);margin-bottom:4px;}
+  .sig-preview .sig-head a{color:var(--slate);text-transform:none;letter-spacing:0;font-weight:600;}
+  .sig-preview .sig-body{white-space:pre-line;color:var(--ink);}
+  .sig-preview .sig-body::first-line{font-weight:700;}
   .draft-box{border:1px solid var(--line);border-radius:10px;padding:14px;min-height:150px;font-size:13px;line-height:1.6;font-family:var(--font-body);background:#FBFCFB;white-space:pre-wrap;color:var(--ink);width:100%;resize:vertical;}
   .status-line{display:flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:11px;color:var(--slate-soft);margin:10px 0 16px;}
   .status-dot{width:6px;height:6px;border-radius:50%;background:var(--amber);animation:pulse 1s infinite ease-in-out;}
@@ -1222,10 +1245,29 @@
       <div class="hint" id="subject-hint">Auto-generated &mdash; edit it before approving if needed.</div>
     </div>
 
+    <div class="ai-instruct" id="ai-instruct-box">
+      <div class="ai-instruct-head"><b>Tell the AI what to change</b><span style="font-size:11px;color:var(--slate-soft);">Rewrites the draft below</span></div>
+      <div class="ai-instruct-row">
+        <textarea id="ai-instruct" maxlength="500" rows="2" placeholder="e.g. Make this follow-up stern and demand payment" onkeydown="aiInstructKey(event)"></textarea>
+        <button type="button" class="btn-primary" id="ai-instruct-btn" onclick="applyAiInstruction()">Rewrite</button>
+      </div>
+      <div class="ai-chips">
+        <button type="button" class="ai-chip" onclick="applyAiInstruction('Make this stern and firmly demand payment.')">Stern &amp; demand payment</button>
+        <button type="button" class="ai-chip" onclick="applyAiInstruction('Ask for payment within 7 days of this email.')">Pay within 7 days</button>
+        <button type="button" class="ai-chip" onclick="applyAiInstruction('Make it shorter - three or four sentences.')">Shorter</button>
+        <button type="button" class="ai-chip" onclick="applyAiInstruction('Make it warmer and more relationship-focused, still asking for payment.')">Friendlier</button>
+        <button type="button" class="ai-chip" onclick="applyAiInstruction('Ask them to confirm the payment status and an expected payment date.')">Ask for a payment date</button>
+      </div>
+      <div class="ai-instruct-note" id="ai-instruct-note">Type anything &mdash; tone, a deadline, what to mention. The amounts and facts on this invoice stay the same. Press Enter to rewrite.</div>
+    </div>
     <div id="status-row" class="status-line" style="display:none;">
-      <span class="status-dot"></span> Drafting based on invoice age, payer type, and attached documents&#8230;
+      <span class="status-dot"></span> <span id="status-row-text">Drafting based on invoice age, payer type, and attached documents&#8230;</span>
     </div>
     <textarea class="draft-box" id="draft-text" placeholder="Draft will appear here..."></textarea>
+    <div class="sig-preview" id="sig-preview" style="display:none;">
+      <div class="sig-head"><span>Your signature &mdash; added to every email you send</span><a href="/account#identity">Edit</a></div>
+      <div class="sig-body" id="sig-preview-text"></div>
+    </div>
     <div id="err" class="err" style="display:none;"></div>
     <div class="drawer-actions">
       <button class="btn-ghost" onclick="generateDraft(true)">&#8635; Regenerate</button>
@@ -1235,6 +1277,21 @@
 </div>
 
 <!-- ===================== ADD INVOICE DRAWER ===================== -->
+<div class="overlay" id="overlay-escalate">
+  <div class="drawer" style="max-width:500px;">
+    <div class="drawer-head"><h3>Escalate invoice</h3><button class="close" onclick="closeEscalateBox()">Close ×</button></div>
+    <div class="drawer-sub" id="esc-box-sub">This pulls the invoice out of the automated cadence and into Escalations.</div>
+    <div class="drawer-section">
+      <h4>Who should be notified?</h4>
+      <label class="esc-opt sel" data-esc-opt="manager"><input type="radio" name="esc-notify" value="manager" checked onchange="onEscNotifyChange()"><div><div class="t">The office manager</div><div class="d" id="esc-opt-manager-d">The manager for this invoice's office gets an email.</div></div></label>
+      <label class="esc-opt" data-esc-opt="admin"><input type="radio" name="esc-notify" value="admin" onchange="onEscNotifyChange()"><div><div class="t">An admin</div><div class="d">An admin on your account gets an email.</div></div></label>
+      <label class="esc-opt" data-esc-opt="user"><input type="radio" name="esc-notify" value="user" onchange="onEscNotifyChange()"><div style="flex:1;"><div class="t">A specific teammate</div><div class="d">Pick exactly who gets the email.</div><select id="esc-user" onclick="event.stopPropagation()" onchange="selectEscOpt('user')"><option value="">Loading your team&#8230;</option></select></div></label>
+      <label class="esc-opt" data-esc-opt="none"><input type="radio" name="esc-notify" value="none" onchange="onEscNotifyChange()"><div><div class="t">Don't notify anyone</div><div class="d">Just move it to Escalations.</div></div></label>
+    </div>
+    <div class="form-row"><label>Note <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate);">(optional &mdash; included in the email)</span></label><textarea id="esc-note" rows="3" maxlength="1000" placeholder="e.g. Adjuster stopped responding after the supplement - can you call their supervisor?"></textarea></div>
+    <div class="form-actions"><button class="btn-primary" id="esc-confirm" onclick="confirmEscalate()">Escalate</button> <span class="sub" id="esc-msg"></span></div>
+  </div>
+</div>
 <div class="overlay" id="overlay-reply">
   <div class="drawer" style="max-width:560px;">
     <div class="drawer-head"><h3>Log a reply</h3><button class="close" onclick="closeReplyBox()">Close ×</button></div>
@@ -3736,46 +3793,119 @@ function todoRowHTML(item, num, priority){
     renderAll();
   }
 
+  // Escalating asks who to notify - the office manager, an admin, a specific
+  // teammate, or no one - then moves the invoice to Escalations.
+  let escBoxId = null;
+  const ESC_ROLE_LABELS = { admin: 'Admin', manager: 'Manager', employee: 'User' };
   function escalateInvoice(id){
-const inv = findInv(id);
-if(!inv) return;
-inv.escalated = true;
-inv.notifiedName = null;
-inv.notifiedAt = new Date().toISOString();
-// Save the flag, or the account drops back out of Escalations on the next
-// refresh and the autonomous cadence starts chasing it again.
-persistInvoice(inv, ['escalated', 'notifiedAt']);
-addActivity(inv, 'Invoice escalated for manager attention; removed from autonomous cadence.', 'manual', 'escalation');
-saveState(); renderAll();
-showToast(`${inv.name} moved to Escalations`);
-// The recipient is resolved server-side from the company's own user list
-// (manager or admin for this office), so no address is sent from the browser.
-fetch('/api/escalate-notify', {
-method: 'POST',
-credentials: 'same-origin',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({
-invoiceName: inv.name,
-amount: inv.amount,
-office: inv.officeLocation,
-officeLabel: OFFICE_LABELS[inv.officeLocation],
-departmentLabel: DEPARTMENT_LABELS[inv.department]
-})
-}).then(function(r){ return r.json(); }).then(function(res){
-if(res && res.ok && res.notifiedName){
-inv.notifiedName = res.notifiedName;
-persistInvoice(inv, ['notifiedName']);
-addActivity(inv, `Escalation notice emailed to ${res.notifiedName}${res.notifiedEmail ? ` (${res.notifiedEmail})` : ''}.`, 'automation');
-} else {
-const why = (res && res.error) ? res.error : 'the notification could not be delivered.';
-addActivity(inv, `Escalated, but no one was notified: ${why}`, 'automation');
-showToast('Escalated \u2014 but no one could be notified');
-}
-saveState(); renderAll();
-}).catch(function(){
-addActivity(inv, 'Escalated, but the notification request failed to send.', 'automation');
-saveState(); renderAll();
-});
+    const inv = findInv(id);
+    if(!inv || inv.escalated) return;
+    escBoxId = id;
+    document.getElementById('esc-box-sub').textContent = inv.name + ' — $' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '. Escalating pulls it out of the automated cadence and into Escalations.';
+    const office = OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '';
+    document.getElementById('esc-opt-manager-d').textContent = office ? ('The ' + office + ' office manager gets an email.') : "The manager for this invoice's office gets an email.";
+    document.getElementById('esc-note').value = '';
+    document.getElementById('esc-msg').textContent = '';
+    const confirmBtn = document.getElementById('esc-confirm'); confirmBtn.disabled = false; confirmBtn.textContent = 'Escalate';
+    selectEscOpt('manager');
+    loadEscTeam();
+    document.getElementById('overlay-escalate').classList.add('open');
+  }
+  function closeEscalateBox(){
+    document.getElementById('overlay-escalate').classList.remove('open');
+    escBoxId = null;
+    // An inline edit (e.g. the Escalated cell on the spreadsheet) snaps back if cancelled.
+    renderAll();
+  }
+  function selectEscOpt(v){
+    document.querySelectorAll('input[name="esc-notify"]').forEach(function(r){ r.checked = (r.value === v); });
+    onEscNotifyChange();
+  }
+  function onEscNotifyChange(){
+    const v = (document.querySelector('input[name="esc-notify"]:checked') || {}).value;
+    document.querySelectorAll('.esc-opt').forEach(function(el){ el.classList.toggle('sel', el.getAttribute('data-esc-opt') === v); });
+    document.getElementById('esc-confirm').textContent = v === 'none' ? 'Escalate' : 'Escalate & notify';
+  }
+  async function loadEscTeam(){
+    const sel = document.getElementById('esc-user');
+    let team = [];
+    try{
+      if(!state.currentUser){ team = state.team || []; }
+      else {
+        const res = await fetch('/api/team', { credentials: 'same-origin' });
+        const data = await res.json();
+        team = (data && data.ok && data.team) || [];
+      }
+    }catch(e){ team = []; }
+    const me = state.currentUser && state.currentUser.email ? String(state.currentUser.email).toLowerCase() : '';
+    const people = team.filter(function(m){ return m && m.email && (m.status || 'active') === 'active' && String(m.email).toLowerCase() !== me; })
+      .sort(function(x, y){ return String(x.full_name || x.email).localeCompare(String(y.full_name || y.email)); });
+    if(!people.length){ sel.innerHTML = '<option value="">No other active teammates</option>'; return; }
+    sel.innerHTML = '<option value="">Choose a teammate…</option>' + people.map(function(m){
+      const office = m.office ? (' · ' + (OFFICE_LABELS[m.office] || m.office)) : '';
+      return '<option value="' + hEsc(m.id) + '" data-name="' + hEsc(m.full_name || m.email) + '">' + hEsc(m.full_name || m.email) + ' (' + hEsc(ESC_ROLE_LABELS[m.role] || m.role || 'User') + office + ')</option>';
+    }).join('');
+  }
+  function confirmEscalate(){
+    const id = escBoxId;
+    const inv = findInv(id); if(!inv) { closeEscalateBox(); return; }
+    const notify = (document.querySelector('input[name="esc-notify"]:checked') || {}).value || 'manager';
+    const sel = document.getElementById('esc-user');
+    const userId = notify === 'user' ? sel.value : '';
+    if(notify === 'user' && !userId){ document.getElementById('esc-msg').textContent = 'Choose a teammate to notify.'; sel.focus(); return; }
+    const userName = notify === 'user' ? (sel.options[sel.selectedIndex].getAttribute('data-name') || '') : '';
+    const note = (document.getElementById('esc-note').value || '').trim();
+    document.getElementById('overlay-escalate').classList.remove('open');
+    escBoxId = null;
+    doEscalate(id, { notify: notify, userId: userId, userName: userName, note: note });
+  }
+  function doEscalate(id, opts){
+    opts = opts || { notify: 'manager' };
+    const inv = findInv(id);
+    if(!inv) return;
+    inv.escalated = true;
+    inv.notifiedName = null;
+    inv.notifiedAt = new Date().toISOString();
+    // Save the flag, or the account drops back out of Escalations on the next
+    // refresh and the autonomous cadence starts chasing it again.
+    persistInvoice(inv, ['escalated', 'notifiedAt']);
+    addActivity(inv, 'Invoice escalated; removed from autonomous cadence.' + (opts.note ? ' Note: "' + opts.note + '"' : ''), 'manual', 'escalation');
+    saveState(); renderAll();
+    if(opts.notify === 'none'){ showToast(`${inv.name} moved to Escalations`); return; }
+    showToast(`${inv.name} moved to Escalations — sending the notice…`);
+    // The address is resolved server-side from the company's own user list;
+    // the browser only says which kind of person (or which teammate) to tell.
+    fetch('/api/escalate-notify', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceName: inv.name,
+        amount: inv.amount,
+        office: inv.officeLocation,
+        officeLabel: OFFICE_LABELS[inv.officeLocation],
+        departmentLabel: DEPARTMENT_LABELS[inv.department],
+        notify: opts.notify, userId: opts.userId || null, userName: opts.userName || null,
+        note: opts.note || ''
+      })
+    }).then(function(r){ return r.json(); }).then(function(res){
+      if(res && res.ok && res.notifiedName){
+        inv.notifiedName = res.notifiedName;
+        persistInvoice(inv, ['notifiedName']);
+        const roleTxt = res.notifiedRole ? ` (${ESC_ROLE_LABELS[res.notifiedRole] || res.notifiedRole})` : '';
+        addActivity(inv, `Escalation notice emailed to ${res.notifiedName}${roleTxt}${res.notifiedEmail ? ` — ${res.notifiedEmail}` : ''}.`, 'automation');
+        showToast(`${res.notifiedName} was notified about ${inv.name}`);
+      } else {
+        const why = (res && res.error) ? res.error : 'the notification could not be delivered.';
+        addActivity(inv, `Escalated, but no one was notified: ${why}`, 'automation');
+        showToast('Escalated — but no one could be notified: ' + why);
+      }
+      saveState(); renderAll();
+    }).catch(function(){
+      addActivity(inv, 'Escalated, but the notification request failed to send.', 'automation');
+      showToast('Escalated — but the notification failed to send');
+      saveState(); renderAll();
+    });
   }
   function unescalateInvoice(id){
     const inv = findInv(id);
@@ -6764,14 +6894,30 @@ ${recipientGuidance}
 
 ${instructions}
 
+End the email with a closing line such as "Thank you," and nothing after it: no name, title, phone number, company name or placeholder. The sender's own signature is added automatically under the message.
+
 Do not invent facts beyond what's given.`;
   }
 
-  async function fetchDraftText(inv, draftType, docs, recipient){
+  // The open instruction box above the draft: the coordinator says what to
+  // change ("make this stern and demand payment") and the AI rewrites the
+  // current draft - including any edits already made by hand - to match.
+  function instructionBlock(instruction){
+    return `\n\n<coordinator_instruction>\n${String(instruction).slice(0, 500)}\n</coordinator_instruction>\n\nFollow the coordinator's instruction for tone, length, emphasis and anything they ask you to add or remove. Keep every fact consistent with the details above: never invent amounts, invoice or claim numbers, dates, interest, fees or legal consequences that were not given. If the instruction asks for a deadline without a date, use a relative one such as "within 7 days of this email". Firm is fine; threatening or insulting is not.`;
+  }
+  function buildRevisionPrompt(inv, draftType, docs, recipient, currentDraft, instruction){
+    return buildPrompt(inv, draftType, docs, recipient) +
+      `\n\nThe collections coordinator already has a draft of this email and wants it changed:\n\n<current_draft>\n${String(currentDraft || '').slice(0, 3500)}\n</current_draft>` +
+      instructionBlock(instruction) +
+      `\n\nReturn only the revised email body, ending with a closing line and no signature.`;
+  }
+
+  async function fetchDraftText(inv, draftType, docs, recipient, extraInstruction){
     // The interactive demo has no signed-in user, so there is no AI endpoint to
     // call; it drafts from the standard templates instead of surfacing a failure.
     if(!state.currentUser) return templateDraftText(inv, draftType, recipient || recipientDefault(inv));
-    const prompt = buildPrompt(inv, draftType, docs, recipient);
+    let prompt = buildPrompt(inv, draftType, docs, recipient);
+    if(extraInstruction) prompt += instructionBlock(extraInstruction);
     const response = await fetch("/api/ai-draft", {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -6798,7 +6944,7 @@ Do not invent facts beyond what's given.`;
     const tone = recipient === 'adjuster'
       ? `This invoice is ${inv.days} day${inv.days===1?'':'s'} outstanding since first contact.${claimLine}\nWork performed per the estimate on file: ${inv.scopeOfWork || 'see the estimate on file'}.`
       : "If payment has already been sent, please reply with the details and we'll reconcile right away. Otherwise, we're happy to help with anything you need to get this resolved.";
-    return `Hello ${who},\n\n${opening}\n\nInvoice: ${inv.name}\nBalance due: ${money}\n\n${tone}\n\nThank you,\nAccounts Receivable`;
+    return `Hello ${who},\n\n${opening}\n\nInvoice: ${inv.name}\nBalance due: ${money}\n\n${tone}\n\nThank you,`;
   }
 
   function recordSend(inv, draftType, draftText, source, recipient, subject){
@@ -6970,8 +7116,84 @@ Do not invent facts beyond what's given.`;
 
     document.getElementById('draft-text').value = '';
     document.getElementById('err').style.display = 'none';
+    const instrEl = document.getElementById('ai-instruct'); if(instrEl) instrEl.value = '';
+    resetAiInstructNote();
+    renderSignaturePreview();
     document.getElementById('overlay').classList.add('open');
     generateDraft(false);
+  }
+
+  const AI_INSTRUCT_NOTE = 'Type anything — tone, a deadline, what to mention. The amounts and facts on this invoice stay the same. Press Enter to rewrite.';
+  function resetAiInstructNote(){ const n = document.getElementById('ai-instruct-note'); if(n){ n.textContent = AI_INSTRUCT_NOTE; n.style.color = ''; } }
+  function aiInstructKey(e){
+    if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); applyAiInstruction(); }
+  }
+  async function applyAiInstruction(preset){
+    const box = document.getElementById('ai-instruct');
+    if(preset) box.value = preset;
+    const instruction = (box.value || '').trim();
+    if(!instruction){ box.focus(); return; }
+    const inv = currentInvoice; if(!inv) return;
+    const draftBox = document.getElementById('draft-text');
+    const errBox = document.getElementById('err');
+    const btn = document.getElementById('ai-instruct-btn');
+    if(btn.disabled) return;
+    const approveBtn = document.getElementById('approve-btn');
+    const note = document.getElementById('ai-instruct-note');
+    errBox.style.display = 'none';
+    if(!state.currentUser){
+      note.textContent = 'AI rewrites run on your live company workspace — sign in to use them.';
+      note.style.color = '#B23A2E';
+      return;
+    }
+    const before = draftBox.value;
+    btn.disabled = true; btn.textContent = 'Rewriting…';
+    approveBtn.disabled = true; draftBox.readOnly = true;
+    const statusRow = document.getElementById('status-row');
+    const statusText = document.getElementById('status-row-text');
+    if(statusText) statusText.textContent = 'Rewriting the draft with your instructions…';
+    statusRow.style.display = 'flex';
+    try{
+      const prompt = before.trim()
+        ? buildRevisionPrompt(inv, currentDraftType, selectedDocs(), currentRecipient, before, instruction)
+        : buildPrompt(inv, currentDraftType, selectedDocs(), currentRecipient) + instructionBlock(instruction);
+      const res = await fetch('/api/ai-draft', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt, maxTokens: 1000, draftType: currentDraftType })
+      });
+      const data = await res.json();
+      if(!data || !data.ok || !data.text) throw new Error((data && data.error) || 'No draft returned.');
+      // Ignore a late answer if the drawer moved on to another invoice.
+      if(currentInvoice !== inv) return;
+      draftBox.value = String(data.text).trim();
+      note.textContent = 'Rewritten: “' + instruction + '” — review it, edit by hand, or give another instruction.';
+      note.style.color = '';
+    }catch(e){
+      if(currentInvoice === inv) draftBox.value = before;
+      errBox.innerHTML = '<b>The AI couldn’t rewrite this draft right now.</b> Your draft is unchanged. ' + hEsc((e && e.message) || '');
+      errBox.style.display = 'block';
+    }finally{
+      btn.disabled = false; btn.textContent = 'Rewrite';
+      approveBtn.disabled = false; draftBox.readOnly = false;
+      statusRow.style.display = 'none';
+    }
+  }
+
+  // The signer's own messaging identity, shown under the draft so the person
+  // approving it sees exactly how the email will be signed.
+  let signatureCache = null;
+  async function renderSignaturePreview(){
+    const wrap = document.getElementById('sig-preview');
+    const body = document.getElementById('sig-preview-text');
+    if(!wrap || !body) return;
+    if(!state.currentUser){ wrap.style.display = 'none'; return; }
+    if(signatureCache){ body.textContent = signatureCache; wrap.style.display = ''; }
+    try{
+      const res = await fetch('/api/cadence-settings', { credentials: 'same-origin' });
+      const data = await res.json();
+      if(data && data.ok && data.signature){ signatureCache = data.signature; body.textContent = data.signature; wrap.style.display = ''; }
+    }catch(e){}
   }
   function closeDrawer(){ document.getElementById('overlay').classList.remove('open'); }
 
@@ -6982,7 +7204,8 @@ Do not invent facts beyond what's given.`;
     'overlay-history': closeAccountHistory, 'overlay-messages': closeMessagesSent,
     'overlay-response': closeResponseSeen, 'overlay-payment': closePaymentForm,
     'overlay-preview': closePreview, 'overlay-integration': closeAddIntegration,
-    'overlay-invite': function(){ if(typeof closeInviteTeamMember === 'function') closeInviteTeamMember(); }
+    'overlay-invite': function(){ if(typeof closeInviteTeamMember === 'function') closeInviteTeamMember(); },
+    'overlay-escalate': closeEscalateBox
   };
   document.addEventListener('keydown', function(e){
     if(e.key !== 'Escape' || e.defaultPrevented) return;
@@ -7081,8 +7304,12 @@ Do not invent facts beyond what's given.`;
     statusRow.style.display = 'flex';
     approveBtn.disabled = true;
     if(!isRegenerate) draftBox.value = '';
+    const instrEl = document.getElementById('ai-instruct');
+    const extra = isRegenerate && instrEl ? instrEl.value.trim() : '';
+    const statusText = document.getElementById('status-row-text');
+    if(statusText) statusText.textContent = extra ? 'Drafting a fresh version with your instructions…' : 'Drafting based on invoice age, payer type, and attached documents…';
     try{
-      const text = await fetchDraftText(currentInvoice, currentDraftType, selectedDocs(), currentRecipient);
+      const text = await fetchDraftText(currentInvoice, currentDraftType, selectedDocs(), currentRecipient, extra);
       draftBox.value = text;
     }catch(e){
       draftBox.value = templateDraftText(currentInvoice, currentDraftType, currentRecipient);
