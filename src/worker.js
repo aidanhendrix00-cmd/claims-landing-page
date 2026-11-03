@@ -748,6 +748,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
 
   var REPORTS = {
     queue: { label: 'Invoice Queue', dateField: 'Invoice date', needs: ['accounts'] },
+    accounts: { label: 'Accounts', dateField: 'Invoice date', needs: ['accounts'] },
     ar: { label: 'Accounts Receivable', dateField: 'Invoice date', needs: ['accounts'] },
     mtd: { label: 'Invoiced (by invoice date)', dateField: 'Invoice date', needs: ['accounts'] },
     collected: { label: 'Collected (payments)', dateField: 'Payment date', needs: ['accounts', 'payments'] },
@@ -846,6 +847,24 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       cols = baseCols().concat(['Follow-ups', 'Last contact', 'Responded?', 'Currently with']);
       rows = list.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), cwLabel(a)]); });
       foot = totals(list);
+    } else if(f.type === 'accounts'){
+      // One row per customer: every invoice that shares the customer name.
+      var al = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f); });
+      if(f.status === 'all') al = al.filter(function(a){ return !isPaid(a); });
+      var grp = {};
+      al.forEach(function(a){
+        var k = String(a.name || '').trim().toLowerCase().replace(/\\s+/g, ' ');
+        var g = grp[k] || (grp[k] = { name: a.name, n: 0, biz: {}, cities: {}, open: 0, invoiced: 0, ageSum: 0, last: '' , contact: a.contact || '', email: a.contactEmail || '' });
+        g.n++; g.biz[deptLabel(a.department)] = 1; g.cities[officeLabel(a.officeLocation)] = 1;
+        g.open += balance(a); g.invoiced += Number(a.amount || 0); g.ageSum += ageDays(a);
+        if(a.lastContact && String(day(a.lastContact)) > String(g.last)) g.last = day(a.lastContact);
+        if(!g.email && a.contactEmail) g.email = a.contactEmail;
+      });
+      var glist = Object.keys(grp).map(function(k){ return grp[k]; }).sort(function(x, y){ return y.open - x.open || String(x.name).localeCompare(String(y.name)); });
+      cols = ['Account', 'Invoices', bizWord(), cityWord(), 'Open balance', 'Total invoiced', 'Avg age (days)', 'Last contact', 'Contact', 'Contact email'];
+      rows = glist.map(function(g){ return [g.name, g.n, Object.keys(g.biz).sort().join(', '), Object.keys(g.cities).sort().join(', '), money(g.open), money(g.invoiced), g.n ? Math.round(g.ageSum / g.n) : 0, g.last ? fmtDay(g.last) : '', g.contact, g.email]; });
+      var gOpen = glist.reduce(function(s2, g){ return s2 + g.open; }, 0);
+      foot = glist.length + ' account' + (glist.length === 1 ? '' : 's') + ' · ' + al.length + ' invoice' + (al.length === 1 ? '' : 's') + ' · ' + money(gOpen) + ' open';
     } else if(f.type === 'ar'){
       var ar = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f); });
       if(f.status === 'all') ar = ar.filter(function(a){ return !isPaid(a); });
@@ -2730,6 +2749,7 @@ async function commsAttachSenders(env, tenantId, comms) {
 }
 function commsKindLabel(kind) {
   const k = String(kind || '').toLowerCase();
+  if (k.indexOf('statement') !== -1) return 'Account Statement';
   if (k.indexOf('noil') !== -1) return 'NOIL';
   if (k.indexOf('demand') !== -1) return 'Demand letter';
   if (k.indexOf('payment') !== -1) return 'Payment email';
@@ -5935,6 +5955,228 @@ sentFrom: usedMailbox ? (mailbox && mailbox.email) : sender.from,
 ownAddress: usedMailbox || sender.ownDomain,
 replyTo: usedMailbox ? (mailbox && mailbox.email) : sender.replyTo, to: to,
 attached: attach.attachments.map(function (a) { return a.filename; }), attachmentsSkipped: attach.skipped });
+}
+
+/* ---------------------------------------------------------------------------
+   Accounts tab - account statements
+   An "account" here is a customer: every invoice that shares a customer name.
+   A statement is a PDF the dashboard builds from the invoices the user ticked.
+   It is stored on its own (account_statements + the documents bucket), never
+   as a document on an individual invoice, so it only ever shows on the
+   Accounts tab. Sending one logs a comm on every invoice it covers, tagged
+   as sent from the Accounts tab.
+   --------------------------------------------------------------------------- */
+const STATEMENT_MAX_BYTES = 8 * 1024 * 1024;
+const STATEMENT_MAX_INVOICES = 200;
+function customerKey(name) { return String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+function b64ToBytesStrict(b64) {
+const clean = String(b64 || '').replace(/^data:[^,]*,/, '').replace(/\s+/g, '');
+if (!clean || !/^[A-Za-z0-9+/=]+$/.test(clean)) return null;
+try { const bin = atob(clean); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; } catch (e) { return null; }
+}
+function statementToJson(row) {
+return {
+id: row.id, customerName: row.customer_name, fileName: row.file_name, size: row.size_bytes,
+invoiceCount: row.invoice_count, total: Number(row.total_amount || 0), accountIds: row.account_ids || [],
+createdAt: row.created_at, createdBy: row.created_by_name || null, sentAt: row.sent_at || null, sentTo: row.sent_to || null
+};
+}
+// The invoices this user may act on for one customer: same visibility rules as
+// /api/accounts, and only ids the dashboard actually asked for.
+async function statementAccountsFor(env, user, customerName, accountIds) {
+const ids = (Array.isArray(accountIds) ? accountIds : []).map(function (v) { return String(v); }).filter(function (v) { return /^[0-9]+$/.test(v); }).slice(0, STATEMENT_MAX_INVOICES);
+if (!ids.length) return [];
+let q = 'tenant_id=' + pgEq(user.tenant_id) + '&id=in.(' + ids.join(',') + ')&select=*';
+if (user.role !== 'admin') q += '&office=' + pgEq(user.office || '__none__');
+const rows = await pgSelect(env, 'accounts', q) || [];
+const key = customerKey(customerName);
+return key ? rows.filter(function (a) { return customerKey(a.customer_name) === key; }) : rows;
+}
+async function handleStatementList(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const url = new URL(request.url);
+const customer = String(url.searchParams.get('customer') || '').trim();
+let q = 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=created_at.desc&limit=500';
+if (customer) q += '&customer_key=' + pgEq(customerKey(customer));
+let rows = [];
+try { rows = await pgSelect(env, 'account_statements', q) || []; }
+catch (e) { return json({ ok: false, error: 'Account statements are not set up yet (account_statements table).', code: 'no_table' }, 500); }
+return json({ ok: true, statements: rows.map(statementToJson) });
+}
+async function handleStatementCreate(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const customerName = String(body.customerName || '').trim().slice(0, 200);
+if (!customerName) return json({ ok: false, error: 'Missing customer name' }, 400);
+const accounts = await statementAccountsFor(env, user, customerName, body.accountIds);
+if (!accounts.length) return json({ ok: false, error: 'None of those invoices belong to this customer.' }, 400);
+const bytes = b64ToBytesStrict(body.pdfBase64);
+if (!bytes || bytes.length < 100) return json({ ok: false, error: 'The statement PDF is missing.' }, 400);
+if (bytes.length > STATEMENT_MAX_BYTES) return json({ ok: false, error: 'That statement is too large (8 MB max).' }, 413);
+const fileName = safeFileName(body.fileName || ('Account Statement - ' + customerName + '.pdf'));
+const path = 'tenant_' + user.tenant_id + '/statements/' + Date.now() + '_' + randomToken().slice(0, 8) + '_' + fileName;
+const up = await storageUpload(env, path, bytes, 'application/pdf');
+if (!up.ok) return json({ ok: false, error: up.error }, 502);
+const total = accounts.reduce(function (s, a) { return s + Math.max(0, Number(a.amount || 0) - Number(a.paid_amount || 0)); }, 0);
+let row;
+try {
+row = await pgInsert(env, 'account_statements', {
+tenant_id: user.tenant_id, customer_key: customerKey(customerName), customer_name: customerName,
+account_ids: accounts.map(function (a) { return a.id; }), invoice_count: accounts.length, total_amount: Math.round(total * 100) / 100,
+storage_path: path, file_name: fileName, size_bytes: bytes.length,
+created_by: user.id, created_by_name: String(user.full_name || user.email || '').slice(0, 160)
+});
+} catch (e) {
+await storageDelete(env, path);
+return json({ ok: false, error: 'Could not save the statement' + (/account_statements/.test(String(e && e.message)) ? ' - the account_statements table is missing.' : '.') }, 500);
+}
+await logUserActivity(env, user, accounts[0], 'document', 'Account Statement created from the Accounts tab for ' + customerName + ' (' + accounts.length + ' invoice' + (accounts.length === 1 ? '' : 's') + ')');
+return json({ ok: true, statement: statementToJson(row) });
+}
+async function handleStatementDownload(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const id = new URL(request.url).searchParams.get('id');
+if (!id) return json({ ok: false, error: 'id is required' }, 400);
+const row = await pgSelectOne(env, 'account_statements', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=*');
+if (!row) return json({ ok: false, error: 'Statement not found' }, 404);
+const signed = await storageSignedUrl(env, row.storage_path, 300);
+if (!signed) return json({ ok: false, error: 'Could not open that statement.' }, 502);
+return json({ ok: true, url: signed, name: row.file_name });
+}
+async function handleStatementDelete(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const row = await pgSelectOne(env, 'account_statements', 'id=' + pgEq(body.id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=*');
+if (!row) return json({ ok: false, error: 'Statement not found' }, 404);
+if (user.role !== 'admin' && user.role !== 'manager' && String(row.created_by) !== String(user.id)) return json({ ok: false, error: 'Only the person who created it, a manager or an admin can remove a statement.' }, 403);
+await pgDelete(env, 'account_statements', 'id=' + pgEq(row.id));
+await storageDelete(env, row.storage_path);
+return json({ ok: true });
+}
+// Draft Now on the Accounts tab: one email to the customer covering every
+// ticked invoice, with the statement PDF attached. Logged on each invoice.
+async function handleStatementSend(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const customerName = String(body.customerName || '').trim().slice(0, 200);
+const accounts = await statementAccountsFor(env, user, customerName, body.accountIds);
+if (!accounts.length) return json({ ok: false, error: 'Pick at least one invoice for this customer.' }, 400);
+const blocked = accounts.filter(isDoNotContact);
+if (blocked.length) return json({ ok: false, code: 'do_not_contact', error: DO_NOT_CONTACT_ERROR }, 409);
+if (user.role !== 'admin' && user.role !== 'manager' && accounts.some(function (a) { return a.escalated; })) {
+return json({ ok: false, code: 'escalated', error: 'One of these invoices is escalated to a manager. Ask them before sending anything further, or leave it out of the statement.' }, 409);
+}
+const toList = parseCcList(body.to !== undefined && String(body.to).trim() ? body.to : (accounts[0].contact_email || ''), '');
+const to = toList[0] || '';
+if (!to || to.indexOf('@') === -1) return json({ ok: false, error: 'Enter at least one valid email address in To.' }, 400);
+const ccList = parseCcList(body.cc, to).filter(function (a) { return toList.map(function (t) { return t.toLowerCase(); }).indexOf(a.toLowerCase()) === -1; });
+const text = String(body.body || '').trim();
+if (!text) return json({ ok: false, error: 'The message is empty.' }, 400);
+const subject = String(body.subject || ('Account Statement - ' + customerName)).slice(0, 200);
+
+// The statement itself: either one already saved on the account, or the PDF
+// the dashboard just built (which is then saved too, so the record exists).
+let statementRow = null; let pdfBytes = null; let fileName = '';
+if (body.statementId) {
+statementRow = await pgSelectOne(env, 'account_statements', 'id=' + pgEq(body.statementId) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=*');
+if (!statementRow) return json({ ok: false, error: 'That saved statement could not be found.' }, 404);
+const res = await fetch(env.SUPABASE_URL + '/storage/v1/object/' + DOC_BUCKET + '/' + statementRow.storage_path, { headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY } });
+if (!res.ok) return json({ ok: false, error: 'The saved statement could not be read.' }, 502);
+pdfBytes = new Uint8Array(await res.arrayBuffer()); fileName = statementRow.file_name;
+} else {
+pdfBytes = b64ToBytesStrict(body.pdfBase64);
+if (!pdfBytes || pdfBytes.length < 100) return json({ ok: false, error: 'The statement PDF is missing.' }, 400);
+if (pdfBytes.length > STATEMENT_MAX_BYTES) return json({ ok: false, error: 'That statement is too large (8 MB max).' }, 413);
+fileName = safeFileName(body.fileName || ('Account Statement - ' + customerName + '.pdf'));
+}
+
+const idSettings = await senderSettingsFor(env, user) || {};
+const idUser = Object.assign({}, user, { full_name: idSettings.sender_name || user.full_name });
+const sender = await resolveSender(env, idUser);
+if (idSettings.reply_to) sender.replyTo = idSettings.reply_to;
+const mailbox = await mailboxForUser(env, user);
+const sig = buildSignature(idSettings, user, user.company_name, mailbox && mailbox.email);
+const html = bodyWithSignature(text, sig);
+const attachments = [{ filename: fileName, contentType: 'application/pdf', base64: bytesToBase64(pdfBytes) }];
+
+let result = null; let sentVia = 'platform';
+if (!mailbox && !sender.ownDomain && requiresOwnSender(user)) {
+return json({ ok: false, code: 'connect_email', error: CONNECT_EMAIL_MSG, accountUrl: '/account' }, 409);
+}
+if (mailbox) {
+result = await sendViaMailbox(env, mailbox, { to: toList, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(sig.name || user.full_name || mailbox.email), attachments: attachments });
+if (result && result.ok) sentVia = 'mailbox';
+else {
+if (result && result.needsReconnect) return json({ ok: false, error: 'Your connected email needs to be reconnected in Account settings.', needsReconnect: true }, 400);
+return json({ ok: false, error: (result && result.error) || 'Your connected email refused this message. Nothing was sent.' }, 502);
+}
+}
+if (!result) {
+try {
+result = await sendEmail(env, { to: toList, cc: ccList, subject: subject, html: html, kind: 'manual_statement', tenantId: user.tenant_id, userId: user.id, from: sender.from, replyTo: sender.replyTo, attachments: attachments });
+} catch (e) { result = { ok: false, error: String(e) }; }
+}
+const okSent = !!(result && result.ok);
+const now = new Date();
+const who = String(user.full_name || user.email || '').slice(0, 130);
+// One comm row per invoice, so the Comms Log, Last Follow-Up and every
+// account history show the statement - tagged as sent from the Accounts tab.
+for (const a of accounts) {
+await pgInsert(env, 'invoice_comms', {
+tenant_id: user.tenant_id, account_id: a.id, cadence_day: null,
+kind: 'manual_statement', recipient_role: body.recipient || 'contact', recipient_email: to,
+subject: subject, status: okSent ? 'sent' : 'failed',
+body: String(html || '').slice(0, COMMS_BODY_LIMIT),
+error: okSent ? null : String((result && result.error) || 'Send failed')
+}).catch(function () {});
+}
+if (!okSent) return json({ ok: false, error: (result && result.error) || 'The email could not be sent.' }, 502);
+
+// Save a freshly built statement on the account so it is on record.
+if (!statementRow) {
+const path = 'tenant_' + user.tenant_id + '/statements/' + Date.now() + '_' + randomToken().slice(0, 8) + '_' + fileName;
+const up = await storageUpload(env, path, pdfBytes, 'application/pdf');
+if (up.ok) {
+const total = accounts.reduce(function (s2, a) { return s2 + Math.max(0, Number(a.amount || 0) - Number(a.paid_amount || 0)); }, 0);
+try {
+statementRow = await pgInsert(env, 'account_statements', {
+tenant_id: user.tenant_id, customer_key: customerKey(customerName), customer_name: customerName,
+account_ids: accounts.map(function (a) { return a.id; }), invoice_count: accounts.length, total_amount: Math.round(total * 100) / 100,
+storage_path: path, file_name: fileName, size_bytes: pdfBytes.length,
+created_by: user.id, created_by_name: who, sent_at: now.toISOString(), sent_to: to
+});
+} catch (e) { statementRow = null; }
+}
+} else {
+try { await pgUpdate(env, 'account_statements', 'id=' + pgEq(statementRow.id), { sent_at: now.toISOString(), sent_to: to }); } catch (e) {}
+}
+
+for (const a of accounts) {
+await pgUpdate(env, 'accounts', 'id=' + pgEq(a.id), {
+follow_up_count: (parseInt(a.follow_up_count, 10) || 0) + 1,
+last_contact: clientDay(body.localDate, now),
+responded: a.responded && a.responded !== 'none' ? a.responded : 'sent',
+last_follow_up_at: now.toISOString(),
+last_follow_up_by: (who + ' (Accounts tab)').slice(0, 160),
+last_follow_up_kind: 'statement',
+updated_at: now.toISOString()
+}).catch(function () {});
+await pgInsert(env, 'account_notes', { occurred_at: now.toISOString(),
+tenant_id: user.tenant_id, account_id: a.id,
+body: 'Account Statement (' + accounts.length + ' invoice' + (accounts.length === 1 ? '' : 's') + ') sent to ' + to + ' by ' + who + ' from the Accounts tab.',
+author_name: who, source: 'dashboard'
+}).catch(function () {});
+await logUserActivity(env, user, a, 'followup', 'Account Statement sent from the Accounts tab to ' + to + ' - "' + subject + '" (' + accounts.length + ' invoice' + (accounts.length === 1 ? '' : 's') + ' for ' + customerName + ')' + (sentVia === 'mailbox' ? ' from their own mailbox' : ''));
+}
+return json({ ok: true, via: sentVia, to: to, sentFrom: sentVia === 'mailbox' ? (mailbox && mailbox.email) : sender.from, invoices: accounts.length, statement: statementRow ? statementToJson(statementRow) : null });
 }
 
 // Admins register their company's sending domain, get the DNS records to add,
@@ -9449,6 +9691,21 @@ return handleOutboxAck(request, env);
 }
 if (url.pathname === '/api/invoices/send' && request.method === 'POST') {
 return handleInvoiceSend(request, env);
+}
+if (url.pathname === '/api/accounts/statements' && request.method === 'GET') {
+return handleStatementList(request, env);
+}
+if (url.pathname === '/api/accounts/statements' && request.method === 'POST') {
+return handleStatementCreate(request, env);
+}
+if (url.pathname === '/api/accounts/statements/download' && request.method === 'GET') {
+return handleStatementDownload(request, env);
+}
+if (url.pathname === '/api/accounts/statements/delete' && request.method === 'POST') {
+return handleStatementDelete(request, env);
+}
+if (url.pathname === '/api/accounts/send-statement' && request.method === 'POST') {
+return handleStatementSend(request, env);
 }
 if (url.pathname === '/api/sending-domain' && request.method === 'GET') {
 return handleSendingDomainGet(request, env);
