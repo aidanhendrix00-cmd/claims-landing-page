@@ -1289,7 +1289,7 @@
     <div class="drawer-section" id="subject-section" style="display:none;">
       <h4>Subject Line</h4>
       <input type="text" id="draft-subject" class="subject-input" oninput="onSubjectInput()">
-      <div class="hint" id="subject-hint">Auto-generated &mdash; edit it before approving if needed.</div>
+      <div class="hint" id="subject-hint">Auto-generated &mdash; edit it before approving if needed. If this invoice already has an email thread, this is sent as a reply on it (subject becomes &ldquo;Re: &hellip;&rdquo;) so the customer sees one conversation.</div>
     </div>
 
     <div class="ai-instruct" id="ai-instruct-box">
@@ -1378,6 +1378,7 @@
     <div class="drawer-section">
       <h4>Subject line</h4>
       <input type="text" id="stmt-subject" class="subject-input">
+      <div class="hint">If this account already has a statement email thread, this is sent as a reply on it (subject becomes &ldquo;Re: &hellip;&rdquo;) so the customer sees one conversation.</div>
     </div>
     <div class="ai-instruct" id="stmt-instruct-box">
       <div class="ai-instruct-head"><b>Tell the AI what to change</b><span style="font-size:11px;color:var(--slate-soft);">Rewrites the draft below</span></div>
@@ -3299,7 +3300,7 @@ async function loadRealAccountsNow(){
     } catch (e) {}
     __pingBusy = false;
   }
-  setInterval(pingRealtimeSync, 8000);
+  setInterval(pingRealtimeSync, 5000);
 
 document.addEventListener('visibilitychange', function(){
 if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadRealIntegrations(); }
@@ -5767,7 +5768,7 @@ Hard rules - these override everything above:
       ctx.invoices.forEach(function(inv){ recordStatementSendLocal(inv, body, subject, n, d.to || to.join(', ')); historyInvalidate(inv.id); });
       saveState(); quietRender(renderAll);
       stmtDraftCtx = null; document.getElementById('overlay-statement').classList.remove('open');
-      showToast('Account Statement sent to ' + (d.to || to.join(', ')) + ' for ' + ctx.g.name + ' — logged on ' + n + ' invoice' + (n === 1 ? '' : 's'));
+      showToast('Account Statement sent to ' + (d.to || to.join(', ')) + ' for ' + ctx.g.name + (d.threaded ? ' as a reply on the existing thread' : '') + ' — logged on ' + n + ' invoice' + (n === 1 ? '' : 's'));
       loadRealAccounts();
       if(acctPanelKey){ loadAccountStatements(ctx.g.name); renderAccountPanel(); document.getElementById('overlay-account').classList.add('open'); }
     }catch(e){ err.textContent = 'The statement could not be sent: ' + ((e && e.message) || e); err.style.display = 'block'; }
@@ -7991,7 +7992,7 @@ Hard rules - these override everything above:
       // brings back the server's copy of the same.
       quietRender(renderAll);
       const att = Array.isArray(res.attached) ? res.attached.length : 0;
-      showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} (${res.to})` + (att ? ` with ${att} attachment${att === 1 ? '' : 's'}` : '') + (res.attachmentsSkipped && res.attachmentsSkipped.length ? ` \u2014 ${res.attachmentsSkipped.length} file(s) too large to attach` : ''));
+      showToast(`${typeLabels[currentDraftType]} sent to ${recipientLabel} (${res.to})` + (res.threaded ? ' as a reply on the existing thread' : '') + (att ? ` with ${att} attachment${att === 1 ? '' : 's'}` : '') + (res.attachmentsSkipped && res.attachmentsSkipped.length ? ` \u2014 ${res.attachmentsSkipped.length} file(s) too large to attach` : ''));
       loadRealAccounts();
     }).catch(function(){
       approveBtn.disabled = false;

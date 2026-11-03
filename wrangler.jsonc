@@ -12,8 +12,10 @@
     "QBO_ENV": "sandbox"
   },
   "triggers": {
+    // Every 5 minutes: QuickBooks / IES change pulls run on every firing; the
+    // hourly jobs (cadence, reports) run on the first firing of each hour.
     "crons": [
-      "0 * * * *"
+      "*/5 * * * *"
     ]
   },
   "assets": {
