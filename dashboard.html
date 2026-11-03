@@ -6853,6 +6853,24 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     }).join('; ') || 'none selected';
     const cleanNote = (inv.note || '').replace(/&middot;/g,'-');
     const rolePhrase = recipientRolePhrase(inv, recipient);
+    const money = function(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); };
+    // What the customer actually still owes: the invoice total less anything
+    // already applied. The AI asks for the balance, never the original total.
+    const paid = Number(inv.amountPaid || 0);
+    const balance = Math.max(0, +(Number(inv.amount || 0) - paid).toFixed(2));
+    const invoiceNo = String(inv.invoiceNumber || '').trim();
+    const invoiceLine = invoiceNo ? invoiceNo : 'none on file - do NOT write an invoice number; refer to it as "the invoice" or "the attached invoice"';
+    const balanceLine = paid > 0.005 && balance > 0
+      ? `${money(balance)} (invoice total ${money(inv.amount)}, ${money(paid)} already received - ask for the ${money(balance)} balance, not the total)`
+      : money(balance);
+    // Greeting: a real name when one is on file, otherwise the role, never a
+    // bracketed placeholder.
+    const personName = recipient === 'adjuster' ? '' : contactPersonName(inv);
+    const greeting = personName
+      ? `Address the email to ${personName} by name (for example "Hello ${personName.split(' ')[0]},").`
+      : (recipient === 'adjuster'
+        ? 'No adjuster name is on file: open with "Hello," or "To the adjuster handling this claim,".'
+        : `No contact name is on file: open with "Hello," or "Dear ${recipient === 'contact' ? 'Accounts Payable Team' : (inv.payer === 'pm' ? 'Property Manager' : 'Homeowner')},". Never write a bracketed placeholder such as [Name] or [Property Manager].`);
     let instructions = '';
     if(draftType === 'followup'){
       instructions = `Write only the email body (no subject line, no placeholders like [Your Name] beyond a simple sign-off). Keep it under 120 words, professional, courteous but direct given the invoice is aging. Match tone to how many follow-ups have already been sent (be firmer if follow-ups > 1). Naturally reference the attached documents by name where relevant.`;
@@ -6877,7 +6895,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
 
 Details:
 - Customer/property: ${inv.name}
-- Invoice amount: $${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}
+- Invoice number: ${invoiceLine}
+- Balance due: ${balanceLine}
 - Days since first contact: ${inv.days}
 - Invoice age: ${invoiceAgeDays(inv)} days (invoice dated ${fmtDate(inv.invoiceDate)})
 - First contact date: ${firstContactDateStr(inv)}
@@ -6890,20 +6909,26 @@ Details:
 - Attached/referenced documents: ${docsList}
 - When citing documents, refer to them by type (for example "the signed Work Authorization", "the Certificate of Satisfaction", "the attached invoice") and to what they establish; never mention file names.
 
+${greeting}
+
 ${recipientGuidance}
 
 ${instructions}
 
 End the email with a closing line such as "Thank you," and nothing after it: no name, title, phone number, company name or placeholder. The sender's own signature is added automatically under the message.
 
-Do not invent facts beyond what's given.`;
+Hard rules - these override everything above:
+1. Use only the facts listed under Details. If something is "none on file" or not listed (an invoice number, a claim number, a name, a date, a PO number, a late fee, an interest rate), leave it out entirely. Never fill a gap with a guess, and never turn a dollar amount or a date into a reference number.
+2. The dollar figure you ask for is exactly the Balance due above. Do not state any other amount unless it is listed.
+3. No placeholders of any kind: nothing in square brackets, no "[Name]", "[Date]", "[Company]" or similar. If you do not know it, write around it.
+4. Before you finish, re-read the draft and remove anything that breaks rules 1-3.`;
   }
 
   // The open instruction box above the draft: the coordinator says what to
   // change ("make this stern and demand payment") and the AI rewrites the
   // current draft - including any edits already made by hand - to match.
   function instructionBlock(instruction){
-    return `\n\n<coordinator_instruction>\n${String(instruction).slice(0, 500)}\n</coordinator_instruction>\n\nFollow the coordinator's instruction for tone, length, emphasis and anything they ask you to add or remove. Keep every fact consistent with the details above: never invent amounts, invoice or claim numbers, dates, interest, fees or legal consequences that were not given. If the instruction asks for a deadline without a date, use a relative one such as "within 7 days of this email". Firm is fine; threatening or insulting is not.`;
+    return `\n\n<coordinator_instruction>\n${String(instruction).slice(0, 500)}\n</coordinator_instruction>\n\nFollow the coordinator's instruction for tone, length, emphasis and anything they ask you to add or remove. Keep every fact consistent with the details above and obey the hard rules: never invent amounts, invoice or claim numbers, dates, interest, fees or legal consequences that were not given, and if the current draft already contains an invented detail or a bracketed placeholder, remove it. If the instruction asks for a deadline without a date, use a relative one such as "within 7 days of this email". Firm is fine; threatening or insulting is not.`;
   }
   function buildRevisionPrompt(inv, draftType, docs, recipient, currentDraft, instruction){
     return buildPrompt(inv, draftType, docs, recipient) +
