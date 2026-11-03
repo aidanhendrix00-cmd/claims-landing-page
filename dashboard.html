@@ -479,6 +479,30 @@
   .drawer-section h4{font-family:var(--font-display);font-size:12.5px;margin:0 0 10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--slate);}
   .drawer-section .hint{font-size:11px;color:var(--slate-soft);margin-top:6px;line-height:1.5;}
 
+  .from-accounts{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:#E8EEF3;color:#2F4A5E;border:1px solid #C9D6E0;margin-left:6px;vertical-align:middle;white-space:nowrap;}
+  .acct-row{cursor:pointer;}
+  .acct-row:hover td{background:#FAFBFA;}
+  .acct-name{font-weight:600;color:var(--ink);}
+  .acct-sub{font-size:11px;color:var(--slate);margin-top:2px;}
+  .acct-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0 14px;}
+  .acct-kpi{background:#FAF8F2;border:1px solid var(--line);border-radius:9px;padding:10px 12px;}
+  .acct-kpi .l{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--slate-soft);}
+  .acct-kpi .v{font-family:var(--font-display);font-size:18px;font-weight:700;color:var(--ink);margin-top:3px;}
+  .acct-kpi .s{font-size:11px;color:var(--slate);margin-top:1px;}
+  .acct-inv-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .acct-inv-table th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--slate-soft);font-weight:700;padding:8px 8px;border-bottom:1px solid var(--line);background:#FBFCFB;position:sticky;top:0;}
+  .acct-inv-table td{padding:8px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .acct-inv-table tr.paid td{color:var(--slate-soft);}
+  .acct-inv-table input[type=checkbox]{accent-color:var(--ink);}
+  .acct-inv-wrap{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;}
+  .acct-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;}
+  .acct-actions .spacer{flex:1;}
+  .stmt-list{margin-top:8px;}
+  .stmt-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:12.5px;background:#fff;}
+  .stmt-row .n{font-weight:600;color:var(--ink);}
+  .stmt-row .m{font-size:11px;color:var(--slate);}
+  .stmt-row .sp{flex:1;}
+  .drawer.wide{max-width:960px;}
   .esc-opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:pointer;background:#fff;}
   .esc-opt:hover{border-color:var(--slate-soft);}
   .esc-opt.sel{border-color:var(--ink);background:#FAF8F2;}
@@ -743,6 +767,7 @@
   <aside class="sidebar">
     <nav id="nav">
       <button class="nav-item active" data-view="queue"><span class="left"><span class="ic">Q</span> Invoice Queue</span><span class="count" id="nav-count-queue"></span></button>
+      <button class="nav-item" data-view="accounts"><span class="left"><span class="ic">K</span> Accounts</span><span class="count" id="nav-count-accounts"></span></button>
       <button class="nav-item" data-view="sheet"><span class="left"><span class="ic">S</span> Accounts Receivable</span></button>
       <button class="nav-item" data-view="report"><span class="left"><span class="ic">R</span> Aging Report</span></button>
       <button class="nav-item" data-view="invoicedmtd"><span class="left"><span class="ic">M</span> Invoiced MTD</span><span class="count" id="nav-count-mtd"></span></button>
@@ -842,6 +867,28 @@
     </section>
 
     <!-- ===================== ACCOUNTS RECEIVABLE VIEW ===================== -->
+    <!-- ===================== ACCOUNTS VIEW ===================== -->
+    <section class="view" id="view-accounts">
+      <div class="topbar"><div><h1>Accounts</h1><p>Every customer with all of their invoices in one place &#8212; statements and account-level follow-ups live here</p></div></div>
+      <div class="mtd-filters" data-scope-panel="accounts"></div>
+      <div class="section-head">
+        <h2>Customer accounts</h2>
+        <div class="toolbar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input class="search" id="accts-search" type="search" placeholder="Search accounts&hellip;" autocomplete="off" oninput="setAcctsFilter('search', this.value)" style="min-width:200px;">
+          <select class="search" id="accts-sort" onchange="setAcctsFilter('sort', this.value)" style="padding:7px 9px;">
+            <option value="open-desc">Open balance (high to low)</option>
+            <option value="count-desc">Most invoices</option>
+            <option value="age-desc">Oldest average age</option>
+            <option value="name-asc">Account name (A&ndash;Z)</option>
+          </select>
+          <label style="font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px;"><input type="checkbox" id="accts-paid" onchange="setAcctsFilter('includePaid', this.checked)"> Include paid invoices</label>
+          <button class="btn-small" id="accts-sync-btn" onclick="pullFromAccounting()" title="Pull the latest invoices and customers from every connected QuickBooks / Intuit Enterprise Suite company">&#8635; Pull from QuickBooks / IES</button>
+        </div>
+      </div>
+      <div id="accts-hint" style="margin:-6px 0 10px;font-size:12px;color:var(--slate);"></div>
+      <div id="accounts-wrap"></div>
+    </section>
+
     <section class="view" id="view-sheet">
       <div class="topbar"><div><h1>Accounts Receivable</h1><p>Your full A/R ledger with autonomous contact tracking</p></div></div>
       <div class="mtd-filters" data-scope-panel="sheet"></div>
@@ -1277,6 +1324,89 @@
 </div>
 
 <!-- ===================== ADD INVOICE DRAWER ===================== -->
+<!-- ===================== ACCOUNT PANEL (Accounts tab) ===================== -->
+<div class="overlay" id="overlay-account">
+  <div class="drawer wide">
+    <div class="drawer-head"><h3 id="acct-panel-title">Account</h3><button class="close" onclick="closeAccountPanel()">Close &times;</button></div>
+    <div class="drawer-sub" id="acct-panel-sub"></div>
+    <div class="acct-kpis" id="acct-panel-kpis"></div>
+    <div class="drawer-section">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <h4 style="margin:0;">Invoices on this account</h4>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button type="button" class="btn-small" onclick="acctSelectAll(true)">Select all</button>
+          <button type="button" class="btn-small" onclick="acctSelectAll(false)">Clear</button>
+          <button type="button" class="btn-small" onclick="acctSelectOpen()">Open only</button>
+        </div>
+      </div>
+      <div class="acct-inv-wrap"><table class="acct-inv-table" id="acct-inv-table"></table></div>
+      <div id="acct-sel-hint" style="margin-top:6px;font-size:11.5px;color:var(--slate);"></div>
+      <div class="acct-actions">
+        <button type="button" class="btn-small" id="acct-dl-btn" onclick="downloadStatement()">&#8615; Download statement</button>
+        <button type="button" class="btn-small" id="acct-create-btn" onclick="createStatementReport()">Create statement report</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn-solid" id="acct-draft-btn" onclick="openStatementDraft()">Draft Now &mdash; email statement</button>
+      </div>
+      <div id="acct-stmt-msg" style="margin-top:6px;font-size:11.5px;color:var(--slate);"></div>
+    </div>
+    <div class="drawer-section">
+      <h4>Account statements</h4>
+      <div class="hint" style="margin:0 0 6px;">Statement reports created or sent for this account. They stay here on the Accounts tab and are not added to the individual invoices.</div>
+      <div class="stmt-list" id="acct-stmt-list"></div>
+    </div>
+  </div>
+</div>
+<!-- ===================== STATEMENT DRAFT (Accounts tab Draft Now) ===================== -->
+<div class="overlay" id="overlay-statement">
+  <div class="drawer" style="max-width:680px;">
+    <div class="drawer-head"><h3 id="stmt-draft-title">Draft account statement email</h3><button class="close" onclick="closeStatementDraft()">Close &times;</button></div>
+    <div class="drawer-sub" id="stmt-draft-sub"></div>
+    <div class="drawer-section">
+      <h4>Send to</h4>
+      <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden;">
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);background:#FAF8F2;">
+          <span style="font-size:11.5px;font-weight:700;color:var(--slate);width:26px;">To</span>
+          <input id="stmt-to" type="text" autocomplete="off" placeholder="Email address(es), separated by commas" style="flex:1;border:none;outline:none;font-size:13px;background:transparent;color:var(--ink);" />
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;">
+          <span style="font-size:11.5px;font-weight:700;color:var(--slate);width:26px;">Cc</span>
+          <input id="stmt-cc" type="text" autocomplete="off" placeholder="Add emails, separated by commas" style="flex:1;border:none;outline:none;font-size:13px;background:transparent;color:var(--ink);" />
+        </div>
+      </div>
+      <div class="hint" id="stmt-to-note"></div>
+    </div>
+    <div class="drawer-section">
+      <h4>Subject line</h4>
+      <input type="text" id="stmt-subject" class="subject-input">
+    </div>
+    <div class="ai-instruct" id="stmt-instruct-box">
+      <div class="ai-instruct-head"><b>Tell the AI what to change</b><span style="font-size:11px;color:var(--slate-soft);">Rewrites the draft below</span></div>
+      <div class="ai-instruct-row">
+        <textarea id="stmt-instruct" maxlength="500" rows="2" placeholder="e.g. Ask them to confirm which invoices are approved for payment" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();applyStatementInstruction();}"></textarea>
+        <button type="button" class="btn-primary" id="stmt-instruct-btn" onclick="applyStatementInstruction()">Rewrite</button>
+      </div>
+      <div class="ai-chips">
+        <button type="button" class="ai-chip" onclick="applyStatementInstruction('Make this stern and ask for payment of the full balance within 7 days.')">Stern &amp; 7-day deadline</button>
+        <button type="button" class="ai-chip" onclick="applyStatementInstruction('Make it shorter.')">Shorter</button>
+        <button type="button" class="ai-chip" onclick="applyStatementInstruction('Make it warmer and more relationship-focused, still asking for the expected payment date.')">Friendlier</button>
+        <button type="button" class="ai-chip" onclick="applyStatementInstruction('Ask them to let us know if any invoice is missing a PO number or needs to be resubmitted.')">Ask about missing POs</button>
+      </div>
+      <div class="ai-instruct-note" id="stmt-instruct-note">The invoice list, amounts and dates come straight from the account and stay the same.</div>
+    </div>
+    <div id="stmt-status-row" class="status-line" style="display:none;"><span class="status-dot"></span> <span id="stmt-status-text">Drafting from the invoices on this account&#8230;</span></div>
+    <textarea class="draft-box" id="stmt-text" placeholder="Draft will appear here..."></textarea>
+    <div class="sig-preview" id="stmt-sig-preview" style="display:none;">
+      <div class="sig-head"><span>Your signature &mdash; added to every email you send</span><a href="/account#identity">Edit</a></div>
+      <div class="sig-body" id="stmt-sig-text"></div>
+    </div>
+    <div id="stmt-attach-note" style="margin-top:8px;font-size:11.5px;color:var(--slate);"></div>
+    <div id="stmt-err" class="err" style="display:none;"></div>
+    <div class="drawer-actions">
+      <button class="btn-ghost" onclick="generateStatementDraft(true)">&#8635; Regenerate</button>
+      <button class="btn-solid" id="stmt-send-btn" onclick="sendStatement()">Approve &amp; Send with statement</button>
+    </div>
+  </div>
+</div>
 <div class="overlay" id="overlay-escalate">
   <div class="drawer" style="max-width:500px;">
     <div class="drawer-head"><h3>Escalate invoice</h3><button class="close" onclick="closeEscalateBox()">Close ×</button></div>
@@ -3107,6 +3237,7 @@ async function loadRealAccountsNow(){
         amount: c.amount == null ? (inv ? inv.amount : 0) : c.amount,
         sentAt: c.at ? fmtDate(c.at) : '\u2014',
         draftType: c.label || 'Follow-up',
+        fromAccounts: /statement/i.test(String(c.kind || '')) || /Account Statement/i.test(String(c.label || '')),
         status: c.status || 'sent',
         source: c.source === 'automation' ? 'automation' : 'manual',
         sentBy: c.sentBy || null,
@@ -3176,7 +3307,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
 
   function renderAll(){
     const steps = [
-      renderScopePanels, renderKpis, renderTodoList, renderQueue, renderSheet, renderReport, renderSent, renderResponses,
+      renderScopePanels, renderKpis, renderTodoList, renderQueue, renderAccountsTab, renderSheet, renderReport, renderSent, renderResponses,
       renderEscalations, renderAutomationsFeed, renderNavCounts, renderSfSimOptions,
       renderCustomIntegrations, renderRespSimOptions, renderNotifications,
       renderInvoicedMTD, renderCollectedMTD, renderCollectedAll, renderNetSuitePaymentOptions, renderMoneyPanel,
@@ -3291,6 +3422,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   })();
   function renderNavCounts(){
     document.getElementById('nav-count-queue').textContent = state.invoices.filter(i=>!i.escalated && i.jobStatus!=='paid').length;
+    const nca = document.getElementById('nav-count-accounts'); if(nca) nca.textContent = accountGroups(true).filter(g => g.openCount > 0).length;
     document.getElementById('nav-count-sent').textContent = state.commsLog.length;
     document.getElementById('nav-count-resp').textContent = state.responsesLog.length;
     document.getElementById('nav-count-esc').textContent = state.invoices.filter(i=>i.escalated).length;
@@ -3954,15 +4086,15 @@ function todoRowHTML(item, num, priority){
   function followUpDay(ts){ const d = new Date(ts); return isNaN(d.getTime()) ? String(ts).slice(0, 10) : localDay(d); }
   function lastFollowUpHTML(inv){
     if (!inv.lastFollowUpAt) return '<span style="color:var(--slate-soft);">\u2014</span>';
-    const kind = { followup: 'Follow-up', demand: 'Demand letter', demand_letter: 'Demand letter', noil: 'NOIL', first_contact: 'First contact' }[inv.lastFollowUpKind] || (inv.lastFollowUpKind ? hEsc(inv.lastFollowUpKind) : 'Follow-up');
-    return '<div style="white-space:nowrap;">' + fmtDate(followUpDay(inv.lastFollowUpAt)) + '</div><div style="font-size:11px;color:var(--slate);">' + kind + (inv.lastFollowUpBy ? ' \u00b7 by ' + hEsc(inv.lastFollowUpBy) : '') + '</div>';
+    const kind = { followup: 'Follow-up', demand: 'Demand letter', demand_letter: 'Demand letter', noil: 'NOIL', first_contact: 'First contact', statement: 'Account Statement' }[inv.lastFollowUpKind] || (inv.lastFollowUpKind ? hEsc(inv.lastFollowUpKind) : 'Follow-up');
+    return '<div style="white-space:nowrap;">' + fmtDate(followUpDay(inv.lastFollowUpAt)) + fromAccountsBadge(inv) + '</div><div style="font-size:11px;color:var(--slate);">' + kind + (inv.lastFollowUpBy ? ' · by ' + hEsc(fromAccountsName(inv.lastFollowUpBy)) : '') + '</div>';
   }
   // One-line tracker summary on queue/escalation cards for operating-company
   // workspaces (replaces the restoration "last on site" line).
   function trackerLineHTML(inv){
     const bits = [];
     if (inv.contactInfo) bits.push('<span title="Point of contact">\u260E ' + hEsc(String(inv.contactInfo).split(/\n/)[0].slice(0, 60)) + '</span>');
-    if (inv.lastFollowUpAt) bits.push('<span title="Last follow-up">Last follow-up ' + fmtDate(followUpDay(inv.lastFollowUpAt)) + (inv.lastFollowUpBy ? ' by ' + hEsc(inv.lastFollowUpBy) : '') + '</span>');
+    if (inv.lastFollowUpAt) bits.push('<span title="Last follow-up">Last follow-up ' + fmtDate(followUpDay(inv.lastFollowUpAt)) + (inv.lastFollowUpBy ? ' by ' + hEsc(fromAccountsName(inv.lastFollowUpBy)) : '') + fromAccountsBadge(inv) + '</span>');
     if (inv.projectedPaymentDate) bits.push('<span title="Projected collection date">Expected ' + fmtDate(inv.projectedPaymentDate) + (inv.paymentType ? ' via ' + hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType) : '') + '</span>');
     if (!bits.length) return '';
     return '<div class="onsite-line" style="gap:10px;flex-wrap:wrap;">' + bits.join('<span style="color:var(--slate-soft);">\u00b7</span>') + '</div>';
@@ -3980,7 +4112,7 @@ function todoRowHTML(item, num, priority){
         <td><span class="badge office">${hEsc(city)}</span></td>
         <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}</td>
         <td class="tracker-text"><textarea rows="2" placeholder="Name, email, phone\u2026" onchange="setTrackerText(${inv.id}, 'contactInfo', this.value)">${hEsc(inv.contactInfo || '')}</textarea></td>
-        <td>${inv.lastContact ? fmtDate(inv.lastContact) : '\u2014'}</td>
+        <td>${inv.lastContact ? fmtDate(inv.lastContact) + fromAccountsBadge(inv) : '\u2014'}</td>
         <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span></td>
         <td class="tracker-text qb-notes resp-cell" title="${hEsc(inv.responseSummary || '')}"><div class="resp-wrap">${inv.responseSummary ? '<div class="clamp">' + hEsc(inv.responseSummary) + '</div>' : '<span class="none">No reply yet</span>'}<button class="btn-small reply-btn" onclick="openReplyBox(${inv.id})" title="Paste the email you received \u2014 clAIms summarizes it here">${inv.responseSummary ? 'Log another reply' : 'Log reply'}</button></div></td>
         <td class="tracker-text"><textarea rows="2" placeholder="Notes\u2026" onchange="setTrackerText(${inv.id}, 'note', this.value)">${hEsc(inv.note || '')}</textarea></td>
@@ -4190,7 +4322,7 @@ function todoRowHTML(item, num, priority){
         <td style="text-align:center;"><input type="checkbox" ${inv.pa?'checked':''} onchange="toggleFlagField(${inv.id}, 'pa', this.checked)"/></td>
         <td style="text-align:center;"><input type="checkbox" ${inv.noilSent?'checked':''} onchange="toggleFlagField(${inv.id}, 'noilSent', this.checked)"/></td>
         <td style="text-align:center;"><input type="checkbox" ${inv.lienFiled?'checked':''} onchange="toggleFlagField(${inv.id}, 'lienFiled', this.checked)"/></td>
-        <td>${inv.lastContact ? fmtDate(inv.lastContact) : '\u2014'}</td>
+        <td>${inv.lastContact ? fmtDate(inv.lastContact) + fromAccountsBadge(inv) : '\u2014'}</td>
         <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span></td>
         <td class="resp-summary">${inv.responseSummary || '\u2014'}</td>
         <td class="sf-update-cell">${latestSalesforceUpdateHTML(inv)}</td>
@@ -4908,8 +5040,8 @@ function todoRowHTML(item, num, priority){
 <td>${DEPARTMENT_LABELS[(findInv(s.invoiceId)||{}).department] || '\u2014'}</td>
               <td class="amt">$${s.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               <td>${s.sentAt}</td>
-              <td>${s.draftType}</td>
-              <td>${s.recipient || '\u2014'}</td>
+              <td>${s.draftType}${s.fromAccounts ? '<span class="from-accounts" title="Sent from the Accounts tab">Accounts tab</span>' : ''}</td>
+              <td>${s.recipient || '—'}</td>
               <td style="font-family:var(--font-mono);font-size:11px;">${s.subject || '\u2014'}</td>
               <td>${s.source === 'automation' ? '<span class="status-pill auto-tag">AUTONOMOUS</span>' : ('Manual' + (s.sentBy ? ' <span class="sent-by">\u00b7 ' + hEsc(s.sentBy) + '</span>' : ''))}</td>
               <td><span class="status-pill ${s.status}">${msgStatusLabel(s.status)}</span></td>
@@ -5201,6 +5333,448 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   }
 
   /* ============================================================
+     ACCOUNTS TAB - one row per customer, all of their invoices,
+     account statements and account-level Draft Now
+     ============================================================ */
+  // "Sent from Accounts tab" indicator: the server stamps last_follow_up_kind
+  // = 'statement' and " (Accounts tab)" on the sender; demo sends set the same.
+  function sentFromAccounts(inv){ return !!(inv && (inv.lastFollowUpKind === 'statement' || /\(Accounts tab\)/.test(String(inv.lastFollowUpBy || '')))); }
+  function fromAccountsBadge(inv){ return sentFromAccounts(inv) ? '<span class="from-accounts" title="Sent from the Accounts tab">Accounts tab</span>' : ''; }
+  function fromAccountsName(by){ return String(by || '').replace(/\s*\(Accounts tab\)\s*$/, ''); }
+  function acctKey(name){ return String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+  function acctsFilters(){ return state.acctsFilters || (state.acctsFilters = { search: '', sort: 'open-desc', includePaid: false }); }
+  function setAcctsFilter(k, v){ const f = acctsFilters(); f[k] = (k === 'includePaid') ? !!v : String(v == null ? '' : v); saveState(); renderAccountsTab(); }
+  function invBalance(inv){ return Math.max(0, +(Number(inv.amount || 0) - Number(inv.amountPaid || 0)).toFixed(2)); }
+  // Groups every invoice (optionally including paid ones) by customer name.
+  function accountGroups(allInvoices){
+    const f = acctsFilters();
+    const groups = {};
+    state.invoices.forEach(function(inv){
+      if(!allInvoices && !passesFilters(inv)) return;
+      const k = acctKey(inv.name); if(!k) return;
+      const g = groups[k] || (groups[k] = { key: k, name: inv.name, invoices: [], openCount: 0, openTotal: 0, invoiced: 0, biz: {}, cities: {}, lastContact: '', contact: '', contactEmail: '', ageSum: 0, ageN: 0, escalated: 0, dnc: 0 });
+      g.invoices.push(inv);
+      g.invoiced += Number(inv.amount || 0);
+      g.biz[deptLabel(inv)] = 1; g.cities[OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || ''] = 1;
+      if(inv.jobStatus !== 'paid' && invBalance(inv) > 0){ g.openCount++; g.openTotal += invBalance(inv); g.ageSum += agingDays(inv); g.ageN++; }
+      if(inv.lastContact && String(inv.lastContact) > String(g.lastContact)) g.lastContact = inv.lastContact;
+      if(!g.contact && inv.contact) g.contact = inv.contact;
+      if(!g.contactEmail && inv.contactEmail) g.contactEmail = inv.contactEmail;
+      if(inv.escalated) g.escalated++;
+      if(isDoNotContact(inv)) g.dnc++;
+    });
+    return Object.keys(groups).map(function(k){ const g = groups[k]; g.avgAge = g.ageN ? Math.round(g.ageSum / g.ageN) : 0; g.count = g.invoices.length; return g; });
+  }
+  function acctBizLabel(g){ const b = Object.keys(g.biz).filter(Boolean).sort(); return b.length <= 2 ? b.join(', ') : (b.length + ' businesses'); }
+  function renderAccountsTab(){
+    const wrap = document.getElementById('accounts-wrap'); if(!wrap) return;
+    const f = acctsFilters();
+    const sb = document.getElementById('accts-search'); if(sb && document.activeElement !== sb && sb.value !== f.search) sb.value = f.search;
+    const ss = document.getElementById('accts-sort'); if(ss && ss.value !== f.sort) ss.value = f.sort;
+    const sp = document.getElementById('accts-paid'); if(sp) sp.checked = !!f.includePaid;
+    const hasQb = (state.realIntegrations || []).some(function(i){ return i.status === 'connected' && /quickbooks|intuit/i.test(String(i.provider || '')); });
+    const syncBtn = document.getElementById('accts-sync-btn');
+    if(syncBtn) syncBtn.style.display = (state.currentUser && state.currentUser.role === 'admin') ? '' : 'none';
+    const hint = document.getElementById('accts-hint');
+    if(hint) hint.textContent = state.currentUser
+      ? (hasQb ? 'Invoices and customers sync automatically from your connected QuickBooks / Intuit Enterprise Suite companies; use Pull to fetch the latest right now.' : 'Connect QuickBooks or Intuit Enterprise Suite on the Integrations tab and every invoice and customer will appear here automatically.')
+      : 'Demo workspace — accounts are grouped from the sample invoices.';
+    let groups = accountGroups(false);
+    if(!f.includePaid) groups = groups.filter(function(g){ return g.openCount > 0; });
+    const q = f.search.trim().toLowerCase();
+    if(q) groups = groups.filter(function(g){ return g.name.toLowerCase().indexOf(q) !== -1 || Object.keys(g.biz).join(' ').toLowerCase().indexOf(q) !== -1 || String(g.contact || '').toLowerCase().indexOf(q) !== -1; });
+    const sorters = {
+      'open-desc': function(a, b){ return b.openTotal - a.openTotal || a.name.localeCompare(b.name); },
+      'count-desc': function(a, b){ return b.count - a.count || a.name.localeCompare(b.name); },
+      'age-desc': function(a, b){ return b.avgAge - a.avgAge || a.name.localeCompare(b.name); },
+      'name-asc': function(a, b){ return a.name.localeCompare(b.name); }
+    };
+    groups.sort(sorters[f.sort] || sorters['open-desc']);
+    if(!groups.length){ wrap.innerHTML = '<div class="empty">No accounts' + (q ? ' match that search' : ' with open invoices') + '.</div>'; return; }
+    const totOpen = groups.reduce(function(s2, g){ return s2 + g.openTotal; }, 0);
+    const totInv = groups.reduce(function(s2, g){ return s2 + (f.includePaid ? g.count : g.openCount); }, 0);
+    wrap.innerHTML = `
+      <table class="log">
+        <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>City</th><th>Total open</th><th>Avg age</th><th>Last contact</th><th></th></tr></thead>
+        <tbody>
+          ${groups.map(g => `
+            <tr class="acct-row" onclick="openAccountPanel(${JSON.stringify(g.key)})">
+              <td><div class="acct-name">${hEsc(g.name)}</div><div class="acct-sub">${hEsc(g.contact || 'No contact on file')}${g.contactEmail ? ' · ' + hEsc(g.contactEmail) : ''}${g.escalated ? ' · <span style="color:var(--rust);font-weight:600;">' + g.escalated + ' escalated</span>' : ''}${g.dnc ? ' · <span style="color:var(--rust);font-weight:600;">Do not contact</span>' : ''}</div></td>
+              <td><b>${f.includePaid ? g.count : g.openCount}</b>${f.includePaid && g.openCount !== g.count ? '<div class="acct-sub">' + g.openCount + ' open</div>' : ''}</td>
+              <td>${hEsc(acctBizLabel(g))}</td>
+              <td>${hEsc(Object.keys(g.cities).filter(Boolean).sort().join(', '))}</td>
+              <td class="amt">$${g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              <td>${g.openCount ? g.avgAge + ' days' : '—'}</td>
+              <td>${g.lastContact ? fmtDate(g.lastContact) : '<span style="color:var(--slate-soft);">—</span>'}</td>
+              <td style="white-space:nowrap;"><button class="btn-small" onclick="event.stopPropagation(); openAccountPanel(${JSON.stringify(g.key)})">Open</button></td>
+            </tr>`).join('')}
+        </tbody>
+        <tfoot><tr><td style="font-weight:600;padding:10px 16px;">${groups.length} account${groups.length === 1 ? '' : 's'}</td><td style="font-weight:600;">${totInv}</td><td></td><td></td><td class="amt" style="font-weight:600;">$${totOpen.toLocaleString(undefined,{minimumFractionDigits:2})}</td><td></td><td></td><td></td></tr></tfoot>
+      </table>`;
+  }
+
+  // Pull from QuickBooks / IES: runs Sync Now on every connected Intuit
+  // company (IES uses the same QuickBooks connection), then reloads.
+  async function pullFromAccounting(){
+    const btn = document.getElementById('accts-sync-btn');
+    if(!state.currentUser){ showToast('Connect QuickBooks or IES in your live workspace to pull invoices.'); return; }
+    const live = (state.realIntegrations || []).filter(function(i){ return i.status === 'connected'; });
+    const qb = live.filter(function(i){ return /quickbooks|intuit/i.test(String(i.provider || '')); });
+    if(!live.length){ showToast('No accounting system is connected yet — connect QuickBooks / IES on the Integrations tab.'); return; }
+    const targets = qb.length ? qb : live;
+    if(btn){ btn.disabled = true; btn.textContent = 'Pulling…'; }
+    let ok = 0, failed = 0, importing = false;
+    for(const integ of targets){
+      try{
+        const res = await fetch('/api/integrations/sync', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: integ.id }) });
+        const d = await res.json();
+        if(d && d.ok){ ok++; if(d.importing) importing = true; } else failed++;
+      }catch(e){ failed++; }
+    }
+    try{ await loadRealAccounts(); }catch(e){}
+    loadRealIntegrations();
+    if(btn){ btn.disabled = false; btn.innerHTML = '&#8635; Pull from QuickBooks / IES'; }
+    showToast(ok ? ('Pulled from ' + ok + ' connected compan' + (ok === 1 ? 'y' : 'ies') + (importing ? ' — the first import is still running, more invoices will keep appearing.' : '.') + (failed ? ' ' + failed + ' failed.' : '')) : 'The pull did not complete — check the Integrations tab.');
+    renderAccountsTab();
+  }
+
+  // ---- Account panel ----
+  let acctPanelKey = null;
+  let acctSelected = {};          // invoice id -> true
+  let acctStatements = [];        // saved statements for the open account
+  function acctGroup(key){ return accountGroups(true).find(function(g){ return g.key === key; }) || null; }
+  function openAccountPanel(key){
+    const g = acctGroup(key); if(!g) return;
+    acctPanelKey = key;
+    acctSelected = {};
+    g.invoices.forEach(function(inv){ if(inv.jobStatus !== 'paid' && invBalance(inv) > 0) acctSelected[inv.id] = true; });
+    document.getElementById('acct-stmt-msg').textContent = '';
+    renderAccountPanel();
+    loadAccountStatements(g.name);
+    document.getElementById('overlay-account').classList.add('open');
+  }
+  function closeAccountPanel(){ document.getElementById('overlay-account').classList.remove('open'); acctPanelKey = null; }
+  function acctSelectedInvoices(g){ return (g || acctGroup(acctPanelKey) || { invoices: [] }).invoices.filter(function(inv){ return acctSelected[inv.id]; }); }
+  function acctSelectAll(on){ const g = acctGroup(acctPanelKey); if(!g) return; g.invoices.forEach(function(inv){ acctSelected[inv.id] = !!on; }); renderAccountPanel(); }
+  function acctSelectOpen(){ const g = acctGroup(acctPanelKey); if(!g) return; g.invoices.forEach(function(inv){ acctSelected[inv.id] = (inv.jobStatus !== 'paid' && invBalance(inv) > 0); }); renderAccountPanel(); }
+  function acctToggle(id){ acctSelected[id] = !acctSelected[id]; renderAccountPanel(); }
+  function renderAccountPanel(){
+    const g = acctGroup(acctPanelKey); if(!g) return;
+    document.getElementById('acct-panel-title').textContent = g.name;
+    document.getElementById('acct-panel-sub').textContent = (g.contact ? g.contact + (g.contactEmail ? ' · ' + g.contactEmail : '') : (g.contactEmail || 'No contact on file')) + ' · ' + acctBizLabel(g) + (Object.keys(g.cities).filter(Boolean).length ? ' · ' + Object.keys(g.cities).filter(Boolean).sort().join(', ') : '');
+    const sel = acctSelectedInvoices(g);
+    const selTotal = sel.reduce(function(s2, i){ return s2 + invBalance(i); }, 0);
+    document.getElementById('acct-panel-kpis').innerHTML =
+      '<div class="acct-kpi"><div class="l">Invoices</div><div class="v">' + g.count + '</div><div class="s">' + g.openCount + ' open</div></div>' +
+      '<div class="acct-kpi"><div class="l">Open balance</div><div class="v">$' + g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div><div class="s">of $' + g.invoiced.toLocaleString(undefined,{minimumFractionDigits:2}) + ' invoiced</div></div>' +
+      '<div class="acct-kpi"><div class="l">Average age</div><div class="v">' + (g.openCount ? g.avgAge + 'd' : '—') + '</div><div class="s">open invoices</div></div>' +
+      '<div class="acct-kpi"><div class="l">Last contact</div><div class="v" style="font-size:15px;">' + (g.lastContact ? fmtDate(g.lastContact) : '—') + '</div><div class="s">' + (g.invoices.filter(sentFromAccounts).length ? 'statement sent from Accounts tab' : 'across all invoices') + '</div></div>';
+    const rows = g.invoices.slice().sort(function(a, b){ return String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')); });
+    document.getElementById('acct-inv-table').innerHTML =
+      '<thead><tr><th></th><th>Invoice #</th><th>Invoice date</th><th>Age</th><th>Business</th><th>City</th><th>Amount</th><th>Balance</th><th>Status</th><th>Last follow-up</th></tr></thead><tbody>' +
+      rows.map(function(inv){
+        const paid = inv.jobStatus === 'paid' || invBalance(inv) <= 0;
+        return '<tr class="' + (paid ? 'paid' : '') + '">' +
+          '<td><input type="checkbox" ' + (acctSelected[inv.id] ? 'checked' : '') + ' onchange="acctToggle(' + JSON.stringify(inv.id) + ')"></td>' +
+          '<td>' + acctLink(inv.id, inv.invoiceNumber || ('#' + inv.id)) + '</td>' +
+          '<td>' + (inv.invoiceDate ? fmtDate(inv.invoiceDate) : '—') + '</td>' +
+          '<td>' + agingDays(inv) + 'd</td>' +
+          '<td>' + hEsc(deptLabel(inv)) + '</td>' +
+          '<td>' + hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '') + '</td>' +
+          '<td class="amt">$' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
+          '<td class="amt">$' + invBalance(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
+          '<td>' + hEsc(STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '') + (inv.escalated ? ' <span class="badge escalated">ESCALATED</span>' : '') + (isDoNotContact(inv) ? ' <span class="badge escalated">DNC</span>' : '') + '</td>' +
+          '<td>' + lastFollowUpHTML(inv) + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody>';
+    document.getElementById('acct-sel-hint').textContent = sel.length ? (sel.length + ' invoice' + (sel.length === 1 ? '' : 's') + ' selected — $' + selTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + ' on the statement') : 'Select the invoices to put on the statement.';
+    ['acct-dl-btn','acct-create-btn','acct-draft-btn'].forEach(function(id){ const b = document.getElementById(id); if(b) b.disabled = !sel.length; });
+    renderStatementList();
+  }
+  async function loadAccountStatements(name){
+    acctStatements = [];
+    if(!state.currentUser){ acctStatements = (state.demoStatements || []).filter(function(s2){ return acctKey(s2.customerName) === acctKey(name); }); renderStatementList(); return; }
+    try{
+      const r = await fetch('/api/accounts/statements?customer=' + encodeURIComponent(name), { credentials: 'same-origin', cache: 'no-store' });
+      const d = await r.json();
+      if(d && d.ok) acctStatements = d.statements || [];
+      else if(d && d.code === 'no_table'){ document.getElementById('acct-stmt-msg').textContent = 'Statement reports are not set up on this workspace yet (database table missing).'; }
+    }catch(e){}
+    renderStatementList();
+  }
+  function renderStatementList(){
+    const el = document.getElementById('acct-stmt-list'); if(!el) return;
+    if(!acctStatements.length){ el.innerHTML = '<div class="hint" style="margin:0;">No statement reports yet for this account.</div>'; return; }
+    el.innerHTML = acctStatements.map(function(st){
+      return '<div class="stmt-row"><div><div class="n">' + hEsc(st.fileName) + '</div><div class="m">' + st.invoiceCount + ' invoice' + (st.invoiceCount === 1 ? '' : 's') + ' · $' + Number(st.total || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + ' · created ' + fmtDate(String(st.createdAt || '').slice(0,10)) + (st.createdBy ? ' by ' + hEsc(st.createdBy) : '') + (st.sentAt ? ' · <b>sent ' + fmtDate(String(st.sentAt).slice(0,10)) + (st.sentTo ? ' to ' + hEsc(st.sentTo) : '') + '</b>' : '') + '</div></div><span class="sp"></span>' +
+        '<button class="btn-small" onclick="downloadSavedStatement(' + JSON.stringify(st.id) + ')">Download</button>' +
+        '<button class="btn-small" onclick="openStatementDraft(' + JSON.stringify(st.id) + ')">Email it</button>' +
+        '<button class="btn-small" onclick="deleteSavedStatement(' + JSON.stringify(st.id) + ')" title="Remove this statement report">&times;</button></div>';
+    }).join('');
+  }
+  async function downloadSavedStatement(id){
+    const st = acctStatements.find(function(x){ return String(x.id) === String(id); }); if(!st) return;
+    if(st.blob){ const a = document.createElement('a'); a.href = URL.createObjectURL(st.blob); a.download = st.fileName; a.click(); return; }
+    try{ const r = await fetch('/api/accounts/statements/download?id=' + encodeURIComponent(id), { credentials: 'same-origin' }); const d = await r.json(); if(d && d.ok && d.url){ window.open(d.url, '_blank'); return; } showToast((d && d.error) || 'Could not open that statement.'); }catch(e){ showToast('Could not open that statement.'); }
+  }
+  async function deleteSavedStatement(id){
+    if(!state.currentUser){ state.demoStatements = (state.demoStatements || []).filter(function(x){ return String(x.id) !== String(id); }); acctStatements = acctStatements.filter(function(x){ return String(x.id) !== String(id); }); renderStatementList(); return; }
+    try{ const r = await fetch('/api/accounts/statements/delete', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) }); const d = await r.json(); if(d && d.ok){ acctStatements = acctStatements.filter(function(x){ return String(x.id) !== String(id); }); renderStatementList(); showToast('Statement removed.'); } else showToast((d && d.error) || 'Could not remove that statement.'); }catch(e){ showToast('Could not remove that statement.'); }
+  }
+
+  // ---- Statement PDF (built in the browser with jsPDF) ----
+  function loadScriptOnce(src){ return new Promise(function(res, rej){ if(document.querySelector('script[src="' + src + '"]')) { res(); return; } const sc = document.createElement('script'); sc.src = src; sc.onload = res; sc.onerror = function(){ rej(new Error('Could not load ' + src)); }; document.head.appendChild(sc); }); }
+  async function ensurePdfLib(){
+    if(!(window.jspdf && window.jspdf.jsPDF)) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    if(!(window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable)) await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+  }
+  function companyDisplayName(){ return (window.__me && window.__me.companyName) || (document.querySelector('.gh-title') && document.querySelector('.gh-title').textContent.trim()) || 'Your Company'; }
+  function statementFileName(g){ return ('Account Statement - ' + g.name + ' - ' + localDay()).replace(/[^A-Za-z0-9 ._-]+/g, '_') + '.pdf'; }
+  async function buildStatementPdf(g, invoices){
+    await ensurePdfLib();
+    const doc = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+    const money = function(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2}); };
+    const rows = invoices.slice().sort(function(a, b){ return String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || '')); });
+    const total = rows.reduce(function(s2, i){ return s2 + Number(i.amount || 0); }, 0);
+    const paid = rows.reduce(function(s2, i){ return s2 + Number(i.amountPaid || 0); }, 0);
+    const bal = rows.reduce(function(s2, i){ return s2 + invBalance(i); }, 0);
+    const ages = rows.filter(function(i){ return invBalance(i) > 0; }).map(agingDays);
+    const avgAge = ages.length ? Math.round(ages.reduce(function(a, b){ return a + b; }, 0) / ages.length) : 0;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('Account Statement', 40, 52);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(90);
+    doc.text(companyDisplayName(), 40, 68);
+    doc.text('Statement date: ' + fmtDate(localDay()), 572, 52, { align: 'right' });
+    doc.setTextColor(20); doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.text(g.name, 40, 96);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(90);
+    const who = [g.contact, g.contactEmail].filter(Boolean).join('  |  '); if(who) doc.text(who, 40, 110);
+    doc.text(rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + '  |  Balance due ' + money(bal) + (ages.length ? '  |  Average age ' + avgAge + ' days' : ''), 40, who ? 124 : 110);
+    doc.autoTable({
+      startY: who ? 140 : 126,
+      head: [['Invoice #', 'Invoice date', 'Age', 'Business', 'Description', 'Amount', 'Paid', 'Balance']],
+      body: rows.map(function(i){ return [i.invoiceNumber || ('#' + i.id), i.invoiceDate ? fmtDate(i.invoiceDate) : '', agingDays(i) + 'd', deptLabel(i), String(i.meta || i.scopeOfWork || '').replace(/&middot;/g, '-').replace(/&amp;/g, '&').replace(/<[^>]*>/g, '').slice(0, 60), money(i.amount), money(i.amountPaid || 0), money(invBalance(i))]; }),
+      foot: [['', '', '', '', 'Total', money(total), money(paid), money(bal)]],
+      styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 4 },
+      headStyles: { fillColor: [23, 23, 23], textColor: 255 },
+      footStyles: { fillColor: [243, 233, 216], textColor: 20, fontStyle: 'bold' },
+      columnStyles: { 5: { halign: 'right' }, 6: { halign: 'right' }, 7: { halign: 'right' } },
+      margin: { left: 40, right: 40 }
+    });
+    const y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 400) + 22;
+    doc.setFontSize(9); doc.setTextColor(90);
+    doc.text('Please remit payment for the balance due. If any invoice has already been paid, reply with the payment details and we will reconcile it right away.', 40, Math.min(y, 740), { maxWidth: 532 });
+    const pages = doc.internal.getNumberOfPages();
+    for(let p2 = 1; p2 <= pages; p2++){ doc.setPage(p2); doc.setFontSize(8); doc.setTextColor(140); doc.text(companyDisplayName() + '  -  Account Statement  -  ' + g.name + '  -  page ' + p2 + ' of ' + pages, 306, 770, { align: 'center' }); }
+    const blob = doc.output('blob');
+    const b64 = doc.output('datauristring').split(',')[1];
+    return { blob: blob, base64: b64, fileName: statementFileName(g), total: bal, count: rows.length };
+  }
+  async function downloadStatement(){
+    const g = acctGroup(acctPanelKey); const sel = acctSelectedInvoices(g); if(!g || !sel.length) return;
+    const msg = document.getElementById('acct-stmt-msg'); msg.textContent = 'Building the statement…';
+    try{ const pdf = await buildStatementPdf(g, sel); const a = document.createElement('a'); a.href = URL.createObjectURL(pdf.blob); a.download = pdf.fileName; a.click(); msg.textContent = 'Downloaded ' + pdf.fileName + '.'; }
+    catch(e){ msg.textContent = 'Could not build the statement: ' + ((e && e.message) || e); }
+  }
+  async function createStatementReport(){
+    const g = acctGroup(acctPanelKey); const sel = acctSelectedInvoices(g); if(!g || !sel.length) return;
+    const msg = document.getElementById('acct-stmt-msg'); const btn = document.getElementById('acct-create-btn');
+    msg.textContent = 'Building the statement…'; btn.disabled = true;
+    try{
+      const pdf = await buildStatementPdf(g, sel);
+      if(!state.currentUser){
+        const st = { id: 'demo-' + Date.now(), customerName: g.name, fileName: pdf.fileName, invoiceCount: pdf.count, total: pdf.total, createdAt: new Date().toISOString(), createdBy: 'You', blob: pdf.blob, base64: pdf.base64 };
+        state.demoStatements = state.demoStatements || []; state.demoStatements.unshift(st); acctStatements.unshift(st);
+        renderStatementList(); msg.textContent = 'Statement report added to this account.'; showToast('Statement report created for ' + g.name);
+        return;
+      }
+      const r = await fetch('/api/accounts/statements', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customerName: g.name, accountIds: sel.map(function(i){ return i.id; }), fileName: pdf.fileName, pdfBase64: pdf.base64 }) });
+      const d = await r.json();
+      if(!d || !d.ok) throw new Error((d && d.error) || 'Could not save the statement.');
+      acctStatements.unshift(d.statement); renderStatementList();
+      msg.textContent = 'Statement report added to this account.'; showToast('Statement report created for ' + g.name);
+    }catch(e){ msg.textContent = 'Could not create the statement: ' + ((e && e.message) || e); }
+    finally{ btn.disabled = false; }
+  }
+
+  // ---- Draft Now (account-level): AI email covering every selected invoice ----
+  let stmtDraftCtx = null;  // { g, invoices, pdf, statementId }
+  function statementSummary(invoices){
+    const rows = invoices.slice().sort(function(a, b){ return String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || '')); });
+    const open = rows.filter(function(i){ return invBalance(i) > 0; });
+    const avgAge = open.length ? Math.round(open.reduce(function(s2, i){ return s2 + agingDays(i); }, 0) / open.length) : 0;
+    return { rows: rows, total: rows.reduce(function(s2, i){ return s2 + invBalance(i); }, 0), avgAge: avgAge, oldest: open.length ? Math.max.apply(null, open.map(agingDays)) : 0 };
+  }
+  function buildStatementPrompt(g, invoices){
+    const sm = statementSummary(invoices);
+    const money = function(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2}); };
+    const list = sm.rows.map(function(i){ return '- ' + (i.invoiceNumber || ('Invoice #' + i.id)) + ' | dated ' + (i.invoiceDate ? fmtDate(i.invoiceDate) : 'date not on file') + ' | ' + agingDays(i) + ' days old | ' + deptLabel(i) + ' | amount ' + money(i.amount) + (Number(i.amountPaid || 0) > 0 ? ' | balance ' + money(invBalance(i)) : ''); }).join('\n');
+    const personName = contactPersonName({ contact: g.contact });
+    return `You are drafting a professional accounts-receivable email from a service company's collections coordinator to a customer, covering several open invoices at once. An Account Statement PDF listing the same invoices is attached to the email.
+
+Account details:
+- Account (customer) name: ${g.name}
+- Number of invoices on this statement: ${sm.rows.length}
+- Total balance due across them: ${money(sm.total)}
+- Average age of the open invoices: ${sm.avgAge} days (oldest ${sm.oldest} days)
+- Contact: ${g.contact || 'none on file'}
+- Businesses that issued the invoices: ${Object.keys(g.biz).filter(Boolean).sort().join(', ') || 'not listed'}
+
+Invoices (one per line):
+${list}
+
+Write only the email body (no subject line). ${personName ? 'Address it to ' + personName + ' by name (for example "Hello ' + personName.split(' ')[0] + ',").' : 'No contact name is on file: open with "Hello," or "Dear Accounts Payable Team,". Never write a bracketed placeholder.'}
+It must:
+1. Name the account (${g.name}) and say how many invoices are outstanding and the total balance.
+2. List every invoice above with its invoice number, invoice date and amount - a short list, one invoice per line, in the order given. Use the exact numbers, dates and amounts; do not round or change them and do not add invoices.
+3. Mention the average age of the invoices (${sm.avgAge} days).
+4. Say the Account Statement is attached.
+5. Ask whether these invoices are in their payment processing, whether anything is needed from us to release payment, and for the expected payment date.
+Keep it professional and courteous but direct, under 220 words plus the invoice list. End with a closing line such as "Thank you," and nothing after it - the sender's signature is added automatically.
+
+Hard rules - these override everything above:
+1. Use only the facts listed. Never invent PO numbers, claim numbers, late fees, interest, dates or legal consequences, and never turn a dollar amount into a reference number.
+2. No placeholders of any kind: nothing in square brackets.
+3. Before you finish, re-read the draft and remove anything that breaks rules 1-2.`;
+  }
+  function templateStatementText(g, invoices){
+    const sm = statementSummary(invoices);
+    const money = function(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2}); };
+    const who = contactPersonName({ contact: g.contact }); const first = who ? who.split(' ')[0] : '';
+    return 'Hello ' + (first || 'there') + ',\n\nI am reaching out regarding the ' + sm.rows.length + ' open invoice' + (sm.rows.length === 1 ? '' : 's') + ' on the ' + g.name + ' account, totaling ' + money(sm.total) + '. The attached Account Statement lists each one:\n\n' +
+      sm.rows.map(function(i){ return '- ' + (i.invoiceNumber || ('Invoice #' + i.id)) + ' - ' + (i.invoiceDate ? fmtDate(i.invoiceDate) : 'date not on file') + ' - ' + money(invBalance(i)); }).join('\n') +
+      '\n\nThe average age of these invoices is ' + sm.avgAge + ' days. Could you let me know whether they are in your payment processing, if anything is needed from us to release payment, and the expected payment date?\n\nThank you,';
+  }
+  async function openStatementDraft(statementId){
+    const g = acctGroup(acctPanelKey); if(!g) return;
+    let invoices = acctSelectedInvoices(g); let saved = null;
+    if(statementId){
+      saved = acctStatements.find(function(x){ return String(x.id) === String(statementId); });
+      if(saved && saved.accountIds && saved.accountIds.length){ const ids = {}; saved.accountIds.forEach(function(i){ ids[String(i)] = 1; }); const onSaved = g.invoices.filter(function(i){ return ids[String(i.id)]; }); if(onSaved.length) invoices = onSaved; }
+    }
+    if(!invoices.length){ showToast('Select at least one invoice first.'); return; }
+    const dnc = invoices.filter(isDoNotContact);
+    if(dnc.length){ showToast((dnc[0].invoiceNumber || dnc[0].name) + ' is marked DO NOT CONTACT — untick it before sending.'); return; }
+    stmtDraftCtx = { g: g, invoices: invoices, pdf: null, statementId: saved ? saved.id : null, savedName: saved ? saved.fileName : null };
+    document.getElementById('overlay-account').classList.remove('open');
+    document.getElementById('stmt-draft-title').textContent = 'Draft account statement email — ' + g.name;
+    const sm = statementSummary(invoices);
+    document.getElementById('stmt-draft-sub').textContent = invoices.length + ' invoice' + (invoices.length === 1 ? '' : 's') + ' · $' + sm.total.toLocaleString(undefined,{minimumFractionDigits:2}) + ' · average age ' + sm.avgAge + ' days';
+    document.getElementById('stmt-to').value = g.contactEmail || '';
+    document.getElementById('stmt-cc').value = '';
+    document.getElementById('stmt-to-note').textContent = g.contactEmail ? '' : 'No contact email on file for this account — type one above.';
+    document.getElementById('stmt-subject').value = 'Account Statement - ' + g.name + ' (' + invoices.length + ' invoice' + (invoices.length === 1 ? '' : 's') + ')';
+    document.getElementById('stmt-instruct').value = '';
+    document.getElementById('stmt-instruct-note').textContent = 'The invoice list, amounts and dates come straight from the account and stay the same.';
+    document.getElementById('stmt-text').value = '';
+    document.getElementById('stmt-err').style.display = 'none';
+    document.getElementById('stmt-attach-note').textContent = saved ? 'Attaching the saved statement: ' + saved.fileName : 'A fresh Account Statement PDF for these ' + invoices.length + ' invoice' + (invoices.length === 1 ? '' : 's') + ' will be built and attached when you send.';
+    const sigWrap = document.getElementById('stmt-sig-preview'); const sigBody = document.getElementById('stmt-sig-text');
+    if(state.currentUser && signatureCache){ sigBody.textContent = signatureCache; sigWrap.style.display = ''; } else { sigWrap.style.display = 'none'; if(state.currentUser) renderSignaturePreview().then(function(){ if(signatureCache){ sigBody.textContent = signatureCache; sigWrap.style.display = ''; } }); }
+    document.getElementById('overlay-statement').classList.add('open');
+    generateStatementDraft(false);
+  }
+  function closeStatementDraft(){ document.getElementById('overlay-statement').classList.remove('open'); if(acctPanelKey) document.getElementById('overlay-account').classList.add('open'); }
+  async function generateStatementDraft(isRegenerate){
+    const ctx = stmtDraftCtx; if(!ctx) return;
+    const box = document.getElementById('stmt-text'); const status = document.getElementById('stmt-status-row'); const err = document.getElementById('stmt-err'); const sendBtn = document.getElementById('stmt-send-btn');
+    err.style.display = 'none'; status.style.display = 'flex'; sendBtn.disabled = true;
+    const extra = isRegenerate ? (document.getElementById('stmt-instruct').value || '').trim() : '';
+    document.getElementById('stmt-status-text').textContent = extra ? 'Drafting a fresh version with your instructions…' : 'Drafting from the invoices on this account…';
+    try{
+      if(!state.currentUser){ box.value = templateStatementText(ctx.g, ctx.invoices); }
+      else {
+        let prompt = buildStatementPrompt(ctx.g, ctx.invoices); if(extra) prompt += instructionBlock(extra);
+        const r = await fetch('/api/ai-draft', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, maxTokens: 1500, draftType: 'followup' }) });
+        const d = await r.json();
+        if(!d || !d.ok || !d.text) throw new Error((d && d.error) || 'No draft returned.');
+        if(stmtDraftCtx !== ctx) return;
+        box.value = String(d.text).trim();
+      }
+    }catch(e){
+      box.value = templateStatementText(ctx.g, ctx.invoices);
+      err.textContent = "AI drafting isn't available right now, so a standard statement email was loaded — review and edit it before sending."; err.style.display = 'block';
+    }finally{ status.style.display = 'none'; sendBtn.disabled = false; }
+  }
+  async function applyStatementInstruction(preset){
+    const ctx = stmtDraftCtx; if(!ctx) return;
+    const ib = document.getElementById('stmt-instruct'); if(preset) ib.value = preset;
+    const instruction = (ib.value || '').trim(); if(!instruction){ ib.focus(); return; }
+    const box = document.getElementById('stmt-text'); const btn = document.getElementById('stmt-instruct-btn'); const note = document.getElementById('stmt-instruct-note'); const err = document.getElementById('stmt-err'); const status = document.getElementById('stmt-status-row'); const sendBtn = document.getElementById('stmt-send-btn');
+    if(btn.disabled) return;
+    if(!state.currentUser){ note.textContent = 'AI rewrites run on your live company workspace — sign in to use them.'; note.style.color = '#B23A2E'; return; }
+    const before = box.value; err.style.display = 'none';
+    btn.disabled = true; btn.textContent = 'Rewriting…'; sendBtn.disabled = true; box.readOnly = true;
+    document.getElementById('stmt-status-text').textContent = 'Rewriting the draft with your instructions…'; status.style.display = 'flex';
+    try{
+      const prompt = buildStatementPrompt(ctx.g, ctx.invoices) + `\n\nThe collections coordinator already has a draft of this email and wants it changed:\n\n<current_draft>\n${before.slice(0, 4000)}\n</current_draft>` + instructionBlock(instruction) + `\n\nReturn only the revised email body, ending with a closing line and no signature. Keep the full invoice list with its exact numbers, dates and amounts.`;
+      const r = await fetch('/api/ai-draft', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, maxTokens: 1500, draftType: 'followup' }) });
+      const d = await r.json();
+      if(!d || !d.ok || !d.text) throw new Error((d && d.error) || 'No draft returned.');
+      if(stmtDraftCtx !== ctx) return;
+      box.value = String(d.text).trim();
+      note.textContent = 'Rewritten: “' + instruction + '” — review it, edit by hand, or give another instruction.'; note.style.color = '';
+    }catch(e){
+      if(stmtDraftCtx === ctx) box.value = before;
+      err.innerHTML = '<b>The AI couldn’t rewrite this draft right now.</b> Your draft is unchanged. ' + hEsc((e && e.message) || ''); err.style.display = 'block';
+    }finally{ btn.disabled = false; btn.textContent = 'Rewrite'; sendBtn.disabled = false; box.readOnly = false; status.style.display = 'none'; }
+  }
+  function stmtToList(){ return String(document.getElementById('stmt-to').value || '').split(/[,;]/).map(function(a){ return a.trim(); }).filter(function(a){ return a && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a); }); }
+  // Demo workspaces: record the statement send on every invoice locally, with
+  // the same "Accounts tab" marking the server writes for real companies.
+  function recordStatementSendLocal(inv, text, subject, n, to){
+    const now = new Date();
+    inv.followups = (inv.followups || 0) + 1;
+    inv.lastContact = localDay(now);
+    inv.responded = 'sent';
+    inv.lastFollowUpAt = now.toISOString();
+    inv.lastFollowUpBy = ((state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || 'You') + ' (Accounts tab)';
+    inv.lastFollowUpKind = 'statement';
+    inv.currentlyWith = inv.payer === 'pm' ? 'pm' : 'homeowner';
+    addActivity(inv, 'Account Statement (' + n + ' invoice' + (n === 1 ? '' : 's') + ') sent to ' + to + ' from the Accounts tab' + (subject ? ' (subject: ' + subject + ')' : '') + '.', 'manual', 'skip');
+    state.commsLog.unshift({ invoiceId: inv.id, invoiceName: inv.name, amount: inv.amount, sentAt: fmtDate(now), draftType: 'Account Statement', fromAccounts: true, status: 'sent', source: 'manual', recipient: 'Point of Contact', sentBy: (state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || 'You', subject: subject || null, preview: (text || '').slice(0, 100), body: text || '', sentTs: now.toISOString() });
+  }
+  async function sendStatement(){
+    const ctx = stmtDraftCtx; if(!ctx) return;
+    const btn = document.getElementById('stmt-send-btn'); const err = document.getElementById('stmt-err');
+    const to = stmtToList(); const body = (document.getElementById('stmt-text').value || '').trim(); const subject = (document.getElementById('stmt-subject').value || '').trim() || ('Account Statement - ' + ctx.g.name);
+    err.style.display = 'none';
+    if(!to.length){ err.textContent = 'Enter at least one valid email address in To.'; err.style.display = 'block'; document.getElementById('stmt-to').focus(); return; }
+    if(!body){ err.textContent = 'The message is empty.'; err.style.display = 'block'; return; }
+    btn.disabled = true; btn.textContent = 'Building statement…';
+    try{
+      let pdf = null;
+      if(!ctx.statementId) pdf = await buildStatementPdf(ctx.g, ctx.invoices);
+      btn.textContent = 'Sending…';
+      const n = ctx.invoices.length;
+      if(!state.currentUser){
+        ctx.invoices.forEach(function(inv){ recordStatementSendLocal(inv, body, subject, n, to.join(', ')); });
+        if(pdf){ const st = { id: 'demo-' + Date.now(), customerName: ctx.g.name, fileName: pdf.fileName, invoiceCount: n, total: pdf.total, createdAt: new Date().toISOString(), createdBy: 'You', sentAt: new Date().toISOString(), sentTo: to.join(', '), blob: pdf.blob }; state.demoStatements = state.demoStatements || []; state.demoStatements.unshift(st); }
+        saveState(); renderAll();
+        stmtDraftCtx = null; document.getElementById('overlay-statement').classList.remove('open');
+        showToast('Account Statement sent to ' + to.join(', ') + ' for ' + ctx.g.name + ' (' + n + ' invoice' + (n === 1 ? '' : 's') + ')');
+        if(acctPanelKey){ loadAccountStatements(ctx.g.name); renderAccountPanel(); document.getElementById('overlay-account').classList.add('open'); }
+        return;
+      }
+      const payload = { customerName: ctx.g.name, accountIds: ctx.invoices.map(function(i){ return i.id; }), to: to.join(', '), cc: document.getElementById('stmt-cc').value || '', subject: subject, body: body, localDate: localDay(), recipient: 'contact' };
+      if(ctx.statementId) payload.statementId = ctx.statementId; else { payload.pdfBase64 = pdf.base64; payload.fileName = pdf.fileName; }
+      const r = await fetch('/api/accounts/send-statement', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const d = await r.json();
+      if(!d || !d.ok){
+        const needsEmail = !!(d && (d.code === 'connect_email' || d.needsReconnect));
+        err.innerHTML = '<b>Nothing was sent.</b> ' + hEsc((d && d.error) || 'The email could not be sent.') + (needsEmail ? ' <a class="btn-small" href="/account#email" style="margin-left:8px;text-decoration:none;">Connect my email</a>' : ''); err.style.display = 'block';
+        return;
+      }
+      // Reflect it on every invoice right away; the reload brings the server's copy.
+      ctx.invoices.forEach(function(inv){ recordStatementSendLocal(inv, body, subject, n, d.to || to.join(', ')); historyInvalidate(inv.id); });
+      saveState(); quietRender(renderAll);
+      stmtDraftCtx = null; document.getElementById('overlay-statement').classList.remove('open');
+      showToast('Account Statement sent to ' + (d.to || to.join(', ')) + ' for ' + ctx.g.name + ' — logged on ' + n + ' invoice' + (n === 1 ? '' : 's'));
+      loadRealAccounts();
+      if(acctPanelKey){ loadAccountStatements(ctx.g.name); renderAccountPanel(); document.getElementById('overlay-account').classList.add('open'); }
+    }catch(e){ err.textContent = 'The statement could not be sent: ' + ((e && e.message) || e); err.style.display = 'block'; }
+    finally{ btn.disabled = false; btn.innerHTML = 'Approve &amp; Send with statement'; }
+  }
+
+  /* ============================================================
      ESCALATIONS
      ============================================================ */
   // Escalations: a summary strip plus search and filters (city, business,
@@ -5452,8 +6026,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         document.getElementById('detail-tracker-facts').innerHTML =
           kv('Business', hEsc(deptLabel(inv))) +
           kv('Invoice age', agingDays(inv) + ' days') +
-          kv('Last contact', inv.lastContact ? fmtDate(inv.lastContact) : 'None yet', !inv.lastContact) +
-          kv('Last follow-up', inv.lastFollowUpAt ? (fmtDate(followUpDay(inv.lastFollowUpAt)) + (inv.lastFollowUpBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.lastFollowUpBy) + '</div>' : '')) : 'None yet', !inv.lastFollowUpAt) +
+          kv('Last contact', inv.lastContact ? fmtDate(inv.lastContact) + fromAccountsBadge(inv) : 'None yet', !inv.lastContact) +
+          kv('Last follow-up', inv.lastFollowUpAt ? (fmtDate(followUpDay(inv.lastFollowUpAt)) + fromAccountsBadge(inv) + (inv.lastFollowUpBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(fromAccountsName(inv.lastFollowUpBy)) + '</div>' : '')) : 'None yet', !inv.lastFollowUpAt) +
           kv('Projected collection', inv.projectedPaymentDate ? fmtDate(inv.projectedPaymentDate) : 'Not set', !inv.projectedPaymentDate) +
           kv('Payment type', hEsc(PAYMENT_TYPE_LABELS[inv.paymentType] || PAYMENT_METHOD_LABELS[inv.paymentType] || inv.paymentType || 'Not set'), !inv.paymentType) +
           kv('Notes', inv.note ? hEsc(inv.note).replace(/\n/g, '<br>') : 'None', !inv.note) +
@@ -6014,7 +6588,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Balance due', hMoney(balance), balance > 0 ? '' : 'muted') +
       tile('Status', hEsc(STATUS_LABELS[a.status] || a.status || '—')) +
       tile('Invoice date', hDate(a.invoicedAt) + (a.invoicedAt ? (' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.invoicedAt) + 'd)</span>') : '')) +
-      tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>') : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
+      tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>' + fromAccountsBadge(a)) : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
       tile('Follow-ups sent', String(a.followUpCount || 0), '', 'followups') +
       lastDayTile +
       (TENANT_DEPTS_CUSTOM ? tile('Work Authorization signed', a.waSignedAt ? ('Signed <span style="font-weight:400;color:var(--slate-soft);">' + hDate(a.waSignedAt) + '</span>') : 'Not signed', a.waSignedAt ? '' : 'muted', 'waSignedDate') : dateTile('Work Authorization signed', a.waSignedAt, 'waSignedDate')) +
@@ -6028,7 +6602,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Contact', hEsc(a.contact || '—') + (a.contactEmail ? ('<div style="font-weight:400;font-size:12px;">' + hEsc(a.contactEmail) + '</div>') : ''), '', 'contact') +
       (TENANT_DEPTS_CUSTOM ? (
         tile('Point of contact', a.contactInfo ? hEsc(a.contactInfo).replace(/\n/g, '<br>') : 'Not on file', a.contactInfo ? '' : 'muted', 'contactInfo') +
-        tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(a.lastFollowUpBy) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted', 'lastFollowUpAt') +
+        tile('Last follow-up', a.lastFollowUpAt ? (hDate(a.lastFollowUpAt) + fromAccountsBadge(a) + (a.lastFollowUpBy ? ('<div style="font-weight:400;font-size:12px;">by ' + hEsc(fromAccountsName(a.lastFollowUpBy)) + '</div>') : '')) : 'None yet', a.lastFollowUpAt ? '' : 'muted', 'lastFollowUpAt') +
         tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted', 'paymentType') +
         tile('Notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted', 'note') +
         tile('Note time', noteStamp(inv) ? noteStampHTML(inv) : 'No note on file', noteStamp(inv) ? '' : 'muted') +
@@ -7230,7 +7804,8 @@ Hard rules - these override everything above:
     'overlay-response': closeResponseSeen, 'overlay-payment': closePaymentForm,
     'overlay-preview': closePreview, 'overlay-integration': closeAddIntegration,
     'overlay-invite': function(){ if(typeof closeInviteTeamMember === 'function') closeInviteTeamMember(); },
-    'overlay-escalate': closeEscalateBox
+    'overlay-escalate': closeEscalateBox,
+    'overlay-account': closeAccountPanel, 'overlay-statement': closeStatementDraft
   };
   document.addEventListener('keydown', function(e){
     if(e.key !== 'Escape' || e.defaultPrevented) return;
