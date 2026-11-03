@@ -1074,6 +1074,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     $('rptPreview').addEventListener('click', function(e){ var b = e.target && e.target.closest ? e.target.closest('[data-dl]') : null; if(!b) return; var k = b.getAttribute('data-dl'); if(k === 'pdf') exportPdf(); else if(k === 'xlsx') exportXlsx(); else exportCsv(); });
     // Arriving from the dashboard's Reports link opens this tab directly.
     if(window.location.hash === '#reports'){ var tab = document.querySelector('.acct-tab[data-tab="reports"]'); if(tab) setTimeout(function(){ tab.click(); }, 0); }
+    // The dashboard's "Edit signature" link lands on the user's own messaging identity.
+    if(window.location.hash === '#identity'){ var ftab = document.querySelector('.acct-tab[data-tab="frequency"]'); if(ftab) setTimeout(function(){ ftab.click(); var card = document.getElementById('identityCard'); if(card && card.scrollIntoView) card.scrollIntoView({ block: 'start' }); }, 300); }
     document.querySelectorAll('[data-rpt-range]').forEach(function(b){ b.addEventListener('click', function(){ presetRange(b.getAttribute('data-rpt-range')); }); });
     fetch('/api/me', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){ if(d && d.ok){ R.me = d; fillSelects(); } }).catch(function(){});
   }
@@ -1353,14 +1355,21 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="freq-note">Accounts you mark Do Not Contact or escalate to a teammate are removed from all automation immediately, whatever the cadence above says. Customers who opt out are removed from all future automation immediately and flagged here for manual follow-up. This cannot be overridden by the cadence settings above.</div> ' +
   '</div> ' +
   ' ' +
-  '<div class="acct-card"> ' +
-  '<h3>Messaging identity</h3> ' +
-  '<div class="acct-card-sub">What customers see when a message arrives.</div> ' +
+  '<div class="acct-card" id="identityCard"> ' +
+  '<h3>My messaging identity</h3> ' +
+  '<div class="acct-card-sub">Yours alone &mdash; every teammate has their own. This signature is added to every email sent from your account: the ones you send from the dashboard and the automated follow-ups you switch on.</div> ' +
   '<div class="acct-grid"> ' +
-  '<div class="acct-field"><label>Sender name (signature)</label><input type="text" id="senderName" placeholder="Accounts Receivable" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
-  '<div class="acct-field"><label>Replies go to</label><input type="email" id="replyTo" placeholder="ar@yourcompany.com" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
+  '<div class="acct-field"><label>Sender name</label><input type="text" id="senderName" maxlength="120" placeholder="Your full name" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
+  '<div class="acct-field"><label>Title</label><input type="text" id="senderTitle" maxlength="120" placeholder="Accounts Receivable Coordinator" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
+  '<div class="acct-field"><label>Phone</label><input type="tel" id="senderPhone" maxlength="40" placeholder="(214) 555-0100" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
+  '<div class="acct-field"><label>Replies go to</label><input type="email" id="replyTo" placeholder="Your email address" style="width:100%;font-family:inherit;font-size:14.5px;padding:9px 11px;border:1.5px solid #E5E0D2;border-radius:8px;"></div> ' +
   '</div> ' +
-  '<div class="freq-note">Every follow-up, NOIL, and demand letter is sent and signed as your company. Customers never see the clAIms platform name in a message as the signature in the footnote.</div> ' +
+  '<div style="margin-top:14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#615D53;">Signature preview</div> ' +
+  '<div id="identityPreview" style="margin-top:6px;padding:12px 14px;border:1px dashed #E5E0D2;border-radius:8px;background:#FBFAF6;font-size:13.5px;line-height:1.5;white-space:pre-line;"></div> ' +
+  '<div class="freq-note">Every follow-up, NOIL, and demand letter is signed by you and your company. Customers never see the clAIms platform name in a message.</div> ' +
+  '<div id="identitySavedNote" style="display:none;font-size:12.5px;color:#1E5245;margin-top:10px;">&#10003; Saved &mdash; your signature is on every email you send from now on.</div> ' +
+  '<div id="identityErrNote" style="display:none;font-size:12.5px;color:#B3261E;margin-top:10px;"></div> ' +
+  '<div style="display:flex;justify-content:flex-end;margin-top:12px;"><button class="btn-dark" id="identitySaveBtn">Save my identity</button></div> ' +
   '</div> ' +
   ' ' +
   '<div id="freqSavedNote" style="display:none;font-size:12.5px;color:#1E5245;margin-bottom:14px;">&#10003; Saved</div> ' +
@@ -1685,9 +1694,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    freqSet("quietEnd",function(el){ el.value=f.quietEnd||""; }); ' +
   '    freqSet("maxPerWeek",function(el){ el.value=f.maxPerWeek||2; }); ' +
   '    freqSet("timeZone",function(el){ el.value=f.timeZone||"America/Chicago"; if(el.value!==(f.timeZone||"America/Chicago")){ var o=document.createElement("option"); o.value=f.timeZone; o.textContent=f.timeZone; el.appendChild(o); el.value=f.timeZone; } }); ' +
-  '    freqSet("senderName",function(el){ el.value=f.senderName||""; }); ' +
-  '    freqSet("replyTo",function(el){ el.value=f.replyTo||""; }); ' +
-  '    ["cadenceEnabled","requireReview","noilEnabled","noilDay","demandEnabled","demandDay","quietStart","quietEnd","maxPerWeek","timeZone","senderName","replyTo"].forEach(function(id){ ' +
+  '    renderIdentity(); ' +
+  '    ["cadenceEnabled","requireReview","noilEnabled","noilDay","demandEnabled","demandDay","quietStart","quietEnd","maxPerWeek","timeZone"].forEach(function(id){ ' +
   '      freqSet(id,function(el){ el.disabled=!canEdit; }); ' +
   '    }); ' +
   '    document.getElementById("freqActions").style.display=canEdit?"flex":"none"; ' +
@@ -1706,6 +1714,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '          maxPerWeek:parseInt(document.getElementById("maxPerWeek").value,10)||2, ' +
   '          timeZone:document.getElementById("timeZone").value, ' +
   '          senderName:document.getElementById("senderName").value, ' +
+  '          senderTitle:document.getElementById("senderTitle").value, ' +
+  '          senderPhone:document.getElementById("senderPhone").value, ' +
   '          replyTo:document.getElementById("replyTo").value ' +
   '        }; ' +
   '        var note=document.getElementById("freqSavedNote"); var err=document.getElementById("freqErrNote"); ' +
@@ -1720,6 +1730,41 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      saveBtn.dataset.wired="1"; ' +
   '    } ' +
   '  } ' +
+  '  function identityPreviewText(){ ' +
+  '    var me=state.me||{}; function v(id){ var el=document.getElementById(id); return el?String(el.value||"").trim():""; } ' +
+  '    var name=v("senderName")||me.fullName||(me.email?String(me.email).split("@")[0]:"Accounts Receivable"); ' +
+  '    var lines=[name]; var t=v("senderTitle"); if(t) lines.push(t); ' +
+  '    var co=String(me.companyName||"").trim(); if(co && co.toLowerCase()!==name.toLowerCase()) lines.push(co); ' +
+  '    var c=[]; var ph=v("senderPhone"); if(ph) c.push(ph); var em=v("replyTo")||me.email||""; if(em) c.push(em); if(c.length) lines.push(c.join("  |  ")); ' +
+  '    return "Thank you,\\n\\n"+lines.join("\\n"); ' +
+  '  } ' +
+  '  function updateIdentityPreview(){ var el=document.getElementById("identityPreview"); if(el) el.textContent=identityPreviewText(); } ' +
+  '  function renderIdentity(){ ' +
+  '    var f=state.freq||{}; ' +
+  '    freqSet("senderName",function(el){ el.value=f.senderName||""; el.disabled=false; }); ' +
+  '    freqSet("senderTitle",function(el){ el.value=f.senderTitle||""; el.disabled=false; }); ' +
+  '    freqSet("senderPhone",function(el){ el.value=f.senderPhone||""; el.disabled=false; }); ' +
+  '    freqSet("replyTo",function(el){ el.value=f.replyTo||""; el.disabled=false; }); ' +
+  '    ["senderName","senderTitle","senderPhone","replyTo"].forEach(function(id){ freqSet(id,function(el){ if(!el.dataset.wired){ el.addEventListener("input",updateIdentityPreview); el.dataset.wired="1"; } }); }); ' +
+  '    updateIdentityPreview(); ' +
+  '    var btn=document.getElementById("identitySaveBtn"); ' +
+  '    if(btn && !btn.dataset.wired){ ' +
+  '      btn.addEventListener("click",function(){ ' +
+  '        var note=document.getElementById("identitySavedNote"); var err=document.getElementById("identityErrNote"); ' +
+  '        note.style.display="none"; err.style.display="none"; ' +
+  '        var rt=String(document.getElementById("replyTo").value||"").trim(); ' +
+  '        if(rt && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(rt)){ err.textContent="Enter a valid email address for replies, or leave it blank to use your own."; err.style.display="block"; return; } ' +
+  '        var payload={ senderName:document.getElementById("senderName").value, senderTitle:document.getElementById("senderTitle").value, senderPhone:document.getElementById("senderPhone").value, replyTo:rt }; ' +
+  '        btn.disabled=true; btn.textContent="Saving…"; ' +
+  '        fetch("/api/cadence-settings",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ ' +
+  '          btn.disabled=false; btn.textContent="Save my identity"; ' +
+  '          if(d&&d.ok&&d.settings){ applyFreq(d.settings); renderIdentity(); if(d.warning){ err.textContent=d.warning; err.style.display="block"; } else { note.style.display="block"; setTimeout(function(){ note.style.display="none"; },3000); } } ' +
+  '          else { err.textContent=(d&&d.error)||"Could not save your identity."; err.style.display="block"; } ' +
+  '        }).catch(function(){ btn.disabled=false; btn.textContent="Save my identity"; err.textContent="Could not save your identity."; err.style.display="block"; }); ' +
+  '      }); ' +
+  '      btn.dataset.wired="1"; ' +
+  '    } ' +
+  '  } ' +
   '  function applyFreq(row){ ' +
   '    row=row||{}; ' +
   '    state.freq={ ' +
@@ -1727,7 +1772,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      days:(Array.isArray(row.contact_days)?row.contact_days:[1,3,5,7,10,15,25]).map(function(d){return parseInt(d,10);}).filter(function(d){return d>=1&&d<=30;}), ' +
   '      noilDay:row.noil_day||null, demandDay:row.demand_letter_day||null, ' +
   '      quietStart:row.quiet_start||"", quietEnd:row.quiet_end||"", maxPerWeek:row.max_per_week||2, ' +
-  '      timeZone:row.time_zone||"America/Chicago", senderName:row.sender_name||"", replyTo:row.reply_to||"" ' +
+  '      timeZone:row.time_zone||"America/Chicago", senderName:row.sender_name||"", senderTitle:row.sender_title||"", senderPhone:row.sender_phone||"", replyTo:row.reply_to||"" ' +
   '    }; ' +
   '  } ' +
   '  function loadFreq(){ ' +
@@ -2094,7 +2139,7 @@ const DEMO_TOUR_SCRIPT = '<script>' +
   '})();' +
   '<' + '/script>';
 
-const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "window.__CLMS_DEMO=true;(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';if(u.indexOf('/api/documents')!==-1){var J=function(o){return Promise.resolve(new Response(JSON.stringify(o),{status:200,headers:{'Content-Type':'application/json'}}));};if(u.indexOf('/api/documents/upload')!==-1){var f=null,k='Other',lb='';try{var B=init&&init.body;if(B&&B.get){f=B.get('file');k=B.get('kind')||'Other';lb=B.get('label')||'';}}catch(e2){}return J({ok:true,demo:true,document:{id:'demo-'+Date.now(),name:(f&&f.name)||'document.pdf',kind:k,label:lb||null,size:(f&&f.size)||0,contentType:(f&&f.type)||null,createdAt:new Date().toISOString(),auto:false}});}if(u.indexOf('/api/documents/delete')!==-1){return J({ok:true,demo:true});}if(u.indexOf('/api/documents/download')!==-1){return J({ok:false,demo:true,error:'Sample document in the demo - not a stored file.'});}return J({ok:true,demo:true,documents:[]});}if(u.indexOf('/api/escalate-notify')!==-1){var MG={arizona:['Maria Chen','maria.chen@example.com'],dallas:['Dana Whitfield','dana.whitfield@example.com'],houston:['James Okafor','james.okafor@example.com'],hill_country:['Sarah Liu','sarah.liu@example.com'],hillcountry:['Sarah Liu','sarah.liu@example.com']};var off='dallas';try{var pb=JSON.parse((init&&init.body)||'{}');off=String(pb.officeLocation||pb.office||'dallas').toLowerCase();}catch(e3){}var mg=MG[off]||MG.dallas;return Promise.resolve(new Response(JSON.stringify({ok:true,sent:true,demo:true,notifiedName:mg[0],notifiedEmail:mg[1]}),{status:200,headers:{'Content-Type':'application/json'}}));}for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
+const DEMO_FETCH_ISOLATION_SCRIPT = '<script>' + "window.__CLMS_DEMO=true;(function(){var _origFetch=window.fetch;var BLOCKED=['/api/me','/api/accounts','/api/integrations','/api/team'];window.fetch=function(input,init){try{var u=(typeof input==='string')?input:(input&&input.url)||'';if(u.indexOf('/api/documents')!==-1){var J=function(o){return Promise.resolve(new Response(JSON.stringify(o),{status:200,headers:{'Content-Type':'application/json'}}));};if(u.indexOf('/api/documents/upload')!==-1){var f=null,k='Other',lb='';try{var B=init&&init.body;if(B&&B.get){f=B.get('file');k=B.get('kind')||'Other';lb=B.get('label')||'';}}catch(e2){}return J({ok:true,demo:true,document:{id:'demo-'+Date.now(),name:(f&&f.name)||'document.pdf',kind:k,label:lb||null,size:(f&&f.size)||0,contentType:(f&&f.type)||null,createdAt:new Date().toISOString(),auto:false}});}if(u.indexOf('/api/documents/delete')!==-1){return J({ok:true,demo:true});}if(u.indexOf('/api/documents/download')!==-1){return J({ok:false,demo:true,error:'Sample document in the demo - not a stored file.'});}return J({ok:true,demo:true,documents:[]});}if(u.indexOf('/api/escalate-notify')!==-1){var MG={arizona:['Maria Chen','maria.chen@example.com'],dallas:['Dana Whitfield','dana.whitfield@example.com'],houston:['James Okafor','james.okafor@example.com'],hill_country:['Sarah Liu','sarah.liu@example.com'],hillcountry:['Sarah Liu','sarah.liu@example.com']};var off='dallas',nt='manager';try{var pb=JSON.parse((init&&init.body)||'{}');off=String(pb.officeLocation||pb.office||'dallas').toLowerCase();nt=String(pb.notify||'manager');}catch(e3){}if(nt==='none'){return Promise.resolve(new Response(JSON.stringify({ok:true,sent:false,skipped:true,demo:true}),{status:200,headers:{'Content-Type':'application/json'}}));}var mg=nt==='admin'?['Alex Rivera','alex.rivera@example.com']:(nt==='user'?[String((pb&&pb.userName)||'Your teammate'),'teammate@example.com']:(MG[off]||MG.dallas));return Promise.resolve(new Response(JSON.stringify({ok:true,sent:true,demo:true,notifiedName:mg[0],notifiedEmail:mg[1]}),{status:200,headers:{'Content-Type':'application/json'}}));}for(var i=0;i<BLOCKED.length;i++){if(u.indexOf(BLOCKED[i])!==-1){return Promise.resolve(new Response(JSON.stringify({ok:false,demo:true}),{status:401,headers:{'Content-Type':'application/json'}}));}}}catch(e){}return _origFetch.apply(this,arguments);};})();" + '</scr' + 'ipt>';
 const DEMO_ACCOUNT_OVERLAY_SCRIPT = '<style> ' +
   '.cdap-trigger{position:fixed;top:16px;right:16px;z-index:99996;background:#171717;color:#fff;border:none;font-family:' + BRAND_FONT_BODY + ';font-weight:600;font-size:12.5px;padding:9px 16px;border-radius:20px;box-shadow:0 8px 20px -8px rgba(23,23,23,0.5);cursor:pointer;} ' +
   '#clmsAcctOverlay{display:none;position:fixed;inset:0;background:#F5F2EA;z-index:999995;overflow-y:auto;font-family:' + BRAND_FONT_BODY + ';color:#171717;} ' +
@@ -5170,7 +5215,7 @@ if (payer === 'pm') return { role: 'pm', label: 'Property Manager' };
 return { role: 'homeowner', label: 'Homeowner' };
 }
 
-function cadenceEmailBody(account, checkpoint, recipient, settings, balance) {
+function cadenceEmailBody(account, checkpoint, recipient, settings, balance, sig) {
 const money = '$' + Number(balance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const who = escapeHtml(recipient.label);
 const name = escapeHtml(account.customer_name || 'your account');
@@ -5195,7 +5240,8 @@ return '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;"
 claimBit +
 '</table>' +
 '<p>If payment has already been sent, please reply with the details and we will reconcile it.</p>' +
-'<p style="margin-top:18px;">Thank you,<br>' + escapeHtml(settings.sender_name || 'Accounts Receivable') + '</p>' +
+'<p style="margin-top:18px;margin-bottom:0;">Thank you,</p>' +
+(sig ? sig.html : '<p style="margin-top:4px;">' + escapeHtml(settings.sender_name || 'Accounts Receivable') + '</p>') +
 '</div>';
 }
 
@@ -5217,10 +5263,12 @@ cadenceOwner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + 
 if (cadenceOwner) {
 cadenceOwner.company_name = cadenceTenant ? cadenceTenant.company_name : null;
 ownerMailbox = await mailboxForUser(env, cadenceOwner);
-if (!ownerMailbox) { try { ownerSender = await resolveSender(env, cadenceOwner); } catch (e) { ownerSender = null; } }
+if (!ownerMailbox) { try { ownerSender = await resolveSender(env, Object.assign({}, cadenceOwner, { full_name: settings.sender_name || cadenceOwner.full_name })); } catch (e) { ownerSender = null; } }
 }
 }
 const ownerHasOwnAddress = !!(ownerMailbox || (ownerSender && ownerSender.ownDomain));
+// The cadence owner's own signature goes on every automated email they send.
+const ownerSig = buildSignature(settings, cadenceOwner || {}, cadenceTenant && cadenceTenant.company_name, ownerMailbox && ownerMailbox.email);
 if (ownSenderRequired && !ownerHasOwnAddress) { summary.skipped = -4; summary.reason = 'no_own_sender'; }
 
 // Accounts marked DO NOT CONTACT (sent to a collections agency) are never
@@ -5301,11 +5349,11 @@ continue;
 const subject = due.kind === 'noil' ? 'Notice of Intent to Lien - ' + (account.customer_name || 'Invoice')
 : due.kind === 'demand_letter' ? 'Demand for payment - ' + (account.customer_name || 'Invoice')
 : 'Outstanding invoice - ' + (account.customer_name || 'Invoice');
-const html = cadenceEmailBody(account, due, recipient, settings, balance);
+const html = cadenceEmailBody(account, due, recipient, settings, balance, ownerSig);
 let result = null;
 try {
 if (ownerMailbox) {
-result = await sendViaMailbox(env, ownerMailbox, { to: to, subject: subject, html: html, fromName: quoteDisplayName(cadenceOwner.full_name || ownerMailbox.email) });
+result = await sendViaMailbox(env, ownerMailbox, { to: to, subject: subject, html: html, fromName: quoteDisplayName(ownerSig.name || cadenceOwner.full_name || ownerMailbox.email) });
 if (result && !result.ok && result.needsReconnect) result = { ok: false, error: 'Connected mailbox needs to be reconnected' };
 } else {
 result = await sendEmail(env, {
@@ -5372,7 +5420,44 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 const row = await pgSelectOne(env, 'cadence_settings',
 'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=*');
-return json({ ok: true, settings: row || Object.assign({ tenant_id: user.tenant_id, user_id: user.id }, CADENCE_DEFAULTS) });
+const settings = row || Object.assign({ tenant_id: user.tenant_id, user_id: user.id }, CADENCE_DEFAULTS);
+return json({ ok: true, settings: settings, signature: buildSignature(settings, user, user.company_name, null).text });
+}
+
+// ---- Per-user messaging identity (signature) --------------------------------
+// Every user has their own: name, title, phone and reply-to live on their own
+// cadence_settings row. The signature goes on every email sent from their
+// account - manual sends from the dashboard and their automated cadence - so a
+// customer always sees who wrote to them. Blank fields fall back to the user's
+// own name and login email, so there is always a signature.
+function buildSignature(settings, user, companyName, mailboxEmail) {
+settings = settings || {}; user = user || {};
+const clean = function (v, max) { return String(v || '').replace(/[\r\n]+/g, ' ').trim().slice(0, max || 120); };
+const email = clean(user.email, 200);
+const name = clean(settings.sender_name) || clean(user.full_name) || (email ? email.split('@')[0] : '') || 'Accounts Receivable';
+const lines = [name];
+const title = clean(settings.sender_title); if (title) lines.push(title);
+const company = clean(companyName); if (company && company.toLowerCase() !== name.toLowerCase()) lines.push(company);
+const contact = [];
+const phone = clean(settings.sender_phone, 40); if (phone) contact.push(phone);
+const replyEmail = clean(settings.reply_to, 200) || clean(mailboxEmail, 200) || email; if (replyEmail) contact.push(replyEmail);
+if (contact.length) lines.push(contact.join('  |  '));
+const html = '<div style="margin-top:18px;line-height:1.5;color:#171717;font-family:Arial,sans-serif;font-size:14px;">' +
+'<strong>' + escapeHtml(lines[0]) + '</strong>' +
+lines.slice(1).map(function (l) { return '<br><span style="color:#615D53;">' + escapeHtml(l) + '</span>'; }).join('') + '</div>';
+return { name: name, lines: lines, text: lines.join('\n'), html: html };
+}
+// The body a user approved, plus their signature (once - a body that already
+// carries it is left alone).
+function bodyWithSignature(text, sig) {
+const flat = function (v) { return String(v || '').replace(/\s+/g, ' ').trim().toLowerCase(); };
+const already = flat(text).indexOf(flat(sig.text)) !== -1;
+return '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;">' +
+'<div style="white-space:pre-wrap;">' + escapeHtml(text) + '</div>' + (already ? '' : sig.html) + '</div>';
+}
+async function senderSettingsFor(env, user) {
+try { return await pgSelectOne(env, 'cadence_settings', 'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=*'); }
+catch (e) { return null; }
 }
 async function handleCadenceSettingsSave(request, env) {
 const user = await getSessionUser(request, env);
@@ -5403,6 +5488,8 @@ let okTz = false; try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); okTz
 if (okTz) patch.time_zone = tz;
 }
 if (body.senderName !== undefined) patch.sender_name = String(body.senderName || '').replace(/[\r\n]/g, ' ').trim().slice(0, 120) || null;
+if (body.senderTitle !== undefined) patch.sender_title = String(body.senderTitle || '').replace(/[\r\n]/g, ' ').trim().slice(0, 120) || null;
+if (body.senderPhone !== undefined) patch.sender_phone = String(body.senderPhone || '').replace(/[\r\n]/g, ' ').replace(/[^0-9+()\-.\sxX#]/g, '').trim().slice(0, 40) || null;
 if (body.replyTo !== undefined) {
 const rt = String(body.replyTo || '').trim().toLowerCase();
 patch.reply_to = rt && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rt) ? rt : null;
@@ -5412,14 +5499,23 @@ return json({ ok: false, error: 'Only an admin can switch the automated cadence 
 }
 const existing = await pgSelectOne(env, 'cadence_settings',
 'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=id');
-if (existing) {
-await pgUpdate(env, 'cadence_settings', 'id=' + pgEq(existing.id), patch);
-} else {
-await pgInsert(env, 'cadence_settings', Object.assign({}, CADENCE_DEFAULTS, patch, { tenant_id: user.tenant_id, user_id: user.id }));
+const write = async function (p) {
+if (existing) await pgUpdate(env, 'cadence_settings', 'id=' + pgEq(existing.id), p);
+else await pgInsert(env, 'cadence_settings', Object.assign({}, CADENCE_DEFAULTS, p, { tenant_id: user.tenant_id, user_id: user.id }));
+};
+let warning = null;
+try { await write(patch); }
+catch (e) {
+// Title and phone need two columns on cadence_settings. Until they exist the
+// rest of the identity still saves, and the person is told what did not.
+if (!/sender_title|sender_phone/.test(String(e && e.message))) throw e;
+const rest = Object.assign({}, patch); delete rest.sender_title; delete rest.sender_phone;
+await write(rest);
+warning = 'Saved your name and reply-to address. Title and phone could not be saved yet - the database needs a quick update (sender_title, sender_phone columns).';
 }
 const row = await pgSelectOne(env, 'cadence_settings',
 'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=*');
-return json({ ok: true, settings: row });
+return json({ ok: true, settings: row, warning: warning, signature: buildSignature(row, user, user.company_name, null).text });
 }
 
 async function runCadenceSweep(env) {
@@ -5752,14 +5848,19 @@ if (!text) return json({ ok: false, error: 'The message is empty.' }, 400);
 const subject = String(body.subject || ('Outstanding invoice - ' + (full.customer_name || ''))).slice(0, 200);
 const draftType = String(body.draftType || 'followup').slice(0, 40);
 
-const sender = await resolveSender(env, user);
-const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;white-space:pre-wrap;">' +
-escapeHtml(text) + '</div>';
+// The sender's own messaging identity: their display name on the From line and
+// their signature under the message, on every email sent from their account.
+const idSettings = await senderSettingsFor(env, user) || {};
+const idUser = Object.assign({}, user, { full_name: idSettings.sender_name || user.full_name });
+const sender = await resolveSender(env, idUser);
+if (idSettings.reply_to) sender.replyTo = idSettings.reply_to;
+const mailbox = await mailboxForUser(env, user);
+const sig = buildSignature(idSettings, user, user.company_name, mailbox && mailbox.email);
+const html = bodyWithSignature(text, sig);
 
 let result = null;
 let sentVia = 'platform';
 const attach = await loadSendAttachments(env, user, account.id, body.documentIds);
-const mailbox = await mailboxForUser(env, user);
 // Own-sender companies never send from the clAIms address, not even with the
 // user's name on it: the user connects their mailbox first.
 if (!mailbox && !sender.ownDomain && requiresOwnSender(user)) {
@@ -5769,7 +5870,7 @@ if (mailbox) {
 // Goes out through the user's own mailbox: genuinely from them, and a copy
 // lands in their Sent folder.
 result = await sendViaMailbox(env, mailbox, {
-to: toList, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(user.full_name || mailbox.email), attachments: attach.attachments
+to: toList, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(sig.name || user.full_name || mailbox.email), attachments: attach.attachments
 });
 if (result && result.ok) { sentVia = 'mailbox'; }
 else {
@@ -8997,9 +9098,12 @@ const invoiceName = String(body.invoiceName || 'An invoice').slice(0, 200);
 const amount = Number(body.amount) || 0;
 const officeLabel = String(body.officeLabel || '').slice(0, 100);
 const departmentLabel = String(body.departmentLabel || '').slice(0, 100);
-// Resolve the recipient from the tenant's own user list rather than trusting
-// an address supplied by the browser. Prefer a manager in the invoice's office,
-// then an admin in that office, then any admin on the account.
+// Who to notify is the escalating user's choice - the office manager, an
+// admin, a specific teammate, or nobody - but the address is always resolved
+// from the company's own user list, never taken from the browser.
+const notify = ['manager', 'admin', 'user', 'none'].indexOf(String(body.notify || '')) !== -1 ? String(body.notify) : 'manager';
+const note = String(body.note || '').replace(/\r/g, '').trim().slice(0, 1000);
+if (notify === 'none') return json({ ok: true, sent: false, skipped: true });
 const officeKey = String(body.office || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 const roster = await pgSelect(env, 'users',
 'tenant_id=' + pgEq(user.tenant_id) + '&status=' + pgEq('active') +
@@ -9009,15 +9113,21 @@ const sameOffice = function (u) {
 return String(u.office || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') === officeKey;
 };
 const withEmail = roster.filter(function (u) { return u.email; });
-const recipient =
-withEmail.find(function (u) { return u.role === 'manager' && sameOffice(u) && u.id !== user.id; }) ||
-withEmail.find(function (u) { return u.role === 'admin' && sameOffice(u) && u.id !== user.id; }) ||
-withEmail.find(function (u) { return u.role === 'admin' && u.id !== user.id; }) ||
-withEmail.find(function (u) { return u.role === 'manager' && sameOffice(u); }) ||
-withEmail.find(function (u) { return u.role === 'admin'; }) ||
-null;
-if (!recipient) {
-return json({ ok: false, error: 'No active manager or admin is set up to receive escalations.' });
+const pick = function (role) {
+return withEmail.find(function (u) { return u.role === role && sameOffice(u) && u.id !== user.id; }) ||
+withEmail.find(function (u) { return u.role === role && u.id !== user.id; }) ||
+withEmail.find(function (u) { return u.role === role; }) || null;
+};
+let recipient = null;
+if (notify === 'user') {
+recipient = withEmail.find(function (u) { return String(u.id) === String(body.userId); }) || null;
+if (!recipient) return json({ ok: false, error: 'That teammate is not an active user on your account.' });
+} else if (notify === 'admin') {
+recipient = pick('admin');
+if (!recipient) return json({ ok: false, error: 'No active admin is set up to receive escalations.' });
+} else {
+recipient = pick('manager');
+if (!recipient) return json({ ok: false, error: 'No active manager is set up to receive escalations. Choose an admin or a specific teammate instead.' });
 }
 const assigneeEmail = recipient.email;
 const assigneeName = String(recipient.full_name || recipient.email.split('@')[0]).slice(0, 100);
@@ -9025,11 +9135,12 @@ const amountFmt = amount.toLocaleString(undefined, { minimumFractionDigits: 2 })
 const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
 '<h2 style="margin:0 0 12px;">Escalated - Needs Your Attention</h2>' +
 '<p style="margin:0 0 10px;">Hi ' + escapeHtml(assigneeName) + ',</p>' +
-'<p style="margin:0 0 10px;"><strong>' + escapeHtml(invoiceName) + '</strong> ($' + amountFmt + ') was just escalated by ' + escapeHtml(user.email || 'a teammate') + ' at ' + escapeHtml(user.company_name || 'your company') + ' and pulled out of the autonomous follow-up cadence.</p>' +
+'<p style="margin:0 0 10px;"><strong>' + escapeHtml(invoiceName) + '</strong> ($' + amountFmt + ') was just escalated by ' + escapeHtml(user.full_name ? (user.full_name + ' (' + user.email + ')') : (user.email || 'a teammate')) + ' at ' + escapeHtml(user.company_name || 'your company') + ' and pulled out of the autonomous follow-up cadence.</p>' +
 '<table style="border-collapse:collapse;margin:14px 0;">' +
 '<tr><td style="padding:4px 10px 4px 0;color:#615D53;">Office</td><td style="padding:4px 0;font-weight:600;">' + escapeHtml(officeLabel) + '</td></tr>' +
 '<tr><td style="padding:4px 10px 4px 0;color:#615D53;">Department</td><td style="padding:4px 0;font-weight:600;">' + escapeHtml(departmentLabel) + '</td></tr>' +
 '</table>' +
+(note ? '<p style="margin:14px 0 0;"><strong>Note from ' + escapeHtml(user.full_name || user.email || 'your teammate') + ':</strong></p><div style="margin:4px 0 0;padding:10px 12px;background:#F7F5EE;border-radius:6px;white-space:pre-wrap;">' + escapeHtml(note) + '</div>' : '') +
 '<p style="margin:14px 0 0;">Please review this account and follow up directly.</p>' +
 '</div>';
 const result = await sendEmail(env, {
@@ -9041,7 +9152,8 @@ tenantId: user.tenant_id,
 userId: user.id,
 from: OPERATIONS_FROM_EMAIL
 });
-return json({ ok: true, sent: !!result.ok, notifiedName: assigneeName, notifiedEmail: assigneeEmail });
+if (!(result && result.ok)) return json({ ok: false, error: 'The notification email to ' + assigneeName + ' could not be delivered.' });
+return json({ ok: true, sent: true, notifiedName: assigneeName, notifiedEmail: assigneeEmail, notifiedRole: recipient.role });
 }
 
 async function handleLogout(request, env) {
