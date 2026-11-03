@@ -1879,7 +1879,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  function refreshTeam(){ ' +
   '    return fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; } }).catch(function(){}).then(loadTeam).then(function(){ renderTeamTab(); }); ' +
   '  } ' +
-  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active" }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db);n.textContent="A copy of everything you send is saved in your own Sent folder.";return;} var ownOnly=!!(state.me&&state.me.requireOwnSender); if(mb){s.textContent=mb.email+" needs to be reconnected."+(ownOnly?" Until then nothing sends from you, and your automated follow-ups are on hold.":"");s.style.color="#8A1C13";}else{s.textContent=ownOnly?"Not connected. Your company sends every email from its own people, so follow-ups (manual and automated) wait until you connect your email.":"Not connected. Emails send from the clAIms address with your name on them.";s.style.color=ownOnly?"#8A1C13":"";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){var ownOnly=!!(state.me&&state.me.requireOwnSender);if(!confirm(ownOnly?"Disconnect your email? Your company only sends from its own people, so your follow-ups will pause until you connect an email again.":"Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; mbLoad(); if(window.location.hash==="#email"){ var ec=document.getElementById("email"); if(ec){ setTimeout(function(){ ec.scrollIntoView({behavior:"smooth",block:"center"}); },300); } } } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
+  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active" }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db); if(mb.canRead){n.textContent="A copy of everything you send is saved in your own Sent folder, and customer replies to your follow-ups are read automatically (every 5 minutes) and logged on the invoice.";} else {var rb=document.createElement("button");rb.className="btn-dark btn-sm";rb.textContent="Reconnect to capture replies";rb.onclick=function(){mbConnect(mb.provider);};a.appendChild(rb);n.textContent="A copy of everything you send is saved in your own Sent folder. Reconnect once to let clAIms read customer replies to your follow-ups, so Response Summary and Last Contact update on their own.";} return;} var ownOnly=!!(state.me&&state.me.requireOwnSender); if(mb){s.textContent=mb.email+" needs to be reconnected."+(ownOnly?" Until then nothing sends from you, and your automated follow-ups are on hold.":"");s.style.color="#8A1C13";}else{s.textContent=ownOnly?"Not connected. Your company sends every email from its own people, so follow-ups (manual and automated) wait until you connect your email.":"Not connected. Emails send from the clAIms address with your name on them.";s.style.color=ownOnly?"#8A1C13":"";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){var ownOnly=!!(state.me&&state.me.requireOwnSender);if(!confirm(ownOnly?"Disconnect your email? Your company only sends from its own people, so your follow-ups will pause until you connect an email again.":"Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; mbLoad(); if(window.location.hash==="#email"){ var ec=document.getElementById("email"); if(ec){ setTimeout(function(){ ec.scrollIntoView({behavior:"smooth",block:"center"}); },300); } } } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
   '}); ' +
   '})(); ' +
   '</script> ' +
@@ -6273,9 +6273,9 @@ return json({ ok: true, status: status, dnsRecords: (check.data && check.data.re
    --------------------------------------------------------------------------- */
 const MAILBOX_PROVIDERS = {
 google: { authUrl: 'https://accounts.google.com/o/oauth2/v2/auth', tokenUrl: 'https://oauth2.googleapis.com/token',
-scope: 'https://www.googleapis.com/auth/gmail.send openid email', clientIdVar: 'GOOGLE_CLIENT_ID', clientSecretVar: 'GOOGLE_CLIENT_SECRET' },
+scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly openid email', clientIdVar: 'GOOGLE_CLIENT_ID', clientSecretVar: 'GOOGLE_CLIENT_SECRET' },
 microsoft: { authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize', tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-scope: 'offline_access openid email Mail.Send', clientIdVar: 'MS_CLIENT_ID', clientSecretVar: 'MS_CLIENT_SECRET' }
+scope: 'offline_access openid email Mail.Send Mail.Read', clientIdVar: 'MS_CLIENT_ID', clientSecretVar: 'MS_CLIENT_SECRET' }
 };
 function mailboxRedirectUri() { return SITE_URL + '/api/mailbox/callback'; }
 function providerConfigured(env, key) { const p = MAILBOX_PROVIDERS[key]; return !!(p && env[p.clientIdVar] && env[p.clientSecretVar]); }
@@ -6375,7 +6375,7 @@ if (!user) return json({ ok: false }, 401);
 const row = await pgSelectOne(env, 'user_mailboxes', 'user_id=' + pgEq(user.id) + '&select=*');
 return json({ ok: true,
 available: { google: providerConfigured(env, 'google'), microsoft: providerConfigured(env, 'microsoft') },
-mailbox: row ? { provider: row.provider, email: row.email, status: row.status, connectedAt: row.connected_at } : null });
+mailbox: row ? { provider: row.provider, email: row.email, status: row.status, connectedAt: row.connected_at, canRead: mailboxCanRead(row) } : null });
 }
 async function handleMailboxConnect(request, env) {
 const user = await getSessionUser(request, env);
@@ -6565,6 +6565,202 @@ parts.push((a.base64.match(/.{1,76}/g) || []).join(CRLF));
 parts.push('--' + boundary + '--');
 return lines.join(CRLF) + CRLF + CRLF + parts.join(CRLF);
 }
+/* ---------------------------------------------------------------------------
+   Inbound replies
+   Every 5 minutes, each connected mailbox that granted read access is checked
+   for new inbox messages. A message is a reply to clAIms when it sits on a
+   thread clAIms started (Gmail thread / Outlook conversation of the mailbox
+   that sent it) or its References / In-Reply-To cite one of our Message-IDs.
+   The reply is logged on the invoice (or every open invoice on the customer
+   account for statement threads): Response Summary (AI), Responded, Last
+   Contact, a note with the full text, and the activity feed - with nobody
+   pasting anything. Processed messages are recorded in inbound_replies so
+   each one is handled once.
+   --------------------------------------------------------------------------- */
+function mailboxCanRead(mb) {
+const sc = String((mb && mb.scope) || '');
+return mb && mb.provider === 'google' ? sc.indexOf('gmail.readonly') !== -1 || sc.indexOf('gmail.modify') !== -1 : sc.indexOf('Mail.Read') !== -1;
+}
+// The new part of a reply: quoted history and signatures stripped.
+function replyBodyClean(text) {
+const lines = String(text || '').replace(/\r/g, '').split('\n');
+const out = [];
+for (const ln of lines) {
+if (/^\s*>/.test(ln)) continue;
+if (/^\s*On .{4,120} wrote:\s*$/.test(ln) || /^-{2,}\s*Original Message\s*-{2,}/i.test(ln) || /^\s*From:\s.+$/.test(ln) && out.length > 0 || /^_{10,}$/.test(ln)) break;
+out.push(ln);
+}
+return out.join('\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 6000);
+}
+function b64UrlDecodeText(v) {
+try { const b = String(v || '').replace(/-/g, '+').replace(/_/g, '/'); const bin = atob(b + '==='.slice(0, (4 - b.length % 4) % 4)); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); return new TextDecoder().decode(bytes); } catch (e) { return ''; }
+}
+function gmailHeader(msg, name) {
+const hs = (msg && msg.payload && msg.payload.headers) || [];
+const h = hs.find(function (x) { return String(x.name || '').toLowerCase() === name.toLowerCase(); });
+return h ? String(h.value || '') : '';
+}
+function gmailBodyText(msg) {
+let plain = '', html = '';
+const walk = function (part) {
+if (!part) return;
+const mime = String(part.mimeType || '');
+if (part.body && part.body.data) {
+if (mime === 'text/plain' && !plain) plain = b64UrlDecodeText(part.body.data);
+else if (mime === 'text/html' && !html) html = b64UrlDecodeText(part.body.data);
+}
+(part.parts || []).forEach(walk);
+};
+walk(msg && msg.payload);
+return plain || htmlToText(html);
+}
+function messageIdsIn(text) { return (String(text || '').match(/<[^<>\s]+>/g) || []); }
+async function inboundAlreadySeen(env, mb, providerMessageId) {
+try { return !!(await pgSelectOne(env, 'inbound_replies', 'mailbox_email=' + pgEq(mb.email) + '&provider_message_id=' + pgEq(providerMessageId) + '&select=id')); } catch (e) { return true; }
+}
+async function inboundSince(env, mb) {
+try {
+const last = await pgSelectOne(env, 'inbound_replies', 'mailbox_email=' + pgEq(mb.email) + '&select=received_at&order=received_at.desc&limit=1');
+if (last && last.received_at) return new Date(new Date(last.received_at).getTime() - 2 * 3600000);
+} catch (e) {}
+return new Date(Date.now() - 2 * 86400000);
+}
+// Which clAIms thread (if any) an inbox message belongs to.
+function inboundMatch(threads, mb, providerThreadId, headerIds) {
+const ids = {}; (headerIds || []).forEach(function (id) { ids[id] = true; });
+for (const t of threads) {
+if (providerThreadId && t.provider_thread_id && t.mailbox_email && String(t.mailbox_email).toLowerCase() === String(mb.email).toLowerCase() && String(t.provider_thread_id) === String(providerThreadId)) return t;
+const known = [t.first_message_id, t.last_message_id].concat(Array.isArray(t.references_list) ? t.references_list : []);
+if (known.some(function (id) { return id && ids[id]; })) return t;
+}
+return null;
+}
+async function inboundAccountsFor(env, thread) {
+const key = String(thread.thread_key || '');
+if (key.indexOf('inv:') === 0) {
+const a = await pgSelectOne(env, 'accounts', 'id=' + pgEq(key.slice(4)) + '&tenant_id=' + pgEq(thread.tenant_id) + '&select=*');
+return a ? [a] : [];
+}
+if (key.indexOf('acct:') === 0) {
+const ck = key.slice(5);
+const rows = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(thread.tenant_id) + '&status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')&select=*') || [];
+return rows.filter(function (a) { return customerKey(a.customer_name) === ck; });
+}
+return [];
+}
+async function inboundRecord(env, mb, thread, msg) {
+// msg: { providerMessageId, messageId, from, subject, receivedAt, text }
+const accounts = await inboundAccountsFor(env, thread);
+if (!accounts.length) return false;
+try {
+await pgInsert(env, 'inbound_replies', { tenant_id: thread.tenant_id, mailbox_email: mb.email, provider: mb.provider, provider_message_id: msg.providerMessageId, message_id: msg.messageId || null, thread_key: thread.thread_key, from_email: String(msg.from || '').slice(0, 200), subject: String(msg.subject || '').slice(0, 300), received_at: msg.receivedAt, body_text: String(msg.text || '').slice(0, 6000), account_ids: accounts.map(function (a) { return a.id; }) });
+} catch (e) { return false; } // already recorded (unique) or table missing
+const text = replyBodyClean(msg.text) || String(msg.subject || '').trim();
+const when = new Date(msg.receivedAt);
+const day = isNaN(when.getTime()) ? new Date().toISOString().slice(0, 10) : when.toISOString().slice(0, 10);
+const result = await summarizeReplyText(env, text, accounts[0]);
+const fromLabel = String(msg.from || '').replace(/[<>]/g, '').trim();
+for (const a of accounts) {
+await pgUpdate(env, 'accounts', 'id=' + pgEq(a.id), { response_summary: result.summary, responded: 'replied', last_contact: day, updated_at: new Date().toISOString() }).catch(function () {});
+await pgInsert(env, 'account_notes', { occurred_at: isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString(), tenant_id: thread.tenant_id, account_id: a.id,
+body: ('Reply received' + (fromLabel ? ' from ' + fromLabel : '') + (msg.subject ? ' - "' + String(msg.subject).slice(0, 120) + '"' : '') + ':\n\n' + text).slice(0, 4000), author_name: 'clAIms inbox', source: 'reply' }).catch(function () {});
+await logAutomationActivity(env, thread.tenant_id, a, 'response', 'Reply received automatically' + (fromLabel ? ' from ' + fromLabel : '') + ' (' + mb.email + ' inbox): ' + result.summary);
+}
+// The customer's message is now the latest on the thread, so the next send
+// replies to it and stays in the same conversation.
+if (msg.messageId) {
+const refs = (Array.isArray(thread.references_list) ? thread.references_list : []).concat([msg.messageId]).slice(-25);
+try { await pgUpdate(env, 'email_threads', 'id=' + pgEq(thread.id), { last_message_id: msg.messageId, references_list: refs, updated_at: new Date().toISOString() }); } catch (e) {}
+}
+return true;
+}
+async function inboundSweepGmail(env, mb, token, threads) {
+const since = await inboundSince(env, mb);
+const q = 'in:inbox -from:me after:' + Math.floor(since.getTime() / 1000);
+const lr = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=60&q=' + encodeURIComponent(q), { headers: { 'Authorization': 'Bearer ' + token } });
+if (!lr.ok) { console.log('INBOUND_LIST_FAILED google ' + lr.status); return 0; }
+const list = (await lr.json()).messages || [];
+let handled = 0;
+for (const m of list) {
+if (await inboundAlreadySeen(env, mb, m.id)) continue;
+const mr = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/' + m.id + '?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References', { headers: { 'Authorization': 'Bearer ' + token } });
+if (!mr.ok) continue;
+const meta = await mr.json();
+const headerIds = messageIdsIn(gmailHeader(meta, 'In-Reply-To') + ' ' + gmailHeader(meta, 'References'));
+const thread = inboundMatch(threads, mb, meta.threadId, headerIds);
+if (!thread) continue;
+const fr = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/' + m.id + '?format=full', { headers: { 'Authorization': 'Bearer ' + token } });
+if (!fr.ok) continue;
+const full = await fr.json();
+const ok = await inboundRecord(env, mb, thread, {
+providerMessageId: m.id, messageId: (messageIdsIn(gmailHeader(full, 'Message-ID'))[0] || null),
+from: gmailHeader(full, 'From'), subject: gmailHeader(full, 'Subject'),
+receivedAt: full.internalDate ? new Date(Number(full.internalDate)).toISOString() : new Date().toISOString(),
+text: gmailBodyText(full)
+});
+if (ok) handled++;
+}
+return handled;
+}
+async function inboundSweepOutlook(env, mb, token, threads) {
+const since = await inboundSince(env, mb);
+const gh = { 'Authorization': 'Bearer ' + token };
+const url = 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=60&$orderby=receivedDateTime desc&$filter=' + encodeURIComponent('receivedDateTime ge ' + since.toISOString()) + '&$select=id,conversationId,internetMessageId,from,subject,receivedDateTime,internetMessageHeaders';
+const lr = await fetch(url, { headers: gh });
+if (!lr.ok) { console.log('INBOUND_LIST_FAILED microsoft ' + lr.status); return 0; }
+const list = (await lr.json()).value || [];
+let handled = 0;
+for (const m of list) {
+const fromAddr = m.from && m.from.emailAddress ? String(m.from.emailAddress.address || '') : '';
+if (fromAddr && fromAddr.toLowerCase() === String(mb.email).toLowerCase()) continue;
+if (await inboundAlreadySeen(env, mb, m.id)) continue;
+const hdrs = (m.internetMessageHeaders || []).filter(function (h) { return /^(in-reply-to|references)$/i.test(h.name || ''); }).map(function (h) { return h.value; }).join(' ');
+const thread = inboundMatch(threads, mb, m.conversationId, messageIdsIn(hdrs));
+if (!thread) continue;
+const br = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(m.id) + '?$select=uniqueBody,body', { headers: Object.assign({ 'Prefer': 'outlook.body-content-type="text"' }, gh) });
+let text = '';
+if (br.ok) { const b = await br.json(); text = (b.uniqueBody && b.uniqueBody.content) || (b.body && b.body.content) || ''; if (/<[a-z][\s\S]*>/i.test(text)) text = htmlToText(text); }
+const ok = await inboundRecord(env, mb, thread, {
+providerMessageId: m.id, messageId: m.internetMessageId || null,
+from: (m.from && m.from.emailAddress) ? ((m.from.emailAddress.name ? m.from.emailAddress.name + ' ' : '') + '<' + fromAddr + '>') : fromAddr,
+subject: m.subject || '', receivedAt: m.receivedDateTime || new Date().toISOString(), text: text
+});
+if (ok) handled++;
+}
+return handled;
+}
+async function runInboundReplySweep(env) {
+let mailboxes = [];
+try { mailboxes = await pgSelect(env, 'user_mailboxes', 'status=' + pgEq('connected') + '&select=*') || []; } catch (e) { return; }
+for (const mb of mailboxes) {
+if (!mailboxCanRead(mb) || !mb.tenant_id) continue;
+let threads = [];
+try { threads = await pgSelect(env, 'email_threads', 'tenant_id=' + pgEq(mb.tenant_id) + '&select=*&order=updated_at.desc&limit=2000') || []; } catch (e) { threads = []; }
+if (!threads.length) continue;
+let token = null;
+try { token = await mailboxAccessToken(env, mb); } catch (e) { token = null; }
+if (!token) continue;
+try {
+const n = mb.provider === 'google' ? await inboundSweepGmail(env, mb, token, threads) : (mb.provider === 'microsoft' ? await inboundSweepOutlook(env, mb, token, threads) : 0);
+if (n) console.log('INBOUND_REPLIES mailbox=' + mb.email + ' logged=' + n);
+} catch (e) { console.log('INBOUND_SWEEP_FAILED mailbox=' + mb.email + ' ' + String(e && e.message).slice(0, 200)); }
+}
+}
+// Manual "check now" for the signed-in user's own mailbox.
+async function handleInboundCheckNow(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const mb = await mailboxForUser(env, user);
+if (!mb) return json({ ok: false, error: 'Connect your email first.' }, 400);
+if (!mailboxCanRead(mb)) return json({ ok: false, code: 'reconnect', error: 'Reconnect your email once to let clAIms read replies.' }, 409);
+let threads = [];
+try { threads = await pgSelect(env, 'email_threads', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=updated_at.desc&limit=2000') || []; } catch (e) { threads = []; }
+const token = await mailboxAccessToken(env, mb);
+if (!token) return json({ ok: false, error: 'Your connected email needs to be reconnected.', needsReconnect: true }, 400);
+const n = mb.provider === 'google' ? await inboundSweepGmail(env, mb, token, threads) : await inboundSweepOutlook(env, mb, token, threads);
+return json({ ok: true, logged: n });
+}
+
 /* ---------------------------------------------------------------------------
    Email threads
    One conversation per invoice (Invoice Queue follow-ups, demand letters,
@@ -9807,6 +10003,9 @@ return handleStatementDelete(request, env);
 if (url.pathname === '/api/accounts/send-statement' && request.method === 'POST') {
 return handleStatementSend(request, env);
 }
+if (url.pathname === '/api/inbox/check' && request.method === 'POST') {
+return handleInboundCheckNow(request, env);
+}
 if (url.pathname === '/api/sending-domain' && request.method === 'GET') {
 return handleSendingDomainGet(request, env);
 }
@@ -9999,6 +10198,8 @@ if (topOfHour) ctx.waitUntil(runCadenceSweep(env));
 // safety net so nothing waits more than a few minutes), finish first imports,
 // and keep refresh tokens alive.
 ctx.waitUntil(runQuickBooksSweep(env, hour));
+// Customer replies: read every connected inbox for answers to clAIms threads.
+ctx.waitUntil(runInboundReplySweep(env));
 }
 };
 
