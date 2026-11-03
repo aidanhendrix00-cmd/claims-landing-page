@@ -501,6 +501,11 @@
   .stmt-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:12.5px;background:#fff;}
   .stmt-row .n{font-weight:600;color:var(--ink);}
   .stmt-row .m{font-size:11px;color:var(--slate);}
+  .stmt-viewer{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#F0F2F3;height:min(72vh,860px);}
+  .stmt-viewer iframe{display:block;width:100%;height:100%;border:0;background:#fff;}
+  .stmt-viewer .stmt-viewer-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:var(--slate);padding:20px;text-align:center;}
+  .stmt-viewer-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px;}
+  .stmt-viewer-actions .spacer{flex:1;}
   .stmt-row .sp{flex:1;}
   .drawer.wide{max-width:960px;}
   .esc-opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:pointer;background:#fff;}
@@ -1405,6 +1410,20 @@
     <div class="drawer-actions">
       <button class="btn-ghost" onclick="generateStatementDraft(true)">&#8635; Regenerate</button>
       <button class="btn-solid" id="stmt-send-btn" onclick="sendStatement()">Approve &amp; Send with statement</button>
+    </div>
+  </div>
+</div>
+<!-- ===================== STATEMENT VIEWER (Accounts tab · View statement) ===================== -->
+<div class="overlay" id="overlay-stmt-view">
+  <div class="drawer wide" style="max-width:1000px;">
+    <div class="drawer-head"><h3 id="stmt-view-title">Account statement</h3><button class="close" onclick="closeStatementViewer()">Close &times;</button></div>
+    <div class="drawer-sub" id="stmt-view-sub"></div>
+    <div class="stmt-viewer"><iframe id="stmt-view-frame" title="Account statement PDF"></iframe><div class="stmt-viewer-msg" id="stmt-view-msg">Loading statement&hellip;</div></div>
+    <div class="stmt-viewer-actions">
+      <button type="button" class="btn-small" id="stmt-view-dl" onclick="downloadSavedStatement(stmtViewId)">&#8615; Download</button>
+      <button type="button" class="btn-small" id="stmt-view-tab" onclick="openStatementInTab()">Open in new tab</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn-solid" onclick="emailViewedStatement()">Email it</button>
     </div>
   </div>
 </div>
@@ -5508,15 +5527,63 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     if(!acctStatements.length){ el.innerHTML = '<div class="hint" style="margin:0;">No statement reports yet for this account.</div>'; return; }
     el.innerHTML = acctStatements.map(function(st){
       return '<div class="stmt-row"><div><div class="n">' + hEsc(st.fileName) + '</div><div class="m">' + st.invoiceCount + ' invoice' + (st.invoiceCount === 1 ? '' : 's') + ' · $' + Number(st.total || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + ' · created ' + fmtDate(String(st.createdAt || '').slice(0,10)) + (st.createdBy ? ' by ' + hEsc(st.createdBy) : '') + (st.sentAt ? ' · <b>sent ' + fmtDate(String(st.sentAt).slice(0,10)) + (st.sentTo ? ' to ' + hEsc(st.sentTo) : '') + '</b>' : '') + '</div></div><span class="sp"></span>' +
-        '<button class="btn-small" onclick="downloadSavedStatement(' + JSON.stringify(st.id) + ')">Download</button>' +
-        '<button class="btn-small" onclick="openStatementDraft(' + JSON.stringify(st.id) + ')">Email it</button>' +
-        '<button class="btn-small" onclick="deleteSavedStatement(' + JSON.stringify(st.id) + ')" title="Remove this statement report">&times;</button></div>';
+        '<button class="btn-small" data-id="' + hEsc(st.id) + '" onclick="viewSavedStatement(this.dataset.id)">View statement</button>' +
+        '<button class="btn-small" data-id="' + hEsc(st.id) + '" onclick="downloadSavedStatement(this.dataset.id)">Download</button>' +
+        '<button class="btn-small" data-id="' + hEsc(st.id) + '" onclick="openStatementDraft(this.dataset.id)">Email it</button>' +
+        '<button class="btn-small" data-id="' + hEsc(st.id) + '" onclick="deleteSavedStatement(this.dataset.id)" title="Remove this statement report">&times;</button></div>';
     }).join('');
   }
   async function downloadSavedStatement(id){
     const st = acctStatements.find(function(x){ return String(x.id) === String(id); }); if(!st) return;
     if(st.blob){ const a = document.createElement('a'); a.href = URL.createObjectURL(st.blob); a.download = st.fileName; a.click(); return; }
     try{ const r = await fetch('/api/accounts/statements/download?id=' + encodeURIComponent(id), { credentials: 'same-origin' }); const d = await r.json(); if(d && d.ok && d.url){ window.open(d.url, '_blank'); return; } showToast((d && d.error) || 'Could not open that statement.'); }catch(e){ showToast('Could not open that statement.'); }
+  }
+  // View statement: shows the saved PDF inside the dashboard (an iframe on a
+  // same-origin blob URL so the storage host can't refuse to be framed). The
+  // account panel stays open underneath; closing the viewer returns to it.
+  let stmtViewId = null, stmtViewUrl = null, stmtViewObjUrl = null;
+  async function viewSavedStatement(id){
+    const st = acctStatements.find(function(x){ return String(x.id) === String(id); }); if(!st) return;
+    stmtViewId = id; stmtViewUrl = null;
+    if(stmtViewObjUrl){ try{ URL.revokeObjectURL(stmtViewObjUrl); }catch(e){} stmtViewObjUrl = null; }
+    const frame = document.getElementById('stmt-view-frame'), msg = document.getElementById('stmt-view-msg');
+    frame.removeAttribute('src'); msg.style.display = ''; msg.textContent = 'Loading statement\u2026';
+    document.getElementById('stmt-view-title').textContent = st.fileName || 'Account statement';
+    document.getElementById('stmt-view-sub').textContent = (st.customerName || (acctGroup(acctPanelKey) || {}).name || '') + ' \u00b7 ' + st.invoiceCount + ' invoice' + (st.invoiceCount === 1 ? '' : 's') + ' \u00b7 $' + Number(st.total || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + ' \u00b7 created ' + fmtDate(String(st.createdAt || '').slice(0,10)) + (st.createdBy ? ' by ' + st.createdBy : '') + (st.sentAt ? ' \u00b7 sent ' + fmtDate(String(st.sentAt).slice(0,10)) + (st.sentTo ? ' to ' + st.sentTo : '') : '');
+    document.getElementById('overlay-account').classList.remove('open');
+    document.getElementById('overlay-stmt-view').classList.add('open');
+    try{
+      let blob = st.blob || null;
+      if(!blob){
+        const r = await fetch('/api/accounts/statements/download?id=' + encodeURIComponent(id), { credentials: 'same-origin' });
+        const d = await r.json();
+        if(!(d && d.ok && d.url)) throw new Error((d && d.error) || 'Could not open that statement.');
+        stmtViewUrl = d.url;
+        const pr = await fetch(d.url); if(!pr.ok) throw new Error('Could not load the statement file.');
+        blob = await pr.blob();
+      }
+      if(String(stmtViewId) !== String(id)) return;
+      stmtViewObjUrl = URL.createObjectURL(blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' }));
+      frame.src = stmtViewObjUrl + '#toolbar=1&view=FitH';
+      msg.style.display = 'none';
+    }catch(e){
+      msg.style.display = '';
+      msg.textContent = (e && e.message) || 'Could not open that statement.';
+      if(stmtViewUrl){ msg.innerHTML = hEsc(msg.textContent) + ' <a href="#" onclick="openStatementInTab(); return false;">Open it in a new tab instead.</a>'; }
+    }
+  }
+  function openStatementInTab(){
+    if(stmtViewObjUrl){ window.open(stmtViewObjUrl, '_blank'); return; }
+    if(stmtViewUrl){ window.open(stmtViewUrl, '_blank'); return; }
+    if(stmtViewId != null) downloadSavedStatement(stmtViewId);
+  }
+  function emailViewedStatement(){ const id = stmtViewId; document.getElementById('overlay-stmt-view').classList.remove('open'); closeStatementViewer(); openStatementDraft(id); }
+  function closeStatementViewer(){
+    document.getElementById('overlay-stmt-view').classList.remove('open');
+    const frame = document.getElementById('stmt-view-frame'); if(frame) frame.removeAttribute('src');
+    if(stmtViewObjUrl){ const u = stmtViewObjUrl; stmtViewObjUrl = null; setTimeout(function(){ try{ URL.revokeObjectURL(u); }catch(e){} }, 1000); }
+    stmtViewUrl = null;
+    if(acctPanelKey && !document.getElementById('overlay-statement').classList.contains('open')) document.getElementById('overlay-account').classList.add('open');
   }
   async function deleteSavedStatement(id){
     if(!state.currentUser){ state.demoStatements = (state.demoStatements || []).filter(function(x){ return String(x.id) !== String(id); }); acctStatements = acctStatements.filter(function(x){ return String(x.id) !== String(id); }); renderStatementList(); return; }
@@ -7806,7 +7873,8 @@ Hard rules - these override everything above:
     'overlay-preview': closePreview, 'overlay-integration': closeAddIntegration,
     'overlay-invite': function(){ if(typeof closeInviteTeamMember === 'function') closeInviteTeamMember(); },
     'overlay-escalate': closeEscalateBox,
-    'overlay-account': closeAccountPanel, 'overlay-statement': closeStatementDraft
+    'overlay-account': closeAccountPanel, 'overlay-statement': closeStatementDraft,
+    'overlay-stmt-view': closeStatementViewer
   };
   document.addEventListener('keydown', function(e){
     if(e.key !== 'Escape' || e.defaultPrevented) return;
