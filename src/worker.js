@@ -2854,6 +2854,9 @@ return { ok: false, skipped: true };
 }
 try {
 const payload = { from: fromAddr, to: toAll, subject: subject, html: brandEmailHtml(html) };
+const platformMessageId = newMessageId(String(fromAddr).replace(/^.*</, '').replace(/>$/, ''));
+payload.headers = { 'Message-ID': platformMessageId };
+if (opts.thread && opts.thread.inReplyTo) { payload.headers['In-Reply-To'] = opts.thread.inReplyTo; payload.headers['References'] = (opts.thread.references || []).concat([opts.thread.inReplyTo]).filter(function (v, i, a) { return v && a.indexOf(v) === i; }).join(' '); }
 if (opts.cc && opts.cc.length) payload.cc = opts.cc;
 if (opts.attachments && opts.attachments.length) payload.attachments = opts.attachments.map(function (a) { return { filename: a.filename, content: a.base64 }; });
 if (replyTo) payload.reply_to = replyTo;
@@ -2869,7 +2872,7 @@ const ok = res.ok;
 let errText = '';
 if (!ok) errText = await res.text();
 await pgInsert(env, 'email_log', { to_email: to, subject: subject, kind: kind, tenant_id: tenantId || null, user_id: userId || null, status: ok ? 'sent' : 'failed', error: ok ? null : errText.slice(0, 500) });
-return { ok: ok };
+return { ok: ok, messageId: ok ? platformMessageId : null };
 } catch (e) {
 try {
 await pgInsert(env, 'email_log', { to_email: to, subject: subject, kind: kind, tenant_id: tenantId || null, user_id: userId || null, status: 'failed', error: String(e).slice(0, 500) });
@@ -4791,9 +4794,9 @@ async function runQuickBooksSweep(env, centralHour) {
 if (!qboConfigured(env)) return;
 const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
 for (const conn of conns) {
-const importing = conn.cfg.import && conn.cfg.import.phase !== 'done';
-if (importing) await qboRunStep(env, conn, {});
-else if (centralHour === QBO_NIGHTLY_HOUR_CENTRAL) await qboRunStep(env, conn, {});
+// First imports are carried forward; otherwise every firing pulls the
+// changes since the last sync (Intuit's CDC call, one request per company).
+await qboRunStep(env, conn, {});
 }
 }
 
@@ -5370,25 +5373,30 @@ const subject = due.kind === 'noil' ? 'Notice of Intent to Lien - ' + (account.c
 : due.kind === 'demand_letter' ? 'Demand for payment - ' + (account.customer_name || 'Invoice')
 : 'Outstanding invoice - ' + (account.customer_name || 'Invoice');
 const html = cadenceEmailBody(account, due, recipient, settings, balance, ownerSig);
+const cadenceThreadRow = await threadLoad(env, settings.tenant_id, threadKeyInvoice(account.id));
+const cadenceJoin = threadJoin(cadenceThreadRow, ownerMailbox, subject);
+const cadenceSubject = cadenceJoin.subject;
 let result = null;
 try {
 if (ownerMailbox) {
-result = await sendViaMailbox(env, ownerMailbox, { to: to, subject: subject, html: html, fromName: quoteDisplayName(ownerSig.name || cadenceOwner.full_name || ownerMailbox.email) });
+result = await sendViaMailbox(env, ownerMailbox, { to: to, subject: cadenceSubject, html: html, fromName: quoteDisplayName(ownerSig.name || cadenceOwner.full_name || ownerMailbox.email), thread: cadenceJoin.thread });
 if (result && !result.ok && result.needsReconnect) result = { ok: false, error: 'Connected mailbox needs to be reconnected' };
 } else {
 result = await sendEmail(env, {
-to: to, subject: subject, html: html, kind: 'cadence_' + due.kind,
+to: to, subject: cadenceSubject, html: html, kind: 'cadence_' + due.kind,
 tenantId: settings.tenant_id, userId: cadenceOwner ? cadenceOwner.id : undefined,
 from: ownerSender ? ownerSender.from : OPERATIONS_FROM_EMAIL,
-replyTo: settings.reply_to || (ownerSender ? ownerSender.replyTo : undefined) || undefined
+replyTo: settings.reply_to || (ownerSender ? ownerSender.replyTo : undefined) || undefined,
+thread: cadenceJoin.thread
 });
 }
 } catch (e) { result = { ok: false, error: String(e) }; }
+if (result && result.ok) await threadRecord(env, settings.tenant_id, threadKeyInvoice(account.id), ownerMailbox, result, cadenceSubject, cadenceThreadRow);
 
 const commRow = {
 tenant_id: settings.tenant_id, account_id: account.id, cadence_day: due.day,
 kind: due.kind, recipient_role: recipient.role, recipient_email: to,
-subject: subject, status: (result && result.ok) ? 'sent' : 'failed',
+subject: cadenceSubject, status: (result && result.ok) ? 'sent' : 'failed',
 body: String(html || '').slice(0, COMMS_BODY_LIMIT),
 error: (result && result.ok) ? null : String((result && result.error) || 'Send failed')
 };
@@ -5877,6 +5885,10 @@ if (idSettings.reply_to) sender.replyTo = idSettings.reply_to;
 const mailbox = await mailboxForUser(env, user);
 const sig = buildSignature(idSettings, user, user.company_name, mailbox && mailbox.email);
 const html = bodyWithSignature(text, sig);
+// Every email about this invoice goes on one thread.
+const threadRow = await threadLoad(env, user.tenant_id, threadKeyInvoice(account.id));
+const joined = threadJoin(threadRow, mailbox, subject);
+const subjectUsed = joined.subject;
 
 let result = null;
 let sentVia = 'platform';
@@ -5890,7 +5902,7 @@ if (mailbox) {
 // Goes out through the user's own mailbox: genuinely from them, and a copy
 // lands in their Sent folder.
 result = await sendViaMailbox(env, mailbox, {
-to: toList, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(sig.name || user.full_name || mailbox.email), attachments: attach.attachments
+to: toList, cc: ccList, subject: subjectUsed, html: html, fromName: quoteDisplayName(sig.name || user.full_name || mailbox.email), attachments: attach.attachments, thread: joined.thread
 });
 if (result && result.ok) { sentVia = 'mailbox'; }
 else {
@@ -5907,19 +5919,20 @@ return json({ ok: false, error: (result && result.error) || 'Your connected emai
 if (!result) {
 try {
 result = await sendEmail(env, {
-to: toList, cc: ccList, subject: subject, html: html,
+to: toList, cc: ccList, subject: subjectUsed, html: html,
 kind: 'manual_' + draftType,
 tenantId: user.tenant_id, userId: user.id,
-from: sender.from, replyTo: sender.replyTo, attachments: attach.attachments
+from: sender.from, replyTo: sender.replyTo, attachments: attach.attachments, thread: joined.thread
 });
 } catch (e) { result = { ok: false, error: String(e) }; }
 }
 
 const okSent = !!(result && result.ok);
+if (okSent) await threadRecord(env, user.tenant_id, threadKeyInvoice(account.id), mailbox, result, subjectUsed, threadRow);
 await pgInsert(env, 'invoice_comms', {
 tenant_id: user.tenant_id, account_id: account.id, cadence_day: null,
 kind: 'manual_' + draftType, recipient_role: body.recipient || null, recipient_email: to,
-subject: subject, status: okSent ? 'sent' : 'failed',
+subject: subjectUsed, status: okSent ? 'sent' : 'failed',
 body: String(html || '').slice(0, COMMS_BODY_LIMIT),
 error: okSent ? null : String((result && result.error) || 'Send failed')
 });
@@ -5947,10 +5960,10 @@ author_name: user.full_name || user.email, source: 'dashboard'
 await logUserActivity(env, user, full,
 draftType === 'noil' ? 'noil' : (draftType === 'demand' ? 'demand' : 'followup'),
 (draftType === 'noil' ? 'NOIL' : draftType === 'demand' ? 'Demand letter' : 'Follow-up') + ' sent to ' + to +
-(body.recipient ? ' (' + String(body.recipient) + ')' : '') + ' - "' + subject + '"' + (sentVia === 'mailbox' ? ' from their own mailbox' : ''));
+(body.recipient ? ' (' + String(body.recipient) + ')' : '') + ' - "' + subjectUsed + '"' + (sentVia === 'mailbox' ? ' from their own mailbox' : '') + (joined.joined ? ' (reply on the existing thread)' : ''));
 
 const usedMailbox = sentVia === 'mailbox';
-return json({ ok: true, via: sentVia,
+return json({ ok: true, via: sentVia, subject: subjectUsed, threaded: joined.joined,
 sentFrom: usedMailbox ? (mailbox && mailbox.email) : sender.from,
 ownAddress: usedMailbox || sender.ownDomain,
 replyTo: usedMailbox ? (mailbox && mailbox.email) : sender.replyTo, to: to,
@@ -6106,13 +6119,17 @@ const mailbox = await mailboxForUser(env, user);
 const sig = buildSignature(idSettings, user, user.company_name, mailbox && mailbox.email);
 const html = bodyWithSignature(text, sig);
 const attachments = [{ filename: fileName, contentType: 'application/pdf', base64: bytesToBase64(pdfBytes) }];
+// Every statement email to this customer account goes on one thread.
+const acctThreadRow = await threadLoad(env, user.tenant_id, threadKeyAccount(customerName));
+const acctJoin = threadJoin(acctThreadRow, mailbox, subject);
+const subjectUsed = acctJoin.subject;
 
 let result = null; let sentVia = 'platform';
 if (!mailbox && !sender.ownDomain && requiresOwnSender(user)) {
 return json({ ok: false, code: 'connect_email', error: CONNECT_EMAIL_MSG, accountUrl: '/account' }, 409);
 }
 if (mailbox) {
-result = await sendViaMailbox(env, mailbox, { to: toList, cc: ccList, subject: subject, html: html, fromName: quoteDisplayName(sig.name || user.full_name || mailbox.email), attachments: attachments });
+result = await sendViaMailbox(env, mailbox, { to: toList, cc: ccList, subject: subjectUsed, html: html, fromName: quoteDisplayName(sig.name || user.full_name || mailbox.email), attachments: attachments, thread: acctJoin.thread });
 if (result && result.ok) sentVia = 'mailbox';
 else {
 if (result && result.needsReconnect) return json({ ok: false, error: 'Your connected email needs to be reconnected in Account settings.', needsReconnect: true }, 400);
@@ -6121,10 +6138,11 @@ return json({ ok: false, error: (result && result.error) || 'Your connected emai
 }
 if (!result) {
 try {
-result = await sendEmail(env, { to: toList, cc: ccList, subject: subject, html: html, kind: 'manual_statement', tenantId: user.tenant_id, userId: user.id, from: sender.from, replyTo: sender.replyTo, attachments: attachments });
+result = await sendEmail(env, { to: toList, cc: ccList, subject: subjectUsed, html: html, kind: 'manual_statement', tenantId: user.tenant_id, userId: user.id, from: sender.from, replyTo: sender.replyTo, attachments: attachments, thread: acctJoin.thread });
 } catch (e) { result = { ok: false, error: String(e) }; }
 }
 const okSent = !!(result && result.ok);
+if (okSent) await threadRecord(env, user.tenant_id, threadKeyAccount(customerName), mailbox, result, subjectUsed, acctThreadRow);
 const now = new Date();
 const who = String(user.full_name || user.email || '').slice(0, 130);
 // One comm row per invoice, so the Comms Log, Last Follow-Up and every
@@ -6133,7 +6151,7 @@ for (const a of accounts) {
 await pgInsert(env, 'invoice_comms', {
 tenant_id: user.tenant_id, account_id: a.id, cadence_day: null,
 kind: 'manual_statement', recipient_role: body.recipient || 'contact', recipient_email: to,
-subject: subject, status: okSent ? 'sent' : 'failed',
+subject: subjectUsed, status: okSent ? 'sent' : 'failed',
 body: String(html || '').slice(0, COMMS_BODY_LIMIT),
 error: okSent ? null : String((result && result.error) || 'Send failed')
 }).catch(function () {});
@@ -6174,9 +6192,9 @@ tenant_id: user.tenant_id, account_id: a.id,
 body: 'Account Statement (' + accounts.length + ' invoice' + (accounts.length === 1 ? '' : 's') + ') sent to ' + to + ' by ' + who + ' from the Accounts tab.',
 author_name: who, source: 'dashboard'
 }).catch(function () {});
-await logUserActivity(env, user, a, 'followup', 'Account Statement sent from the Accounts tab to ' + to + ' - "' + subject + '" (' + accounts.length + ' invoice' + (accounts.length === 1 ? '' : 's') + ' for ' + customerName + ')' + (sentVia === 'mailbox' ? ' from their own mailbox' : ''));
+await logUserActivity(env, user, a, 'followup', 'Account Statement sent from the Accounts tab to ' + to + ' - "' + subjectUsed + '" (' + accounts.length + ' invoice' + (accounts.length === 1 ? '' : 's') + ' for ' + customerName + ')' + (sentVia === 'mailbox' ? ' from their own mailbox' : ''));
 }
-return json({ ok: true, via: sentVia, to: to, sentFrom: sentVia === 'mailbox' ? (mailbox && mailbox.email) : sender.from, invoices: accounts.length, statement: statementRow ? statementToJson(statementRow) : null });
+return json({ ok: true, via: sentVia, to: to, subject: subjectUsed, threaded: acctJoin.joined, sentFrom: sentVia === 'mailbox' ? (mailbox && mailbox.email) : sender.from, invoices: accounts.length, statement: statementRow ? statementToJson(statementRow) : null });
 }
 
 // Admins register their company's sending domain, get the DNS records to add,
@@ -6514,7 +6532,7 @@ attachments.push({ filename: row.file_name || ('document-' + row.id), contentTyp
 }
 return { attachments: attachments, skipped: skipped };
 }
-function buildMimeMessage(fromName, fromEmail, to, subject, html, cc, attachments) {
+function buildMimeMessage(fromName, fromEmail, to, subject, html, cc, attachments, headers) {
 const CRLF = String.fromCharCode(13) + String.fromCharCode(10);
 const lines = [
 'From: "' + mimeHeaderSafe(fromName).replace(/"/g, '') + '" <' + mimeHeaderSafe(fromEmail) + '>',
@@ -6522,6 +6540,9 @@ const lines = [
 ];
 if (cc && cc.length) lines.push('Cc: ' + cc.map(mimeHeaderSafe).join(', '));
 lines.push('Subject: ' + mimeEncodeSubject(subject));
+// Threading headers (Message-ID, In-Reply-To, References) so every later
+// email on the same invoice or account lands in the same conversation.
+Object.keys(headers || {}).forEach(function (k) { if (headers[k]) lines.push(k + ': ' + mimeHeaderSafe(headers[k])); });
 lines.push('MIME-Version: 1.0');
 if (!attachments || !attachments.length) {
 lines.push('Content-Type: text/html; charset=UTF-8');
@@ -6544,35 +6565,114 @@ parts.push((a.base64.match(/.{1,76}/g) || []).join(CRLF));
 parts.push('--' + boundary + '--');
 return lines.join(CRLF) + CRLF + CRLF + parts.join(CRLF);
 }
+/* ---------------------------------------------------------------------------
+   Email threads
+   One conversation per invoice (Invoice Queue follow-ups, demand letters,
+   NOILs and the automated cadence) and one per customer account (Accounts
+   tab statements). The first email starts the thread; every later email is
+   sent as a reply to it - same subject, In-Reply-To / References headers,
+   and the mailbox's own thread when the same mailbox sent the earlier one -
+   so the customer and the sender both see one running conversation.
+   Rows live in email_threads; if that table is missing, sends still work,
+   just without threading.
+   --------------------------------------------------------------------------- */
+function newMessageId(fromEmail) {
+const dom = (String(fromEmail || '').split('@')[1] || 'claims-collection.net').replace(/[^A-Za-z0-9.-]/g, '');
+return '<clms-' + Date.now().toString(36) + '-' + randomToken().slice(0, 14) + '@' + dom + '>';
+}
+function threadKeyInvoice(accountId) { return 'inv:' + String(accountId); }
+function threadKeyAccount(customerName) { return 'acct:' + customerKey(customerName); }
+async function threadLoad(env, tenantId, key) {
+try { return await pgSelectOne(env, 'email_threads', 'tenant_id=' + pgEq(tenantId) + '&thread_key=' + pgEq(key) + '&select=*'); }
+catch (e) { return null; }
+}
+// What this send needs to join the thread: the subject that keeps it in the
+// conversation and the ids for the headers (plus the mailbox's own thread id
+// when the same connected mailbox sent the earlier email).
+function threadJoin(thread, mailbox, subject) {
+if (!thread || !thread.last_message_id) return { subject: subject, thread: null, joined: false };
+const sameMailbox = !!(mailbox && thread.mailbox_email && mailbox.provider === thread.provider && String(mailbox.email).toLowerCase() === String(thread.mailbox_email).toLowerCase());
+const base = String(thread.subject || subject || '').replace(/^\s*(re|fw|fwd)\s*:\s*/i, '').trim();
+return {
+subject: 'Re: ' + base,
+joined: true,
+thread: { inReplyTo: thread.last_message_id, references: Array.isArray(thread.references_list) ? thread.references_list : [], providerThreadId: sameMailbox ? thread.provider_thread_id : null, providerMessageId: sameMailbox ? thread.last_provider_message_id : null }
+};
+}
+async function threadRecord(env, tenantId, key, mailbox, result, subject, existing) {
+if (!result || !result.ok || !result.messageId) return;
+const refs = (existing && Array.isArray(existing.references_list) ? existing.references_list : []).filter(Boolean).concat([result.messageId]).slice(-25);
+const row = {
+tenant_id: tenantId, thread_key: key,
+subject: existing && existing.subject ? existing.subject : String(subject || '').replace(/^\s*(re|fw|fwd)\s*:\s*/i, '').trim(),
+provider: mailbox ? mailbox.provider : 'platform', mailbox_email: mailbox ? mailbox.email : null,
+provider_thread_id: result.threadId || null, last_provider_message_id: result.providerMessageId || null,
+first_message_id: existing && existing.first_message_id ? existing.first_message_id : result.messageId,
+last_message_id: result.messageId, references_list: refs, message_count: ((existing && existing.message_count) || 0) + 1,
+updated_at: new Date().toISOString()
+};
+try {
+if (existing) await pgUpdate(env, 'email_threads', 'id=' + pgEq(existing.id), row);
+else await pgInsert(env, 'email_threads', row);
+} catch (e) { console.log('THREAD_SAVE_FAILED ' + String(e && e.message).slice(0, 200)); }
+}
+
 async function sendViaMailbox(env, mailbox, opts) {
 const token = await mailboxAccessToken(env, mailbox);
 if (!token) return { ok: false, error: 'Your connected email needs to be reconnected.', needsReconnect: true };
 try {
+const th = opts.thread || null;
 if (mailbox.provider === 'google') {
-const mime = buildMimeMessage(opts.fromName || mailbox.email, mailbox.email, opts.to, opts.subject, opts.html, opts.cc, opts.attachments);
+// Sent through the Gmail API as the user, so it lands in their Sent folder.
+// Our own Message-ID plus In-Reply-To / References (and Gmail's threadId
+// when this mailbox started the thread) keep follow-ups in one conversation.
+const messageId = newMessageId(mailbox.email);
+const headers = { 'Message-ID': messageId };
+if (th && th.inReplyTo) { headers['In-Reply-To'] = th.inReplyTo; headers['References'] = (th.references || []).concat([th.inReplyTo]).filter(function (v, i, a) { return v && a.indexOf(v) === i; }).join(' '); }
+const mime = buildMimeMessage(opts.fromName || mailbox.email, mailbox.email, opts.to, opts.subject, opts.html, opts.cc, opts.attachments, headers);
+const payload = { raw: base64UrlEncode(new TextEncoder().encode(mime)) };
+if (th && th.providerThreadId) payload.threadId = th.providerThreadId;
 const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
 method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-body: JSON.stringify({ raw: base64UrlEncode(new TextEncoder().encode(mime)) }) });
+body: JSON.stringify(payload) });
 if (!res.ok) {
 const t = await res.text();
 console.log('MAILBOX_SEND_FAILED provider=google status=' + res.status + ' body=' + t.slice(0, 300));
 return { ok: false, error: 'Gmail rejected the message: ' + res.status + ' ' + t.slice(0, 200) };
 }
-return { ok: true, via: 'google' };
+let sent = {}; try { sent = await res.json(); } catch (e) { sent = {}; }
+return { ok: true, via: 'google', messageId: messageId, threadId: sent.threadId || null, providerMessageId: sent.id || null };
 }
 if (mailbox.provider === 'microsoft') {
-const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-body: JSON.stringify({ message: { subject: opts.subject, body: { contentType: 'HTML', content: opts.html },
-toRecipients: (Array.isArray(opts.to) ? opts.to : [opts.to]).map(function (a) { return { emailAddress: { address: a } }; }),
-ccRecipients: (opts.cc || []).map(function(a){ return { emailAddress: { address: a } }; }),
-attachments: (opts.attachments || []).map(function (a) { return { '@odata.type': '#microsoft.graph.fileAttachment', name: a.filename, contentType: a.contentType, contentBytes: a.base64 }; }) }, saveToSentItems: true }) });
-if (!res.ok) {
-const t = await res.text();
-console.log('MAILBOX_SEND_FAILED provider=microsoft status=' + res.status + ' body=' + t.slice(0, 300));
-return { ok: false, error: 'Outlook rejected the message: ' + res.status + ' ' + t.slice(0, 200) };
+// Outlook: a draft is created (as a reply to the previous message on the
+// thread when this mailbox sent it), attachments are added, then it is sent
+// - so it threads in Outlook and sits in Sent Items.
+const gh = { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+const toRecipients = (Array.isArray(opts.to) ? opts.to : [opts.to]).map(function (a) { return { emailAddress: { address: a } }; });
+const ccRecipients = (opts.cc || []).map(function (a) { return { emailAddress: { address: a } }; });
+const fields = { subject: opts.subject, body: { contentType: 'HTML', content: opts.html }, toRecipients: toRecipients, ccRecipients: ccRecipients };
+let draft = null;
+if (th && th.providerMessageId) {
+const rr = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(th.providerMessageId) + '/createReply', { method: 'POST', headers: gh, body: '{}' });
+if (rr.ok) { draft = await rr.json(); const pr = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(draft.id), { method: 'PATCH', headers: gh, body: JSON.stringify(fields) }); if (!pr.ok) draft = null; }
 }
-return { ok: true, via: 'microsoft' };
+if (!draft) {
+const cr = await fetch('https://graph.microsoft.com/v1.0/me/messages', { method: 'POST', headers: gh, body: JSON.stringify(fields) });
+if (!cr.ok) { const t = await cr.text(); console.log('MAILBOX_SEND_FAILED provider=microsoft status=' + cr.status + ' body=' + t.slice(0, 300)); return { ok: false, error: 'Outlook rejected the message: ' + cr.status + ' ' + t.slice(0, 200) }; }
+draft = await cr.json();
+}
+for (const a of (opts.attachments || [])) {
+const ar = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(draft.id) + '/attachments', { method: 'POST', headers: gh, body: JSON.stringify({ '@odata.type': '#microsoft.graph.fileAttachment', name: a.filename, contentType: a.contentType, contentBytes: a.base64 }) });
+if (!ar.ok) { const t = await ar.text(); return { ok: false, error: 'Outlook refused the attachment ' + a.filename + ': ' + ar.status + ' ' + t.slice(0, 160) }; }
+}
+let meta = {}; try { const mr = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(draft.id) + '?$select=id,internetMessageId,conversationId', { headers: gh }); if (mr.ok) meta = await mr.json(); } catch (e) { meta = {}; }
+const sr = await fetch('https://graph.microsoft.com/v1.0/me/messages/' + encodeURIComponent(draft.id) + '/send', { method: 'POST', headers: gh });
+if (!sr.ok) {
+const t = await sr.text();
+console.log('MAILBOX_SEND_FAILED provider=microsoft status=' + sr.status + ' body=' + t.slice(0, 300));
+return { ok: false, error: 'Outlook rejected the message: ' + sr.status + ' ' + t.slice(0, 200) };
+}
+return { ok: true, via: 'microsoft', messageId: meta.internetMessageId || null, threadId: meta.conversationId || draft.conversationId || null, providerMessageId: draft.id || null };
 }
 return { ok: false, error: 'Unsupported mail provider.' };
 } catch (e) { return { ok: false, error: String(e) }; }
@@ -9878,19 +9978,26 @@ return injectHelpWidget(assetResponse);
 },
 
 async scheduled(event, env, ctx) {
-const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour12: false, weekday: 'short', hour: '2-digit' }).formatToParts(new Date());
+const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour12: false, weekday: 'short', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date());
 const weekday = (parts.find(p => p.type === 'weekday') || {}).value;
-const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10);
-if (weekday === 'Wed' && hour === 18) {
+const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10) % 24;
+const minute = parseInt((parts.find(p => p.type === 'minute') || {}).value, 10);
+// The cron fires every 5 minutes. The hourly jobs run on the first firing of
+// each hour; the QuickBooks / IES change pull runs on every firing.
+const topOfHour = minute < 5;
+if (topOfHour && weekday === 'Wed' && hour === 18) {
 ctx.waitUntil(runWeeklyDigest(env));
 }
-if (weekday === 'Fri' && hour === 18) {
+if (topOfHour && weekday === 'Fri' && hour === 18) {
 ctx.waitUntil(runWeeklyUsersReport(env));
 }
 // Follow-up cadence runs every hour; each tenant's own quiet hours and
 // weekly send cap decide whether anything actually goes out.
-ctx.waitUntil(runCadenceSweep(env));
-// QuickBooks: finish first imports, plus the nightly change sweep.
+if (topOfHour) ctx.waitUntil(runCadenceSweep(env));
+// QuickBooks / IES: pull every connected company's changes every 5 minutes
+// (webhooks still trigger a pull within seconds of a change; this is the
+// safety net so nothing waits more than a few minutes), finish first imports,
+// and keep refresh tokens alive.
 ctx.waitUntil(runQuickBooksSweep(env, hour));
 }
 };
