@@ -7461,30 +7461,70 @@ if (role !== 'admin' && role !== 'manager' && role !== 'employee') return json({
 // Admins see every office; managers and employees are scoped to one.
 if (role !== 'admin' && !inviteOffices[office]) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
 const officeValue = role === 'admin' ? (inviteOffices[office] ? office : (user.office || Object.keys(inviteOffices)[0] || null)) : office;
+// sendInvite: false adds the teammate with the invite held; an admin sends it
+// later from the Team tab (POST /api/team/send-invite). Held accounts sit in
+// status 'pending' - they take a seat but cannot sign in until invited.
+const sendNow = body.sendInvite !== false;
 const seatErr = await seatLimitError(env, user);
 if (seatErr) return json({ ok: false, error: seatErr, code: 'seat_limit' }, 403);
 const existing = await pgSelectOne(env, 'users', 'email=' + pgEq(email) + '&select=id');
 if (existing) return json({ ok: false, error: 'That email is already associated with an account.' }, 409);
 const throwawaySalt = randomSalt();
 const throwawayHash = await hashPassword(randomToken(), throwawaySalt);
-const resetToken = randomToken();
-const resetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+const resetToken = sendNow ? randomToken() : null;
+const resetExpires = sendNow ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() : null;
 const insertedUser = await pgInsert(env, 'users', {
 tenant_id: user.tenant_id, email: email, password_hash: throwawayHash, salt: throwawaySalt, role: role,
-email_verified: true, status: 'active', full_name: fullName || null, office: officeValue,
+email_verified: true, status: sendNow ? 'active' : 'pending', full_name: fullName || null, office: officeValue,
 reset_token: resetToken, reset_expires: resetExpires, invited_by: user.id
 });
 const newUserId = insertedUser ? insertedUser.id : null;
+const where = role === 'admin' ? '' : ' at ' + (inviteOffices[officeValue] || officeValue);
+if (sendNow) {
+await sendEmail(env, Object.assign({ to: email, tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL },
+teamInviteEmail(user, { email: email, full_name: fullName, role: role, office: officeValue }, inviteOffices, resetToken)));
+await logUserActivity(env, user, null, 'team', 'Invited ' + (fullName || email) + ' (' + email + ') as ' + role + where);
+} else {
+await logUserActivity(env, user, null, 'team', 'Added ' + (fullName || email) + ' (' + email + ') as ' + role + where + ' - invite not sent yet');
+}
+return json({ ok: true, id: newUserId, invited: sendNow });
+}
+
+// The set-your-password email a new teammate receives.
+function teamInviteEmail(admin, target, offices, resetToken) {
 const setPasswordUrl = SITE_URL + '/reset-password?token=' + resetToken;
+const role = String(target.role || 'employee');
 const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
 '<h2 style="margin:0 0 12px;">You\'ve been added to clAIms</h2>' +
-'<p>' + escapeHtml(fullName || email) + (role === 'admin' ? ', you have been added as an administrator for ' + escapeHtml(user.company_name || 'your company') + '.' : ', you have been added as a ' + escapeHtml(role) + ' on the ' + escapeHtml(inviteOffices[office] || office) + ' team.') + '</p>' +
+'<p>' + escapeHtml(target.full_name || target.email) + (role === 'admin' ? ', you have been added as an administrator for ' + escapeHtml(admin.company_name || 'your company') + '.' : ', you have been added as a ' + escapeHtml(role) + ' on the ' + escapeHtml((offices && offices[target.office]) || target.office || '') + ' team.') + '</p>' +
 '<p style="margin-top:20px;"><a href="' + setPasswordUrl + '" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Set Your Password</a></p>' +
 '<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days.</p>' +
 '</div>';
-await sendEmail(env, { to: email, subject: "You've been added to clAIms", html, kind: 'team_invite', tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL });
-await logUserActivity(env, user, null, 'team', 'Invited ' + (fullName || email) + ' (' + email + ') as ' + role + (role === 'admin' ? '' : ' at ' + (inviteOffices[office] || office)));
-return json({ ok: true, id: newUserId });
+return { subject: "You've been added to clAIms", html: html, kind: 'team_invite' };
+}
+
+// POST /api/team/send-invite { id } - admins only. Sends (or re-sends) the
+// set-your-password email with a fresh 7-day link; a held account becomes
+// active at this point.
+async function handleTeamSendInvite(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body; try { body = await request.json(); } catch (e) { body = {}; }
+const id = parseInt(body.id, 10);
+if (!id) return json({ ok: false, error: 'Missing id' }, 400);
+const target = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,status');
+if (!target) return json({ ok: false, error: 'Team member not found' }, 404);
+if (target.status === 'disabled') return json({ ok: false, error: 'That account was removed. Invite them again from + Invite Team Member.' }, 400);
+if (String(target.id) === String(user.id)) return json({ ok: false, error: "That's you." }, 400);
+if (target.status === 'pending') { const seatErr = await seatLimitError(env, user); if (seatErr) return json({ ok: false, error: seatErr, code: 'seat_limit' }, 403); }
+const resetToken = randomToken();
+const resetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+await pgUpdate(env, 'users', 'id=' + pgEq(target.id), { reset_token: resetToken, reset_expires: resetExpires, status: target.status === 'pending' ? 'active' : target.status });
+const offices = resolveOffices(user.tenant_offices);
+await sendEmail(env, Object.assign({ to: target.email, tenantId: user.tenant_id, userId: target.id, from: OPERATIONS_FROM_EMAIL }, teamInviteEmail(user, target, offices, resetToken)));
+await logUserActivity(env, user, null, 'team', (target.status === 'pending' ? 'Sent the invite to ' : 'Re-sent the invite to ') + (target.full_name || target.email) + ' (' + target.email + ')');
+return json({ ok: true, id: target.id, status: target.status === 'pending' ? 'active' : target.status });
 }
 
 async function handleTeamUpdate(request, env) {
@@ -10277,6 +10317,9 @@ return handleTeamInvite(request, env);
 }
 if (url.pathname === '/api/team/update' && request.method === 'POST') {
 return handleTeamUpdate(request, env);
+}
+if (url.pathname === '/api/team/send-invite' && request.method === 'POST') {
+return handleTeamSendInvite(request, env);
 }
 if (url.pathname === '/api/team/remove' && request.method === 'POST') {
 return handleTeamRemove(request, env);
