@@ -3762,8 +3762,21 @@ async function handleIntegrationsList(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
-const rows = await pgSelect(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,provider,status,connected_at,last_synced_at&order=id.desc');
-return json({ ok: true, integrations: rows || [] });
+const rows = await pgSelect(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,provider,status,connected_at,last_synced_at,config_json&order=id.desc');
+const departments = resolveDepartments(user.tenant_departments);
+const list = (rows || []).map(function (r) {
+const out = { id: r.id, provider: r.provider, status: r.status, connected_at: r.connected_at, last_synced_at: r.last_synced_at };
+const cfg = r.provider === QBO_PROVIDER ? qboParseConfig(r.config_json) : null;
+if (cfg && cfg.oauth) {
+out.quickbooks = true; out.realmId = cfg.realmId || null; out.companyName = cfg.companyName || null; out.environment = cfg.environment || null;
+out.department = cfg.department || null; out.departmentLabel = cfg.department && departments[cfg.department] ? departments[cfg.department] : null;
+out.importing = !!(r.status === 'connected' && cfg.import && cfg.import.phase !== 'done'); out.imported = (cfg.import && cfg.import.imported) || 0;
+out.needsReconnect = !!(cfg.needsReconnect || (r.status === 'connected' && cfg.environment && cfg.environment !== (qboSandbox(env) ? 'sandbox' : 'production')));
+out.lastError = r.status === 'connected' ? (cfg.lastError || null) : null;
+}
+return out;
+});
+return json({ ok: true, integrations: list, departments: departments });
 }
 
 async function handleIntegrationConnect(request, env) {
@@ -4189,6 +4202,11 @@ return json({ ok: true, provider: integration.provider, lastSyncedAt: lastSynced
      the safety net (it also keeps the refresh token alive).
    - Requests run one at a time per company, with backoff on HTTP 429, so the
      500 req/min per-company and 10-concurrent per-app limits are respected.
+   - Multi-company: a workspace can hold several connections, one per
+     QuickBooks company file (realmId), each mapped to a clAIms department
+     (business). Mirrored rows carry a per-connection external-id prefix:
+     the first connection keeps the original "qbo-" ids, every later one uses
+     "qbo-<realmId>-", so companies never collide and can be purged alone.
    Secrets: QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_WEBHOOK_VERIFIER.
    Var: QBO_ENV = "sandbox" (development keys) or "production" (live keys).
    --------------------------------------------------------------------------- */
@@ -4227,11 +4245,35 @@ return (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) ? cfg : {};
 function qboConnFromRow(row) {
 const cfg = qboParseConfig(row.config_json);
 if (!cfg.oauth) return null;
-return { id: row.id, tenant_id: row.tenant_id, status: row.status, last_synced_at: row.last_synced_at, cfg: cfg };
+return { id: row.id, tenant_id: row.tenant_id, status: row.status, connected_at: row.connected_at, last_synced_at: row.last_synced_at, cfg: cfg };
 }
 async function qboLoadConns(env, query) {
-const rows = await pgSelect(env, 'integrations', query + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,tenant_id,status,last_synced_at,config_json');
+const rows = await pgSelect(env, 'integrations', query + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,tenant_id,status,connected_at,last_synced_at,config_json&order=id.asc');
 return (rows || []).map(qboConnFromRow).filter(Boolean);
+}
+// Per-connection external-id prefixes (see the header note on multi-company).
+function qboExtPrefix(conn) { return (conn && conn.cfg && conn.cfg.idPrefix) || QBO_EXTERNAL_PREFIX; }
+function qboPayPrefix(conn) { return (conn && conn.cfg && conn.cfg.payPrefix) || QBO_PAYMENT_PREFIX; }
+function qboRealmPrefixes(realmId) { return { idPrefix: QBO_EXTERNAL_PREFIX + String(realmId) + '-', payPrefix: QBO_PAYMENT_PREFIX + String(realmId) + '-' }; }
+// PostgREST filter for "rows mirrored from this connection": its own prefix,
+// minus every sibling connection's prefix (the legacy "qbo-" prefix would
+// otherwise also match "qbo-<realm>-" rows of a company connected later).
+async function qboOwnRowsFilter(env, conn, column, prefixOf) {
+const own = prefixOf(conn);
+let filter = column + '=like.' + encodeURIComponent(own + '*');
+const siblings = await qboLoadConns(env, 'tenant_id=' + pgEq(conn.tenant_id) + '&id=neq.' + encodeURIComponent(conn.id));
+for (const sib of siblings) {
+const other = prefixOf(sib);
+if (other !== own && other.indexOf(own) === 0) filter += '&' + column + '=not.like.' + encodeURIComponent(other + '*');
+}
+return filter;
+}
+// Which clAIms department (business) a connection's invoices belong to:
+// the mapping chosen on the Integrations tab, else QuickBooks' own
+// Department / Class on the invoice.
+function qboConnDepartment(conn, departments) {
+const key = conn && conn.cfg && conn.cfg.department ? String(conn.cfg.department) : '';
+return key && departments && departments[key] ? key : null;
 }
 // Read-merge-write so a token refresh and a progress update never erase each other.
 async function qboSaveConfig(env, conn, patch, rowPatch) {
@@ -4366,7 +4408,7 @@ if (label && label.length >= 4 && (target.indexOf(label) === 0 || label.indexOf(
 }
 return null;
 }
-function qboPaymentsForInvoice(inv, paymentsById) {
+function qboPaymentsForInvoice(inv, paymentsById, conn) {
 const out = [];
 for (const link of (inv.LinkedTxn || [])) {
 if (!link || link.TxnType !== 'Payment') continue;
@@ -4380,7 +4422,7 @@ if (lt && lt.TxnType === 'Invoice' && String(lt.TxnId) === String(inv.Id)) amoun
 }
 if (!(amount > 0)) continue;
 out.push({
-id: QBO_PAYMENT_PREFIX + p.Id + '-' + inv.Id,
+id: qboPayPrefix(conn) + p.Id + '-' + inv.Id,
 amount: round2(amount),
 date: p.TxnDate || null,
 method: (p.PaymentMethodRef && p.PaymentMethodRef.name) || 'QuickBooks',
@@ -4391,19 +4433,19 @@ memo: 'Payment recorded in QuickBooks'
 }
 return out;
 }
-function qboInvoiceToItem(inv, customer, departments, paymentsById) {
+function qboInvoiceToItem(inv, customer, departments, paymentsById, conn) {
 const total = round2(inv.TotalAmt);
 const balance = round2(inv.Balance);
 const voided = total === 0 && /voided/i.test(String(inv.PrivateNote || ''));
 const addr = inv.BillAddr || inv.ShipAddr || (customer && (customer.BillAddr || customer.ShipAddr)) || {};
 const notes = [inv.PrivateNote, inv.CustomerMemo && inv.CustomerMemo.value].filter(function (v) { return v && String(v).trim(); }).join('\n\n');
 const person = customer ? ([customer.GivenName, customer.FamilyName].filter(Boolean).join(' ') || customer.DisplayName || null) : null;
-const payments = qboPaymentsForInvoice(inv, paymentsById || {});
+const payments = qboPaymentsForInvoice(inv, paymentsById || {}, conn);
 const fullyPaid = balance <= 0.005;
 let lastPaidOn = null;
 for (const p of payments) { if (p.date && (!lastPaidOn || p.date > lastPaidOn)) lastPaidOn = p.date; }
 const item = {
-externalId: QBO_EXTERNAL_PREFIX + inv.Id,
+externalId: qboExtPrefix(conn) + inv.Id,
 customerName: (inv.CustomerRef && inv.CustomerRef.name) || (customer && customer.DisplayName) || 'QuickBooks customer',
 invoiceNumber: inv.DocNumber || null,
 amount: total,
@@ -4415,7 +4457,7 @@ contactEmail: (inv.BillEmail && inv.BillEmail.Address) || (customer && customer.
 contactPhone: (customer && customer.PrimaryPhone && customer.PrimaryPhone.FreeFormNumber) || null,
 claimNumber: qboClaimNumber(inv),
 office: addr.City || null,
-department: qboDepartmentKey(inv, departments),
+department: qboConnDepartment(conn, departments) || qboDepartmentKey(inv, departments),
 meta: inv.DueDate ? ('Due ' + inv.DueDate) : null,
 payments: payments
 };
@@ -4438,7 +4480,7 @@ for (const c of await qboFetchByIds(env, conn, 'Customer', customerIds)) custome
 const paymentsById = {};
 for (const p of await qboFetchByIds(env, conn, 'Payment', paymentIds)) paymentsById[String(p.Id)] = p;
 const items = invoices.map(function (inv) {
-return qboInvoiceToItem(inv, customersById[String(inv.CustomerRef && inv.CustomerRef.value)], departments, paymentsById);
+return qboInvoiceToItem(inv, customersById[String(inv.CustomerRef && inv.CustomerRef.value)], departments, paymentsById, conn);
 });
 const result = await ingestAccountingItems(env, { id: conn.id, tenant_id: conn.tenant_id }, items);
 return result.processed;
@@ -4447,7 +4489,7 @@ return result.processed;
 // out of the queue so no follow-up goes out for it.
 async function qboMarkInvoicesDeleted(env, conn, invoiceIds) {
 for (const id of invoiceIds) {
-const acct = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=' + pgEq(QBO_EXTERNAL_PREFIX + id) + '&select=id,note');
+const acct = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=' + pgEq(qboExtPrefix(conn) + id) + '&select=id,note');
 if (!acct) continue;
 await pgUpdate(env, 'accounts', 'id=' + pgEq(acct.id), { status: 'paid', amount: 0, paid_amount: 0,
 note: ('Deleted in QuickBooks' + (acct.note ? '\n\n' + acct.note : '')).slice(0, 4000), updated_at: new Date().toISOString() });
@@ -4458,7 +4500,7 @@ note: ('Deleted in QuickBooks' + (acct.note ? '\n\n' + acct.note : '')).slice(0,
 async function qboRemovePayments(env, conn, paymentIds) {
 const reopen = [];
 for (const pid of paymentIds) {
-const prefix = QBO_PAYMENT_PREFIX + pid + '-';
+const prefix = qboPayPrefix(conn) + pid + '-';
 const rows = await pgSelect(env, 'invoice_payments', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=like.' + encodeURIComponent(prefix + '*') + '&select=id,external_id');
 for (const r of rows) { reopen.push(String(r.external_id).slice(prefix.length)); }
 if (rows.length) await pgDelete(env, 'invoice_payments', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=like.' + encodeURIComponent(prefix + '*'));
@@ -4522,10 +4564,10 @@ await qboSaveConfig(env, conn, { import: imp, lastError: null });
 return;
 }
 if (imp.phase === 'reconcile') {
-const stale = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=like.' + encodeURIComponent(QBO_EXTERNAL_PREFIX + '*') +
+const stale = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(conn.tenant_id) + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix)) +
 '&status=neq.paid&updated_at=lt.' + encodeURIComponent(imp.startedAt) + '&id=gt.' + (imp.reconcileAfter || 0) + '&select=id,external_id&order=id.asc&limit=' + page);
 if (stale.length) {
-const ids = stale.map(function (a) { return String(a.external_id).slice(QBO_EXTERNAL_PREFIX.length); });
+const ids = stale.map(function (a) { return String(a.external_id).slice(qboExtPrefix(conn).length); });
 const found = await qboFetchByIds(env, conn, 'Invoice', ids);
 await qboIngestInvoices(env, conn, found);
 const foundIds = {}; for (const f of found) foundIds[String(f.Id)] = true;
@@ -4649,13 +4691,24 @@ if (!user) return redirectTo('/?login=1');
 if (user.role !== 'admin' || !canSelfServeIntegrations(user)) return redirectTo('/dashboard?qbo=not_allowed');
 if (!qboConfigured(env)) return redirectTo('/dashboard?qbo=not_configured');
 if (!(await importMasterKey(env))) return redirectTo('/dashboard?qbo=not_configured');
-const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(user.tenant_id) + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,status');
+const url = new URL(request.url);
+// Optional: which clAIms department (business) the company being connected
+// belongs to, and which existing connection (if any) is being reconnected.
+const departments = resolveDepartments(user.tenant_departments);
+const deptParam = String(url.searchParams.get('department') || '').trim();
+const department = departments[deptParam] ? deptParam : '';
+const reconnectId = parseInt(url.searchParams.get('reconnect'), 10) || 0;
+const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id));
+const reconnecting = conns.find(function (c) { return c.id === reconnectId; }) || null;
 const limits = planLimitsFor(user);
-if (user.tenant_slug !== 'base' && limits.integrations != null && (!existing || existing.status !== 'connected')) {
+if (user.tenant_slug !== 'base' && limits.integrations != null && !(reconnecting && reconnecting.status === 'connected')) {
 if ((await countIntegrationsConnected(env, user.tenant_id)) >= limits.integrations) return redirectTo('/dashboard?qbo=plan_limit');
 }
 const state = randomToken();
-await pgInsert(env, 'oauth_states', { state: state, user_id: user.id, provider: 'quickbooks', redirect_to: '/dashboard',
+const redirectParams = new URLSearchParams();
+if (department) redirectParams.set('qbo_dept', department);
+if (reconnecting) redirectParams.set('qbo_reconnect', String(reconnecting.id));
+await pgInsert(env, 'oauth_states', { state: state, user_id: user.id, provider: 'quickbooks', redirect_to: '/dashboard' + (redirectParams.toString() ? '?' + redirectParams.toString() : ''),
 expires_at: new Date(Date.now() + 900000).toISOString() });
 const params = new URLSearchParams({ client_id: qboSecret(env, 'CLIENT_ID'), response_type: 'code', scope: QBO_SCOPE,
 redirect_uri: qboRedirectUri(), state: state });
@@ -4676,6 +4729,13 @@ if (!owner || owner.role !== 'admin') return redirectTo('/dashboard?qbo=failed')
 // One QuickBooks company feeds one clAIms workspace.
 const others = await qboLoadConns(env, 'tenant_id=neq.' + encodeURIComponent(owner.tenant_id) + '&status=' + pgEq('connected'));
 if (others.some(function (c) { return String(c.cfg.realmId) === String(realmId); })) return redirectTo('/dashboard?qbo=realm_in_use');
+// What the admin chose before signing in (department, which row to reconnect).
+let wanted = new URLSearchParams();
+try { wanted = new URL(String(st.redirect_to || '/dashboard'), SITE_URL).searchParams; } catch (e) {}
+const tenantRow = await pgSelectOne(env, 'tenants', 'id=' + pgEq(owner.tenant_id) + '&select=departments');
+const tenantDepartments = resolveDepartments(tenantRow ? tenantRow.departments : null);
+const chosenDept = tenantDepartments[String(wanted.get('qbo_dept') || '')] ? String(wanted.get('qbo_dept')) : null;
+const reconnectId = parseInt(wanted.get('qbo_reconnect'), 10) || 0;
 let tokens;
 try { tokens = await qboTokenRequest(env, { grant_type: 'authorization_code', code: code, redirect_uri: qboRedirectUri() }); }
 catch (e) {
@@ -4683,15 +4743,26 @@ console.log('QBO_TOKEN_EXCHANGE_FAILED ' + (e && e.message) + ' redirect_uri=' +
 return redirectTo('/dashboard?qbo=token_failed');
 }
 const nowIso = new Date().toISOString();
-const existing = await pgSelectOne(env, 'integrations', 'tenant_id=' + pgEq(owner.tenant_id) + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,config_json');
-const prev = existing ? qboParseConfig(existing.config_json) : {};
+// Which row this company lands in: the one already holding this realm, else
+// the row the admin asked to reconnect, else a row left behind by the
+// previous environment (sandbox -> live), else a brand-new connection.
+const mine = await qboLoadConns(env, 'tenant_id=' + pgEq(owner.tenant_id));
+const existing = mine.find(function (c) { return String(c.cfg.realmId) === String(realmId); })
+|| mine.find(function (c) { return c.id === reconnectId; })
+|| mine.find(function (c) { return qboEnvMismatch(env, c); })
+|| null;
+const prev = existing ? existing.cfg : {};
 const sameCompany = !!(prev.oauth && String(prev.realmId) === String(realmId) && prev.cdcAt);
+// The first connection in a workspace keeps the original "qbo-" ids; every
+// later company gets ids scoped to its realm so the two never collide.
+const prefixes = existing ? { idPrefix: prev.idPrefix || null, payPrefix: prev.payPrefix || null } : (mine.length ? qboRealmPrefixes(realmId) : { idPrefix: null, payPrefix: null });
 const cfg = Object.assign({ provider: 'quickbooks', oauth: true, realmId: String(realmId), environment: qboSandbox(env) ? 'sandbox' : 'production',
 connectedBy: owner.id, connectedByEmail: owner.email, connectedAt: nowIso, needsReconnect: false, lastError: null,
+department: chosenDept || (sameCompany ? (prev.department || null) : (prev.department || null)),
 cdcAt: sameCompany ? prev.cdcAt : null, lastFullSyncAt: sameCompany ? (prev.lastFullSyncAt || null) : null,
-import: sameCompany ? (prev.import || null) : qboStartImport(prev, true).import },
+import: sameCompany ? (prev.import || null) : qboStartImport(prev, true).import }, prefixes,
 await qboTokenFields(env, tokens));
-const rowPatch = { status: 'connected', api_key: randomToken(), connected_at: nowIso, config_json: JSON.stringify(cfg) };
+const rowPatch = { status: 'connected', api_key: randomToken(), connected_at: nowIso, realm_id: String(realmId), config_json: JSON.stringify(cfg) };
 let integrationId;
 if (existing) { await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), rowPatch); integrationId = existing.id; }
 else { const ins = await pgInsert(env, 'integrations', Object.assign({ tenant_id: owner.tenant_id, provider: QBO_PROVIDER }, rowPatch)); integrationId = ins && ins.id; }
@@ -4701,7 +4772,7 @@ if (!qboSandbox(env)) { try { await demoRemove(env, owner.tenant_id); } catch (e
 // A different company than before (e.g. the sandbox company replaced by the
 // real one): its mirrored rows go before the new import starts.
 if (existing && prev.realmId && !sameCompany) {
-try { const n = await qboPurgeCompanyRows(env, owner.tenant_id); console.log('QBO_PREVIOUS_COMPANY_PURGED rows=' + n + ' realm=' + prev.realmId); }
+try { const n = await qboPurgeCompanyRows(env, existing); console.log('QBO_PREVIOUS_COMPANY_PURGED rows=' + n + ' realm=' + prev.realmId); }
 catch (e) { console.log('QBO_PURGE_FAILED ' + (e && e.message)); }
 }
 const conn = { id: integrationId, tenant_id: owner.tenant_id, status: 'connected', cfg: cfg, _access: tokens.access_token, _accessUntil: Date.now() + 3000000 };
@@ -4718,21 +4789,59 @@ return redirectTo('/dashboard?qbo=connected');
 async function handleQuickBooksStatus(request, env, ctx) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
-const conn = (await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id)))[0] || null;
-const cfg = conn ? conn.cfg : {};
+const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id));
+const departments = resolveDepartments(user.tenant_departments);
+const canManage = user.role === 'admin' && canSelfServeIntegrations(user);
+const envNote = 'clAIms has switched to ' + (qboSandbox(env) ? 'sandbox' : 'live') + ' QuickBooks. Reconnect to link your ' + (qboSandbox(env) ? 'sandbox' : 'real') + ' QuickBooks company.';
+const connections = conns.map(function (conn) {
+const cfg = conn.cfg;
 const envSwitched = qboEnvMismatch(env, conn);
-const connected = !!(conn && conn.status === 'connected' && !cfg.needsReconnect && !envSwitched);
+const connected = !!(conn.status === 'connected' && !cfg.needsReconnect && !envSwitched);
 const importing = !!(connected && cfg.import && cfg.import.phase !== 'done');
 // Viewing the dashboard nudges an unfinished first import forward.
 if (importing && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
-const out = { ok: true, configured: qboConfigured(env), sandbox: qboSandbox(env), connected: connected,
-needsReconnect: !!(conn && (cfg.needsReconnect || (envSwitched && conn.status === 'connected'))), companyName: cfg.companyName || null,
-importing: importing, imported: (cfg.import && cfg.import.imported) || 0,
-lastSyncedAt: conn ? conn.last_synced_at : null, lastError: connected ? (cfg.lastError || null) : null,
-canManage: user.role === 'admin' && canSelfServeIntegrations(user) };
-if (out.canManage && conn && cfg.needsReconnect) out.reconnectReason = cfg.lastError || null;
-if (out.canManage && out.needsReconnect && envSwitched && conn.status === 'connected') out.reconnectReason = 'clAIms has switched to ' + (qboSandbox(env) ? 'sandbox' : 'live') + ' QuickBooks. Reconnect to link your ' + (qboSandbox(env) ? 'sandbox' : 'real') + ' QuickBooks company.';
+const needsReconnect = !!(cfg.needsReconnect || (envSwitched && conn.status === 'connected'));
+return { id: conn.id, status: conn.status, realmId: cfg.realmId || null, companyName: cfg.companyName || null,
+environment: cfg.environment || null, department: cfg.department || null, departmentLabel: cfg.department && departments[cfg.department] ? departments[cfg.department] : null,
+connected: connected, needsReconnect: needsReconnect, importing: importing, imported: (cfg.import && cfg.import.imported) || 0,
+connectedAt: conn.connected_at || cfg.connectedAt || null, lastSyncedAt: conn.last_synced_at || null, lastError: connected ? (cfg.lastError || null) : null,
+reconnectReason: canManage && needsReconnect ? ((envSwitched && conn.status === 'connected') ? envNote : (cfg.lastError || null)) : null };
+});
+const live = connections.filter(function (c) { return c.connected; });
+const first = live[0] || connections[0] || null;
+const out = { ok: true, configured: qboConfigured(env), sandbox: qboSandbox(env), connected: live.length > 0,
+needsReconnect: connections.some(function (c) { return c.needsReconnect; }), companyName: first ? first.companyName : null,
+importing: live.some(function (c) { return c.importing; }), imported: live.reduce(function (n, c) { return n + (c.imported || 0); }, 0),
+lastSyncedAt: live.reduce(function (m, c) { return (c.lastSyncedAt && (!m || c.lastSyncedAt > m)) ? c.lastSyncedAt : m; }, null),
+lastError: (live.find(function (c) { return c.lastError; }) || {}).lastError || null,
+canManage: canManage, connections: connections, departments: departments };
+const rr = connections.find(function (c) { return c.reconnectReason; });
+if (rr) out.reconnectReason = rr.reconnectReason;
 return json(out);
+}
+
+// POST /api/quickbooks/department { id, department } - map a connected
+// company file to a clAIms department (business). An explicit choice re-tags
+// every invoice already mirrored from it; "auto" (empty) re-reads the open
+// invoices so QuickBooks' own Department / Class decides again.
+async function handleQuickBooksDepartment(request, env, ctx) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin' || !canSelfServeIntegrations(user)) return json({ ok: false, error: 'Admins only' }, 403);
+let body; try { body = await request.json(); } catch (e) { body = {}; }
+const id = parseInt(body.id, 10);
+const conn = id ? (await qboLoadConns(env, 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id)))[0] : null;
+if (!conn) return json({ ok: false, error: 'Connection not found' }, 404);
+const departments = resolveDepartments(user.tenant_departments);
+const key = String(body.department || '').trim();
+if (key && !departments[key]) return json({ ok: false, error: 'Pick one of your departments.' }, 400);
+const patch = { department: key || null };
+if (!key && conn.status === 'connected' && !(conn.cfg.import && conn.cfg.import.phase !== 'done')) Object.assign(patch, qboStartImport(conn.cfg, false));
+await qboSaveConfig(env, conn, patch);
+if (key) { try { await qboRetagDepartment(env, conn, key); } catch (e) { console.log('QBO_RETAG_FAILED ' + (e && e.message)); } }
+else if (patch.import && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
+try { await logUserActivity(env, user, null, 'integration', (conn.cfg.companyName || 'QuickBooks company') + ' mapped to ' + (key ? departments[key] : 'automatic (QuickBooks class/department)')); } catch (e) {}
+return json({ ok: true, department: key || null, departmentLabel: key ? departments[key] : null });
 }
 
 // Intuit's change notifications. Verified with the webhook verifier token,
@@ -4764,9 +4873,9 @@ return new Response('ok', { status: 200 });
 // A different QuickBooks company is being connected (sandbox -> production,
 // or a new file): everything mirrored from the previous company is removed
 // so its invoices, payments and notes never show beside the new books.
-async function qboPurgeCompanyRows(env, tenantId) {
-const tid = pgEq(tenantId);
-const rows = await pgSelect(env, 'accounts', 'tenant_id=' + tid + '&external_id=like.' + encodeURIComponent(QBO_EXTERNAL_PREFIX + '*') + '&select=id') || [];
+async function qboPurgeCompanyRows(env, conn) {
+const tid = pgEq(conn.tenant_id);
+const rows = await pgSelect(env, 'accounts', 'tenant_id=' + tid + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix)) + '&select=id') || [];
 const ids = rows.map(function (a) { return a.id; });
 for (const chunk of qboChunks(ids, 100)) {
 const inList = 'in.(' + chunk.join(',') + ')';
@@ -4775,8 +4884,13 @@ try { await pgDelete(env, t, 'tenant_id=' + tid + '&account_id=' + inList); } ca
 }
 await pgDelete(env, 'accounts', 'tenant_id=' + tid + '&id=' + inList);
 }
-try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + tid + '&external_id=like.' + encodeURIComponent(QBO_PAYMENT_PREFIX + '*')); } catch (e) {}
+try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + tid + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboPayPrefix))); } catch (e) {}
 return ids.length;
+}
+// Re-tag every invoice mirrored from a connection with its (new) department.
+async function qboRetagDepartment(env, conn, department) {
+const filter = 'tenant_id=' + pgEq(conn.tenant_id) + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix));
+await pgUpdate(env, 'accounts', filter, { department: department || null, updated_at: new Date().toISOString() });
 }
 async function qboDisconnect(env, conn) {
 const cfg = conn.cfg;
@@ -7322,8 +7436,10 @@ const role = (body.role || '').toString();
 const office = (body.office || '').toString();
 const inviteOffices = resolveOffices(user.tenant_offices);
 if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ ok: false, error: 'Enter a valid email address, e.g. name@company.com' }, 400);
-if (role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'manager' or 'employee'." }, 400);
-if (!inviteOffices[office]) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
+if (role !== 'admin' && role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'admin', 'manager' or 'employee'." }, 400);
+// Admins see every office; managers and employees are scoped to one.
+if (role !== 'admin' && !inviteOffices[office]) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
+const officeValue = role === 'admin' ? (inviteOffices[office] ? office : (user.office || Object.keys(inviteOffices)[0] || null)) : office;
 const seatErr = await seatLimitError(env, user);
 if (seatErr) return json({ ok: false, error: seatErr, code: 'seat_limit' }, 403);
 const existing = await pgSelectOne(env, 'users', 'email=' + pgEq(email) + '&select=id');
@@ -7334,19 +7450,19 @@ const resetToken = randomToken();
 const resetExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 const insertedUser = await pgInsert(env, 'users', {
 tenant_id: user.tenant_id, email: email, password_hash: throwawayHash, salt: throwawaySalt, role: role,
-email_verified: true, status: 'active', full_name: fullName || null, office: office,
+email_verified: true, status: 'active', full_name: fullName || null, office: officeValue,
 reset_token: resetToken, reset_expires: resetExpires, invited_by: user.id
 });
 const newUserId = insertedUser ? insertedUser.id : null;
 const setPasswordUrl = SITE_URL + '/reset-password?token=' + resetToken;
 const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
 '<h2 style="margin:0 0 12px;">You\'ve been added to clAIms</h2>' +
-'<p>' + escapeHtml(fullName || email) + ', you have been added as a ' + escapeHtml(role) + ' on the ' + escapeHtml(inviteOffices[office] || office) + ' team.</p>' +
+'<p>' + escapeHtml(fullName || email) + (role === 'admin' ? ', you have been added as an administrator for ' + escapeHtml(user.company_name || 'your company') + '.' : ', you have been added as a ' + escapeHtml(role) + ' on the ' + escapeHtml(inviteOffices[office] || office) + ' team.') + '</p>' +
 '<p style="margin-top:20px;"><a href="' + setPasswordUrl + '" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Set Your Password</a></p>' +
 '<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days.</p>' +
 '</div>';
 await sendEmail(env, { to: email, subject: "You've been added to clAIms", html, kind: 'team_invite', tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL });
-await logUserActivity(env, user, null, 'team', 'Invited ' + (fullName || email) + ' (' + email + ') as ' + role + ' at ' + (inviteOffices[office] || office));
+await logUserActivity(env, user, null, 'team', 'Invited ' + (fullName || email) + ' (' + email + ') as ' + role + (role === 'admin' ? '' : ' at ' + (inviteOffices[office] || office)));
 return json({ ok: true, id: newUserId });
 }
 
@@ -7655,7 +7771,8 @@ function planKeyFor(userOrTenant) {
 }
 function planLimitsFor(userOrTenant) { return PLAN_LIMITS[planKeyFor(userOrTenant)]; }
 async function countSeatsUsed(env, tenantId) {
-  const rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&status=in.(active,pending)&select=id') || [];
+  // Demo teammates (the sample roster) never take up a paid seat.
+  const rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&status=in.(active,pending)&email=not.like.' + encodeURIComponent('*@' + DEMO_EMAIL_DOMAIN) + '&select=id') || [];
   return rows.length;
 }
 async function countIntegrationsConnected(env, tenantId) {
@@ -10018,6 +10135,7 @@ return handleSendingDomainVerify(request, env);
 if (url.pathname === '/api/quickbooks/connect' && request.method === 'GET') { return handleQuickBooksConnect(request, env); }
 if (url.pathname === '/api/quickbooks/callback' && request.method === 'GET') { return handleQuickBooksCallback(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/status' && request.method === 'GET') { return handleQuickBooksStatus(request, env, ctx); }
+if (url.pathname === '/api/quickbooks/department' && request.method === 'POST') { return handleQuickBooksDepartment(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/webhook' && request.method === 'POST') { return handleQuickBooksWebhook(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/continue' && request.method === 'POST') { return handleQuickBooksContinue(request, env, ctx); }
 if (url.pathname === '/api/mailbox' && request.method === 'GET') { return handleMailboxStatus(request, env); }
