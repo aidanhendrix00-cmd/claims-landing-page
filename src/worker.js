@@ -4394,6 +4394,18 @@ return pick(/claim/i) || pick(/\bp\.?\s?o\b|purchase\s*order|work\s*order/i) || 
 }
 // The company's departments may be its operating companies (Revolve). Match the
 // invoice's QuickBooks Location (API: Department) or Class to one of them.
+// Which department a whole QuickBooks company belongs to, judged by its name.
+function qboGuessDepartment(companyName, departments) {
+const target = qboNorm(companyName);
+if (!target) return null;
+let best = null, bestLen = 0;
+for (const k of Object.keys(departments || {})) {
+const label = qboNorm(departments[k]);
+if (!label || label.length < 4) continue;
+if ((target.indexOf(label) !== -1 || label.indexOf(target) !== -1) && label.length > bestLen) { best = k; bestLen = label.length; }
+}
+return best;
+}
 function qboDepartmentKey(inv, departments) {
 const lineClass = (inv.Line || []).map(function (l) { return l && l.SalesItemLineDetail && l.SalesItemLineDetail.ClassRef && l.SalesItemLineDetail.ClassRef.name; }).find(Boolean);
 const names = [inv.DepartmentRef && inv.DepartmentRef.name, inv.ClassRef && inv.ClassRef.name, lineClass].filter(Boolean);
@@ -4699,6 +4711,11 @@ const departments = resolveDepartments(user.tenant_departments);
 const deptParam = String(url.searchParams.get('department') || '').trim();
 const department = departments[deptParam] ? deptParam : '';
 const reconnectId = parseInt(url.searchParams.get('reconnect'), 10) || 0;
+// chain=1: "Connect all companies" - after each company is authorized the
+// admin is sent straight back to Intuit's company picker for the next one
+// (one sign-in; Intuit keeps the session). Cancelling the picker ends it.
+const chain = url.searchParams.get('chain') === '1';
+const chainCount = Math.min(parseInt(url.searchParams.get('n'), 10) || 0, 50);
 const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id));
 const reconnecting = conns.find(function (c) { return c.id === reconnectId; }) || null;
 const limits = planLimitsFor(user);
@@ -4709,6 +4726,7 @@ const state = randomToken();
 const redirectParams = new URLSearchParams();
 if (department) redirectParams.set('qbo_dept', department);
 if (reconnecting) redirectParams.set('qbo_reconnect', String(reconnecting.id));
+if (chain) { redirectParams.set('qbo_chain', '1'); redirectParams.set('qbo_n', String(chainCount)); }
 await pgInsert(env, 'oauth_states', { state: state, user_id: user.id, provider: 'quickbooks', redirect_to: '/dashboard' + (redirectParams.toString() ? '?' + redirectParams.toString() : ''),
 expires_at: new Date(Date.now() + 900000).toISOString() });
 const params = new URLSearchParams({ client_id: qboSecret(env, 'CLIENT_ID'), response_type: 'code', scope: QBO_SCOPE,
@@ -4718,7 +4736,14 @@ return redirectTo(QBO_AUTH_URL + '?' + params.toString());
 
 async function handleQuickBooksCallback(request, env, ctx) {
 const url = new URL(request.url);
-if (url.searchParams.get('error')) return redirectTo('/dashboard?qbo=declined');
+if (url.searchParams.get('error')) {
+// Cancelling Intuit's company picker is how "Connect all companies" ends.
+const st0 = url.searchParams.get('state') ? await pgSelectOne(env, 'oauth_states', 'state=' + pgEq(url.searchParams.get('state')) + '&provider=' + pgEq('quickbooks') + '&select=state,redirect_to') : null;
+if (st0) { try { await pgDelete(env, 'oauth_states', 'state=' + pgEq(st0.state)); } catch (e) {} }
+let p0 = new URLSearchParams(); try { p0 = new URL(String((st0 && st0.redirect_to) || '/dashboard'), SITE_URL).searchParams; } catch (e) {}
+if (p0.get('qbo_chain') === '1') return redirectTo('/dashboard?qbo=chain_done&n=' + (parseInt(p0.get('qbo_n'), 10) || 0));
+return redirectTo('/dashboard?qbo=declined');
+}
 const code = url.searchParams.get('code'); const state = url.searchParams.get('state'); const realmId = url.searchParams.get('realmId');
 if (!code || !state || !realmId) return redirectTo('/dashboard?qbo=failed');
 const st = await pgSelectOne(env, 'oauth_states', 'state=' + pgEq(state) + '&provider=' + pgEq('quickbooks') + '&select=*');
@@ -4737,6 +4762,8 @@ const tenantRow = await pgSelectOne(env, 'tenants', 'id=' + pgEq(owner.tenant_id
 const tenantDepartments = resolveDepartments(tenantRow ? tenantRow.departments : null);
 const chosenDept = tenantDepartments[String(wanted.get('qbo_dept') || '')] ? String(wanted.get('qbo_dept')) : null;
 const reconnectId = parseInt(wanted.get('qbo_reconnect'), 10) || 0;
+const chain = wanted.get('qbo_chain') === '1';
+const chainCount = (parseInt(wanted.get('qbo_n'), 10) || 0) + 1;
 let tokens;
 try { tokens = await qboTokenRequest(env, { grant_type: 'authorization_code', code: code, redirect_uri: qboRedirectUri() }); }
 catch (e) {
@@ -4780,10 +4807,17 @@ const conn = { id: integrationId, tenant_id: owner.tenant_id, status: 'connected
 try {
 const info = await qboGet(env, conn, 'companyinfo/' + encodeURIComponent(realmId));
 const name = info && info.CompanyInfo && info.CompanyInfo.CompanyName;
-if (name) await qboSaveConfig(env, conn, { companyName: String(name).slice(0, 160) });
+if (name) {
+const patch = { companyName: String(name).slice(0, 160) };
+// No business chosen up front: match the QuickBooks company name to one
+// of the workspace's departments (e.g. "A1 Valet Trash LLC" -> A1 Valet Trash).
+if (!cfg.department) { const guess = qboGuessDepartment(name, tenantDepartments); if (guess) patch.department = guess; }
+await qboSaveConfig(env, conn, patch);
+}
 } catch (e) { console.log('QBO_COMPANYINFO_FAILED ' + (e && e.message)); }
 // First import starts right away; the dashboard's status poll carries it on.
 if (ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
+if (chain && chainCount < 50) return redirectTo('/api/quickbooks/connect?chain=1&n=' + chainCount);
 return redirectTo('/dashboard?qbo=connected');
 }
 
