@@ -2649,7 +2649,7 @@ async function renderTeam() {
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:right;white-space:nowrap;">' +
             (isAdminViewer && m.status === 'pending' ? '<button class="btn-solid" style="margin-right:6px;" data-id="' + hEsc(m.id) + '" onclick="sendTeamInvite(this.dataset.id, false)">Send invite</button>' : '') +
             (isAdminViewer && m.status !== 'pending' && m.status !== 'disabled' && !(state.currentUser && String(m.email || '').toLowerCase() === String(state.currentUser.email || '').toLowerCase()) ? '<button class="btn-small" style="margin-right:6px;" data-id="' + hEsc(m.id) + '" onclick="sendTeamInvite(this.dataset.id, true)" title="Send a fresh set-your-password link">Resend invite</button>' : '') +
-            (m.role === 'admin' ? '' : ('<button class="btn-small" data-id="' + hEsc(m.id) + '" onclick="removeTeamMember(this.dataset.id)">Remove</button>')) +
+            ((state.currentUser && String(m.email || '').toLowerCase() === String(state.currentUser.email || '').toLowerCase()) ? '<span style="font-size:11.5px;color:var(--slate-soft);">You</span>' : ('<button class="btn-small" data-id="' + hEsc(m.id) + '" onclick="removeTeamMember(this.dataset.id)">Remove</button>')) +
           '</td></tr>';
       }).join('') + '</tbody></table>';
   } catch (err) {
