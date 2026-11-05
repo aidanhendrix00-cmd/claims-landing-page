@@ -1452,6 +1452,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<select id="editModalRole"> ' +
   '<option value="employee">Employee</option> ' +
   '<option value="manager">Manager</option> ' +
+  '<option value="admin">Admin (every office, manages team &amp; settings)</option> ' +
   '</select> ' +
   '</div> ' +
   '<div id="editModalMsg" style="font-size:12.5px;color:#B3261E;margin:-4px 0 8px;display:none;"></div> ' +
@@ -1544,8 +1545,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      } ' +
   '      var tr=document.createElement("tr"); ' +
   '      var isSelf=state.me&&String(state.me.id)===String(u.id); ' +
-  '      var credsCell=canEdit?("<td>"+(u.role==="admin"&&!isSelf?"<span style=\\"color:#B7B2A4;font-size:12px;\\">Locked</span>":"<button class=\\"btn-outline btn-sm\\" data-reset=\\""+esc(u.id)+"\\">Send reset link</button>")+"</td>"):""; ' +
-  '      var editCell=canEdit?("<td>"+(u.role==="admin"?"<span style=\\"color:#B7B2A4;font-size:12px;\\">Locked</span>":"<button class=\\"btn-outline btn-sm\\" data-edit=\\""+esc(u.id)+"\\">Edit</button>")+"</td>"):""; ' +
+  '      var credsCell=canEdit?("<td>"+(isSelf?"<span style=\\"color:#B7B2A4;font-size:12px;\\" title=\\"Use Change password above for your own account\\">Your account</span>":"<button class=\\"btn-outline btn-sm\\" data-reset=\\""+esc(u.id)+"\\">Send reset link</button>")+"</td>"):""; ' +
+  '      var editCell=canEdit?("<td>"+(isSelf?"<span style=\\"color:#B7B2A4;font-size:12px;\\" title=\\"Edit your own details in the profile card above\\">Your account</span>":"<button class=\\"btn-outline btn-sm\\" data-edit=\\""+esc(u.id)+"\\">Edit</button>")+"</td>"):""; ' +
   '      var st=u.status||"active"; var stLabel=st==="active"?"Active":(st==="pending_approval"?"Pending approval":(st==="pending_verification"||st==="invited"?"Invited":titleCase(st))); ' +
   '      tr.innerHTML= ' +
   '        "<td><div class=\\"team-name-cell\\"><div class=\\"team-avatar\\">"+esc(initials(u.name))+"</div>"+esc(u.name)+(isSelf?" <span style=\\"color:#8A8578;font-size:11px;\\">(you)</span>":"")+"</div></td>"+ ' +
@@ -1828,7 +1829,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    var offSel=document.getElementById("editModalOffice"); var om=officeMap(); ' +
   '    offSel.innerHTML=Object.keys(om).map(function(k){ return "<option value=\\""+esc(k)+"\\">"+esc(om[k])+"</option>"; }).join(""); ' +
   '    offSel.value=user.office&&om[user.office]?user.office:Object.keys(om)[0]; ' +
-  '    document.getElementById("editModalRole").value=(user.role==="manager")?"manager":"employee"; ' +
+  '    document.getElementById("editModalRole").value=(user.role==="manager"||user.role==="admin")?user.role:"employee"; ' +
   '    document.getElementById("editModalNote").textContent=isNew?"They will get an email with a link to set their password.":""; ' +
   '    document.getElementById("editModalRemove").style.display=isNew?"none":"inline-block"; ' +
   '    document.getElementById("editModalSave").textContent=isNew?"Send invite":"Save changes"; ' +
@@ -7537,21 +7538,24 @@ const id = parseInt(body.id, 10);
 if (!id) return json({ ok: false, error: 'Missing id' }, 400);
 const target = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,status');
 if (!target) return json({ ok: false, error: 'User not found' }, 404);
-if (target.role === 'admin' || String(target.id) === String(user.id)) return json({ ok: false, error: 'Admin accounts cannot be changed here.' }, 400);
+if (String(target.id) === String(user.id)) return json({ ok: false, error: 'Change your own details from the profile card on My Account.' }, 400);
 const patch = {};
 if (body.role !== undefined) {
 const role = String(body.role || '');
-if (role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'manager' or 'employee'." }, 400);
+if (role !== 'admin' && role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'admin', 'manager' or 'employee'." }, 400);
+if (target.role === 'admin' && role !== 'admin' && (await countActiveAdmins(env, user.tenant_id)) <= 1) return json({ ok: false, error: 'That is the only admin on this company. Make someone else an admin first.' }, 400);
 patch.role = role;
 }
+const newRole = patch.role || target.role;
 if (body.office !== undefined) {
 const offices = resolveOffices(user.tenant_offices);
 const office = String(body.office || '');
-if (!offices[office]) return json({ ok: false, error: 'A valid office is required.' }, 400);
-patch.office = office;
+if (!offices[office] && newRole !== 'admin') return json({ ok: false, error: 'A valid office is required.' }, 400);
+if (offices[office]) patch.office = office;
 }
+if (newRole !== 'admin' && !(patch.office || target.office)) return json({ ok: false, error: 'Managers and employees need an office.' }, 400);
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to change.' }, 400);
-await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&role=neq.admin', patch);
+await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id), patch);
 const offices2 = resolveOffices(user.tenant_offices);
 await logUserActivity(env, user, null, 'team', 'Updated ' + (target.full_name || target.email) + ' (' + target.email + ')' +
 (patch.role ? ' to ' + patch.role : '') + (patch.office ? ' at ' + (offices2[patch.office] || patch.office) : ''));
@@ -7566,13 +7570,14 @@ let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
 if (!id) return json({ ok: false, error: 'Missing id' }, 400);
-const removed = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=email,full_name,role');
-await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&role=neq.admin', { status: 'disabled' });
-if (removed && removed.role !== 'admin') {
+if (String(id) === String(user.id)) return json({ ok: false, error: 'You cannot remove your own account.' }, 400);
+const removed = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=email,full_name,role,status');
+if (!removed) return json({ ok: false, error: 'Team member not found' }, 404);
+if (removed.role === 'admin' && removed.status !== 'disabled' && (await countActiveAdmins(env, user.tenant_id)) <= 1) return json({ ok: false, error: 'That is the only admin on this company. Make someone else an admin first.' }, 400);
+await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id), { status: 'disabled' });
 // Their open sessions end now, not when the cookie expires.
 try { await pgDelete(env, 'sessions', 'user_id=' + pgEq(id)); } catch (e) {}
-await logUserActivity(env, user, null, 'team', 'Removed ' + (removed.full_name || removed.email) + ' (' + removed.email + ') from the team');
-}
+await logUserActivity(env, user, null, 'team', 'Removed ' + (removed.full_name || removed.email) + ' (' + removed.email + ')' + (removed.role === 'admin' ? ' (admin)' : '') + ' from the team');
 return json({ ok: true });
 }
 
@@ -7831,6 +7836,12 @@ function planKeyFor(userOrTenant) {
   return PLAN_LIMITS[key] ? key : 'starter';
 }
 function planLimitsFor(userOrTenant) { return PLAN_LIMITS[planKeyFor(userOrTenant)]; }
+// Admins who can still sign in (held invites don't count). A company is
+// never left without one.
+async function countActiveAdmins(env, tenantId) {
+  const rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&role=' + pgEq('admin') + '&status=' + pgEq('active') + '&select=id') || [];
+  return rows.length;
+}
 async function countSeatsUsed(env, tenantId) {
   // Demo teammates (the sample roster) never take up a paid seat.
   const rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&status=in.(active,pending)&email=not.like.' + encodeURIComponent('*@' + DEMO_EMAIL_DOMAIN) + '&select=id') || [];
