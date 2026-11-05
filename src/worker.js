@@ -7532,11 +7532,16 @@ return json({ ok: true, id: newUserId, invited: sendNow });
 function teamInviteEmail(admin, target, offices, resetToken) {
 const setPasswordUrl = SITE_URL + '/reset-password?token=' + resetToken;
 const role = String(target.role || 'employee');
-const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;">' +
+const companyName = escapeHtml(admin.company_name || 'your company');
+const adminName = escapeHtml(admin.full_name || admin.email || 'your administrator');
+const adminEmail = escapeHtml(admin.email || '');
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:520px;line-height:1.5;">' +
 '<h2 style="margin:0 0 12px;">You\'ve been added to clAIms</h2>' +
-'<p>' + escapeHtml(target.full_name || target.email) + (role === 'admin' ? ', you have been added as an administrator for ' + escapeHtml(admin.company_name || 'your company') + '.' : ', you have been added as a ' + escapeHtml(role) + ' on the ' + escapeHtml((offices && offices[target.office]) || target.office || '') + ' team.') + '</p>' +
+'<p style="margin:0 0 12px;">' + escapeHtml(target.full_name || target.email) + (role === 'admin' ? ', you have been added as an administrator for ' + companyName + '.' : ', you have been added as a ' + escapeHtml(role) + ' on the ' + escapeHtml((offices && offices[target.office]) || target.office || '') + ' team.') + '</p>' +
+'<p style="margin:0 0 12px;">' + adminName + ' invited you to the ' + companyName + ' workspace, where your team tracks open invoices and sends collection follow-ups.</p>' +
+'<p style="margin:0 0 12px;">Once you set your password, connect your email from <strong>My Account</strong> so every follow-up you send goes out from your own address and lands in your Sent folder.</p>' +
 '<p style="margin-top:20px;"><a href="' + setPasswordUrl + '" style="background:#C29B57;color:#171717;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;">Set Your Password</a></p>' +
-'<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days.</p>' +
+'<p style="margin-top:24px;font-size:12px;color:#8a8a8a;">This link expires in 7 days. Questions? Contact ' + adminName + (adminEmail ? ' at <a href="mailto:' + adminEmail + '" style="color:#8a8a8a;">' + adminEmail + '</a>' : '') + '.</p>' +
 '</div>';
 return { subject: "You've been added to clAIms", html: html, kind: 'team_invite' };
 }
