@@ -9,7 +9,7 @@
   "vars": {
     "SUPABASE_URL": "https://ievwycehuzhurxkcczra.supabase.co",
     // QuickBooks: "sandbox" while using Intuit development keys; "production" once Intuit issues live keys
-    "QBO_ENV": "sandbox"
+    "QBO_ENV": "production"
   },
   "triggers": {
     // Every 5 minutes: QuickBooks / IES change pulls run on every firing; the
