@@ -1544,7 +1544,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '        tbody.appendChild(divider); ' +
   '      } ' +
   '      var tr=document.createElement("tr"); ' +
-  '      var isSelf=state.me&&String(state.me.id)===String(u.id); ' +
+  '      var isSelf=!!(state.me&&((state.me.id&&String(state.me.id)===String(u.id))||(state.me.email&&String(state.me.email).toLowerCase()===String(u.email||"").toLowerCase()))); ' +
   '      var credsCell=canEdit?("<td>"+(isSelf?"<span style=\\"color:#B7B2A4;font-size:12px;\\" title=\\"Use Change password above for your own account\\">Your account</span>":"<button class=\\"btn-outline btn-sm\\" data-reset=\\""+esc(u.id)+"\\">Send reset link</button>")+"</td>"):""; ' +
   '      var editCell=canEdit?("<td>"+(isSelf?"<span style=\\"color:#B7B2A4;font-size:12px;\\" title=\\"Edit your own details in the profile card above\\">Your account</span>":"<button class=\\"btn-outline btn-sm\\" data-edit=\\""+esc(u.id)+"\\">Edit</button>")+"</td>"):""; ' +
   '      var st=u.status||"active"; var stLabel=st==="active"?"Active":(st==="pending_approval"?"Pending approval":(st==="pending_verification"||st==="invited"?"Invited":titleCase(st))); ' +
