@@ -1136,11 +1136,14 @@
 <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
 <div style="flex:1;min-width:240px;">
 <div class="name"><span class="dot-pending"></span> <span id="qb-card-title">Connect QuickBooks Online</span></div>
+<div class="sub" id="qb-card-multi" style="margin-bottom:6px;display:none;">Each QuickBooks company file connects separately and is mapped to one of your businesses. Connect every company whose invoices you want on this dashboard.</div>
 <div class="sub" id="qb-card-sub">Sign in to QuickBooks and approve read-only access &mdash; about 30 seconds. clAIms then imports your open invoices, customers and payments into every tab and keeps them in step automatically. When a payment posts in QuickBooks, follow-ups for that invoice stop on their own.</div>
 <div class="sub" style="margin-top:8px;">clAIms only <b>reads</b> from QuickBooks &mdash; it never changes your books. You can disconnect any time.</div>
 <div class="sub" id="qb-card-note" style="margin-top:8px;display:none;"></div>
 </div>
-<div class="actions-col" style="align-self:flex-end;">
+<div class="actions-col" style="align-self:flex-end;align-items:flex-end;gap:8px;">
+<label for="qb-connect-dept" style="font-size:11.5px;color:var(--slate);display:block;">This company&#8217;s business</label>
+<select id="qb-connect-dept" style="min-width:240px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"><option value="">Automatic (use QuickBooks class / department)</option></select>
 <button class="btn-primary" id="qb-connect-btn" onclick="connectQuickBooks()" style="background:#2CA01C;border-color:#2CA01C;">Connect to QuickBooks</button>
 </div>
 </div>
@@ -1836,11 +1839,11 @@
 <div class="overlay" id="overlay-invite">
   <div class="drawer">
     <div class="drawer-head"><h3>Invite Team Member</h3><button class="close" onclick="closeInviteTeamMember()">Close &times;</button></div>
-    <div class="drawer-sub">New team members receive an email to set their password. Manager and employee accounts are scoped to a single office.</div>
+    <div class="drawer-sub">New team members receive an email to set their password. Manager and employee accounts are scoped to a single office; admins see every office and can manage the team, integrations and settings.</div>
     <div class="form-row"><label>New User&#39;s Email *</label><input id="invite-email" type="email" placeholder="name@company.com" required></div>
     <div class="form-row"><label>Full Name</label><input id="invite-name" type="text" placeholder="Jane Smith"></div>
-    <div class="form-row"><label>Role</label><select id="invite-role"><option value="employee">Employee</option><option value="manager">Manager</option></select></div>
-    <div class="form-row"><label>Office</label><select id="invite-office"><option value="arizona">Arizona</option><option value="dallas">Dallas</option><option value="houston">Houston</option><option value="hillcountry">Hill Country</option></select></div>
+    <div class="form-row"><label>Role</label><select id="invite-role" onchange="inviteRoleChanged()"><option value="employee">Employee</option><option value="manager">Manager</option><option value="admin">Admin</option></select></div>
+    <div class="form-row" id="invite-office-row"><label>Office</label><select id="invite-office"><option value="arizona">Arizona</option><option value="dallas">Dallas</option><option value="houston">Houston</option><option value="hillcountry">Hill Country</option></select></div>
     <button class="btn-primary" onclick="submitInviteTeamMember()">Send Invite</button>
   </div>
 </div>
@@ -2579,8 +2582,8 @@ qbInit();
       document.querySelectorAll('[title*="CRM"]').forEach(function(el){ el.title = el.title.replace(/your CRM/g, 'QuickBooks').replace(/\bCRM\b/g, 'QuickBooks'); });
       const t = document.getElementById('real-integrations-title'); if (t) t.textContent = 'QuickBooks Connection';
       const p = document.getElementById('real-integrations-intro'); if (p) p.textContent = isAdminUser
-        ? 'QuickBooks Online is the only system this workspace needs. Connect it once below and every open invoice, customer and payment appears across the queue, spreadsheet, reports and collections automatically — refreshed continuously, no manual entry.'
-        : 'This workspace runs on QuickBooks Online. Your admin connects it once and every open invoice, customer and payment appears here automatically.';
+        ? 'QuickBooks Online (or Intuit Enterprise Suite) is the only system this workspace needs. Connect each company file below and map it to the business it belongs to — every open invoice, customer and payment then appears across the queue, accounts, reports and collections automatically, refreshed continuously with no manual entry.'
+        : 'This workspace runs on QuickBooks Online. Your admin connects each company file once and every open invoice, customer and payment appears here automatically.';
     }
     const elevated = (state.currentUser.role === 'admin' || state.currentUser.role === 'manager');
     document.querySelectorAll('[data-manager-only]').forEach(function(el){
@@ -2612,7 +2615,7 @@ async function renderTeam() {
     try {
       var b = (window.__me && window.__me.billing) || (!state.currentUser ? { planName: 'Growth', seats: { limit: 8 } } : null);
       if (b && b.planName) {
-        var used = team.filter(function(m){ return (m.status || 'active') !== 'disabled'; }).length;
+        var used = team.filter(function(m){ return (m.status || 'active') !== 'disabled' && !/@demo\.claims-collection\.net$/i.test(m.email || ''); }).length;
         var limit = b.seats ? b.seats.limit : null;
         var over = (limit && used > limit) ? (used - limit) : 0;
         planLine = '<div id="team-plan-line" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px;font-size:13px;color:#5B6B73;">' +
@@ -2658,6 +2661,7 @@ function openInviteTeamMember() {
   if (emailEl) emailEl.value = '';
   if (nameEl) nameEl.value = '';
   if (roleEl) roleEl.value = 'employee';
+  inviteRoleChanged();
   if (officeEl) officeEl.value = Object.keys(inviteOfficeMap())[0] || 'arizona';
   const overlay = document.getElementById('overlay-invite');
   if (overlay) overlay.classList.add('open');
@@ -2668,6 +2672,11 @@ function closeInviteTeamMember() {
   if (overlay) overlay.classList.remove('open');
 }
 
+function inviteRoleChanged() {
+  const role = (document.getElementById('invite-role') || {}).value || 'employee';
+  const row = document.getElementById('invite-office-row');
+  if (row) row.style.display = role === 'admin' ? 'none' : '';
+}
 async function submitInviteTeamMember() {
   const emailEl = document.getElementById('invite-email');
   const email = emailEl ? emailEl.value.trim() : '';
@@ -8276,7 +8285,11 @@ const list = state.realIntegrations || [];
 const qbCard = document.getElementById('qb-connect-card');
 if (qbMode && qbCard && me.role === 'admin') {
 const live = list.some(function(i){ return i.status === 'connected'; });
-qbCard.style.display = live ? 'none' : '';
+qbCard.style.display = '';
+const multi = document.getElementById('qb-card-multi'); if (multi) multi.style.display = live ? '' : 'none';
+const title = document.getElementById('qb-card-title'); if (title && !(window.__qbStatus && window.__qbStatus.needsReconnect)) title.textContent = live ? 'Connect another QuickBooks company' : 'Connect QuickBooks Online';
+const btn = document.getElementById('qb-connect-btn'); if (btn && !(window.__qbStatus && window.__qbStatus.needsReconnect)) btn.textContent = live ? 'Connect another company' : 'Connect to QuickBooks';
+qbFillDepartmentSelect(document.getElementById('qb-connect-dept'), '');
 }
 if (list.length === 0 && !concierge){
 wrap.innerHTML = (qbMode && me.role !== 'admin') ? '<div class="empty">QuickBooks is not connected yet — ask your admin to connect it under Integrations.</div>' : '';
@@ -8296,23 +8309,56 @@ const requestCard = concierge ? `
 wrap.innerHTML = list.map(integ => `
 <div class="integration-card">
 <div>
-<div class="name"><span class="${integ.status === 'connected' ? 'dot-live' : 'dot-pending'}"></span> ${hEsc(integ.provider)} ${integ.status === 'connected' ? '<span class="badge">LIVE</span>' : '<span class="badge warn">DISCONNECTED</span>'}</div>
+<div class="name"><span class="${integ.status === 'connected' ? 'dot-live' : 'dot-pending'}"></span> ${hEsc(integ.quickbooks && integ.companyName ? integ.companyName : integ.provider)} ${integ.status === 'connected' ? (integ.needsReconnect ? '<span class="badge warn">RECONNECT</span>' : '<span class="badge">LIVE</span>') : '<span class="badge warn">DISCONNECTED</span>'}${integ.quickbooks && integ.environment === 'sandbox' ? ' <span class="badge warn">SANDBOX</span>' : ''}</div>
+${integ.quickbooks ? `<div class="sub">${hEsc(integ.provider)}${integ.companyName ? '' : ' company'} &middot; Business: <select class="qb-dept-select" data-id="${integ.id}" onchange="qbSetDepartment(this)" style="padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:12px;background:#fff;max-width:260px;"></select></div>` : ''}
 <div class="sub">${integ.status === 'connected' ? 'Connected ' + fmtTimeAgo(integ.connected_at) : 'Disconnected'}</div>
 ${integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Last synced ${integ.last_synced_at ? fmtTimeAgo(integ.last_synced_at) : (qbMode ? 'never \u2014 the first import is running now' : 'never \u2014 waiting for the first data push')}</div>` : ''}
 ${concierge && integ.status === 'connected' ? `<div class="sub" style="margin-top:2px;">Managed by the clAIms team \u2014 request changes below.</div>` : ''}
 ${qbMode && integ.status !== 'connected' && me.role === 'admin' ? `<div class="sub" style="margin-top:2px;">Reconnect with the card below.</div>` : ''}
-${qbMode && integ.status === 'connected' && window.__qbStatus && window.__qbStatus.companyName ? `<div class="sub" style="margin-top:2px;">QuickBooks company: ${hEsc(window.__qbStatus.companyName)}${window.__qbStatus.sandbox ? ' (sandbox)' : ''}</div>` : ''}
-${qbMode && integ.status === 'connected' && window.__qbStatus && window.__qbStatus.lastError ? `<div class="sub" style="margin-top:2px;color:#8A1C13;">${hEsc(window.__qbStatus.lastError)}</div>` : ''}
+${integ.quickbooks && integ.importing ? `<div class="sub" style="margin-top:2px;">Importing &mdash; ${integ.imported || 0} open invoice${integ.imported === 1 ? '' : 's'} so far.</div>` : ''}
+${integ.quickbooks && integ.lastError ? `<div class="sub" style="margin-top:2px;color:#8A1C13;">${hEsc(integ.lastError)}</div>` : ''}
+${integ.quickbooks && integ.needsReconnect ? `<div class="sub" style="margin-top:2px;color:#8A1C13;">QuickBooks stopped accepting this connection &mdash; reconnect to resume syncing.</div>` : ''}
 </div>
 <div class="actions-col">
 ${integ.status === 'connected'
 ? (concierge ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button>`
-: qbMode ? (me.role === 'admin' ? `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>` : '')
+: qbMode ? (me.role === 'admin' ? `${integ.needsReconnect ? `<button class="btn-small" onclick="connectQuickBooks(${integ.id})">Reconnect</button>` : `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button>`}<button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>` : '')
 : `<button class="btn-small" onclick="syncRealIntegration(${integ.id})">Sync Now</button><button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Regenerate Key</button><button class="btn-small" onclick="disconnectRealIntegration(${integ.id})">Disconnect</button>`)
-: (concierge ? `<span class="sub">We\u2019ll reconnect this for you</span>` : qbMode ? '' : `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Reconnect</button>`)}
+: (concierge ? `<span class="sub">We\u2019ll reconnect this for you</span>` : qbMode ? (me.role === 'admin' && integ.quickbooks ? `<button class="btn-small" onclick="connectQuickBooks(${integ.id})">Reconnect</button>` : '') : `<button class="btn-small" onclick="regenerateRealIntegration('${String(integ.provider).replace(/'/g,"\\'")}')">Reconnect</button>`)}
 </div>
 </div>
 `).join('') + requestCard;
+// Fill each connection's business picker (the tenant's departments).
+Array.prototype.forEach.call(wrap.querySelectorAll('.qb-dept-select'), function(sel){
+const integ = list.find(function(i){ return String(i.id) === String(sel.dataset.id); });
+qbFillDepartmentSelect(sel, integ ? (integ.department || '') : '');
+sel.disabled = !(me && me.role === 'admin');
+});
+}
+function qbDepartmentMap(){
+const me = (window.__me && window.__me.ok) ? window.__me : null;
+const d = (me && me.departments && typeof me.departments === 'object') ? me.departments : {};
+return d;
+}
+function qbFillDepartmentSelect(sel, value){
+if (!sel) return;
+const d = qbDepartmentMap();
+let html = '<option value="">Automatic (use QuickBooks class / department)</option>';
+Object.keys(d).forEach(function(k){ if (k && d[k]) html += '<option value="' + hEsc(k) + '"' + (k === value ? ' selected' : '') + '>' + hEsc(String(d[k])) + '</option>'; });
+sel.innerHTML = html;
+sel.value = value || '';
+}
+async function qbSetDepartment(sel){
+const id = sel.dataset.id, value = sel.value;
+sel.disabled = true;
+try {
+const res = await fetch('/api/quickbooks/department', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, department: value }) });
+const d = await res.json().catch(function(){ return null; });
+if (!res.ok || !d || !d.ok) { showToast((d && d.error) || 'Could not save that mapping.'); loadRealIntegrations(); return; }
+showToast(value ? ('Invoices from this company now file under ' + (d.departmentLabel || value) + '.') : 'This company now follows its QuickBooks class / department.');
+if (typeof loadRealAccounts === 'function') { try { await loadRealAccounts(); } catch (e) {} }
+} catch (e) { showToast('Could not save that mapping.'); }
+finally { sel.disabled = false; }
 }
 
 function showQuickBooksCard(){
@@ -8325,12 +8371,17 @@ try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) 
 
 // QuickBooks-only workspaces: one click hands off to Intuit's sign-in screen;
 // clAIms brings the admin back here and imports everything itself.
-function connectQuickBooks(){
+function connectQuickBooks(reconnectId){
 const me = (window.__me && window.__me.ok) ? window.__me : null;
 if (me && me.quickbooksOAuth === false) { showToast('The QuickBooks connection is being finalized \u2014 please try again shortly.'); return; }
 const btn = document.getElementById('qb-connect-btn');
 if (btn){ btn.disabled = true; btn.textContent = 'Opening QuickBooks\u2026'; }
-window.location.href = '/api/quickbooks/connect';
+const params = new URLSearchParams();
+const deptSel = document.getElementById('qb-connect-dept');
+if (!reconnectId && deptSel && deptSel.value) params.set('department', deptSel.value);
+if (reconnectId) params.set('reconnect', String(reconnectId));
+const qs = params.toString();
+window.location.href = '/api/quickbooks/connect' + (qs ? '?' + qs : '');
 }
 
 // Live QuickBooks status: the import progress card, the reconnect prompt, and
@@ -8348,17 +8399,22 @@ const prog = document.getElementById('qb-progress-card');
 if (prog) {
 prog.style.display = st.importing ? '' : 'none';
 const sub = document.getElementById('qb-progress-sub');
+const importingNames = (st.connections || []).filter(function(c){ return c.importing; }).map(function(c){ return c.companyName; }).filter(Boolean);
+const ptitle = document.getElementById('qb-progress-title');
+if (ptitle) ptitle.textContent = importingNames.length ? ('Importing from ' + importingNames.join(', ') + '\u2026') : 'Importing from QuickBooks\u2026';
 if (sub && st.importing) sub.textContent = (st.imported ? st.imported + ' open invoice' + (st.imported === 1 ? '' : 's') + ' imported so far. ' : '') + 'You can keep working \u2014 invoices appear in every tab as they arrive.';
 }
 const note = document.getElementById('qb-card-note');
 const title = document.getElementById('qb-card-title');
 if (note) {
-if (st.needsReconnect) { note.style.display = ''; note.style.color = '#8A1C13'; note.textContent = st.reconnectReason || 'QuickBooks stopped accepting the connection. Reconnect to resume syncing.'; if (title) title.textContent = 'Reconnect QuickBooks Online'; }
+if (st.needsReconnect) { const names = (st.connections || []).filter(function(c){ return c.needsReconnect; }).map(function(c){ return c.companyName; }).filter(Boolean); note.style.display = ''; note.style.color = '#8A1C13'; note.textContent = (names.length ? names.join(', ') + ': ' : '') + (st.reconnectReason || 'QuickBooks stopped accepting the connection. Reconnect to resume syncing.'); if (title) title.textContent = 'Reconnect QuickBooks Online'; }
 else if (st.configured === false) { note.style.display = ''; note.style.color = ''; note.textContent = 'The QuickBooks connection is being finalized by the clAIms team and will be ready shortly.'; }
-else { note.style.display = 'none'; if (title) title.textContent = 'Connect QuickBooks Online'; }
+else { note.style.display = 'none'; if (title) title.textContent = st.connected ? 'Connect another QuickBooks company' : 'Connect QuickBooks Online'; }
 }
 const btn = document.getElementById('qb-connect-btn');
-if (btn){ btn.disabled = st.configured === false; btn.textContent = st.needsReconnect ? 'Reconnect QuickBooks' : 'Connect to QuickBooks'; }
+if (btn){ btn.disabled = st.configured === false; btn.textContent = st.needsReconnect ? 'Reconnect QuickBooks' : (st.connected ? 'Connect another company' : 'Connect to QuickBooks');
+const needs = (st.connections || []).find(function(c){ return c.needsReconnect; });
+btn.onclick = function(){ connectQuickBooks(st.needsReconnect && needs ? needs.id : undefined); }; }
 if (wasImporting && !st.importing) { loadRealIntegrations(); if (typeof loadRealAccounts === 'function') loadRealAccounts(); showToast('QuickBooks import finished \u2014 your open invoices are in.'); }
 else if (st.importing && typeof loadRealAccounts === 'function') { loadRealAccounts(); }
 clearTimeout(qbPollTimer);
@@ -8370,7 +8426,7 @@ const params = new URLSearchParams(window.location.search);
 const result = params.get('qbo');
 if (result) {
 const messages = {
-connected: 'QuickBooks connected \u2014 importing your open invoices now.',
+connected: 'QuickBooks company connected \u2014 importing its open invoices now. Connect another company any time.',
 declined: 'QuickBooks connection was cancelled.',
 expired: 'That took a little too long \u2014 please click Connect to QuickBooks again.',
 token_failed: 'QuickBooks did not accept the sign-in. Please try connecting again.',
