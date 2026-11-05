@@ -4935,9 +4935,10 @@ async function qboPurgeCompanyRows(env, conn) {
 const tid = pgEq(conn.tenant_id);
 const rows = await pgSelect(env, 'accounts', 'tenant_id=' + tid + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix)) + '&select=id') || [];
 const ids = rows.map(function (a) { return a.id; });
+await purgeAccountExtras(env, conn.tenant_id, ids);
 for (const chunk of qboChunks(ids, 100)) {
 const inList = 'in.(' + chunk.join(',') + ')';
-for (const t of ['user_activity', 'account_notes', 'invoice_payments', 'invoice_comms', 'documents']) {
+for (const t of ['user_activity', 'account_activity', 'account_notes', 'invoice_payments', 'invoice_comms', 'documents']) {
 try { await pgDelete(env, t, 'tenant_id=' + tid + '&account_id=' + inList); } catch (e) {}
 }
 await pgDelete(env, 'accounts', 'tenant_id=' + tid + '&id=' + inList);
@@ -8862,6 +8863,25 @@ ids = ids.concat(rows.map(function (a) { return a.id; }));
 }
 return Array.from(new Set(ids));
 }
+// Statements built only from the given invoices (and their PDFs) and the
+// email threads that pointed at them - removed alongside the invoices when a
+// demo roster or a replaced QuickBooks company is cleared out.
+async function purgeAccountExtras(env, tenantId, acctIds) {
+if (!acctIds || !acctIds.length) return;
+try {
+const gone = {}; for (const id of acctIds) gone[String(id)] = true;
+const stmts = await pgSelect(env, 'account_statements', 'tenant_id=' + pgEq(tenantId) + '&select=id,storage_path,account_ids') || [];
+for (const st of stmts) {
+const ids = Array.isArray(st.account_ids) ? st.account_ids : [];
+if (!ids.length || !ids.every(function (id) { return gone[String(id)]; })) continue;
+try { await pgDelete(env, 'account_statements', 'id=' + pgEq(st.id)); } catch (e) {}
+if (st.storage_path) { try { await storageDelete(env, st.storage_path); } catch (e) {} }
+}
+} catch (e) {}
+for (const chunk of qboChunks(acctIds, 100)) {
+try { await pgDelete(env, 'email_threads', 'tenant_id=' + pgEq(tenantId) + '&thread_key=in.(' + chunk.map(function (id) { return '"inv:' + id + '"'; }).join(',') + ')'); } catch (e) {}
+}
+}
 async function demoRemove(env, tenantId) {
 const users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenantId) + '&email=like.' + encodeURIComponent('*@' + DEMO_EMAIL_DOMAIN) + '&select=id') || [];
 const acctIds = await demoAccountIds(env, tenantId);
@@ -8873,6 +8893,7 @@ try { await pgDelete(env, t, 'tenant_id=' + pgEq(tenantId) + '&account_id=' + in
 }
 }
 if (userIds.length) { try { await pgDelete(env, 'user_activity', 'tenant_id=' + pgEq(tenantId) + '&user_id=in.(' + userIds.join(',') + ')'); } catch (e) {} }
+await purgeAccountExtras(env, tenantId, acctIds);
 for (const pre of DEMO_EXTERNAL_PREFIXES) {
 try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(pre + '*')); } catch (e) {}
 }
