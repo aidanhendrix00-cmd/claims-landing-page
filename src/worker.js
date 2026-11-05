@@ -4820,6 +4820,27 @@ if (rr) out.reconnectReason = rr.reconnectReason;
 return json(out);
 }
 
+// GET /api/quickbooks/diagnose - clAIms operators only. Confirms the live
+// Intuit credentials without connecting anything: a token exchange with a
+// dummy code is answered "invalid_grant" when the client id/secret pair is
+// accepted and "invalid_client" when it is not. No secret values are returned.
+async function handleQuickBooksDiagnose(request, env) {
+const user = await getSessionUser(request, env);
+if (!user || user.role !== 'admin' || user.tenant_slug !== 'base') return json({ ok: false }, 403);
+const out = { ok: true, environment: qboSandbox(env) ? 'sandbox' : 'production', apiBase: qboApiBase(env), redirectUri: qboRedirectUri(),
+configured: qboConfigured(env), clientIdLength: qboSecret(env, 'CLIENT_ID').length, clientSecretLength: qboSecret(env, 'CLIENT_SECRET').length,
+webhookVerifierSet: !!qboSecret(env, 'WEBHOOK_VERIFIER'), webhookVerifierLength: qboSecret(env, 'WEBHOOK_VERIFIER').length };
+try {
+await qboTokenRequest(env, { grant_type: 'authorization_code', code: 'claims-diagnostic', redirect_uri: qboRedirectUri() });
+out.credentials = 'unexpected_success';
+} catch (e) {
+const msg = String(e && e.message || '');
+out.tokenEndpoint = msg.slice(0, 200);
+out.credentials = /invalid_grant/i.test(msg) ? 'accepted' : (/invalid_client|unauthorized|401/i.test(msg) ? 'rejected' : 'unknown');
+}
+return json(out);
+}
+
 // POST /api/quickbooks/department { id, department } - map a connected
 // company file to a clAIms department (business). An explicit choice re-tags
 // every invoice already mirrored from it; "auto" (empty) re-reads the open
@@ -10136,6 +10157,7 @@ if (url.pathname === '/api/quickbooks/connect' && request.method === 'GET') { re
 if (url.pathname === '/api/quickbooks/callback' && request.method === 'GET') { return handleQuickBooksCallback(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/status' && request.method === 'GET') { return handleQuickBooksStatus(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/department' && request.method === 'POST') { return handleQuickBooksDepartment(request, env, ctx); }
+if (url.pathname === '/api/quickbooks/diagnose' && request.method === 'GET') { return handleQuickBooksDiagnose(request, env); }
 if (url.pathname === '/api/quickbooks/webhook' && request.method === 'POST') { return handleQuickBooksWebhook(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/continue' && request.method === 'POST') { return handleQuickBooksContinue(request, env, ctx); }
 if (url.pathname === '/api/mailbox' && request.method === 'GET') { return handleMailboxStatus(request, env); }
