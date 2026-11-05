@@ -1137,6 +1137,7 @@
 <div style="flex:1;min-width:240px;">
 <div class="name"><span class="dot-pending"></span> <span id="qb-card-title">Connect QuickBooks Online</span></div>
 <div class="sub" id="qb-card-multi" style="margin-bottom:6px;display:none;">Each QuickBooks company file connects separately and is mapped to one of your businesses. Connect every company whose invoices you want on this dashboard.</div>
+<div class="sub" id="qb-card-all" style="margin-bottom:6px;">Several companies under one QuickBooks login? Use <b>Connect all companies</b>: sign in once, then for each company pick it and click Authorize &mdash; you come straight back for the next one. Click <b>Cancel</b> on Intuit&#8217;s picker when every company is connected. Each company is matched to the business with the same name; adjust below if needed.</div>
 <div class="sub" id="qb-card-sub">Sign in to QuickBooks and approve read-only access &mdash; about 30 seconds. clAIms then imports your open invoices, customers and payments into every tab and keeps them in step automatically. When a payment posts in QuickBooks, follow-ups for that invoice stop on their own.</div>
 <div class="sub" style="margin-top:8px;">clAIms only <b>reads</b> from QuickBooks &mdash; it never changes your books. You can disconnect any time.</div>
 <div class="sub" id="qb-card-note" style="margin-top:8px;display:none;"></div>
@@ -1145,6 +1146,7 @@
 <label for="qb-connect-dept" style="font-size:11.5px;color:var(--slate);display:block;">This company&#8217;s business</label>
 <select id="qb-connect-dept" style="min-width:240px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;background:#fff;"><option value="">Automatic (use QuickBooks class / department)</option></select>
 <button class="btn-primary" id="qb-connect-btn" onclick="connectQuickBooks()" style="background:#2CA01C;border-color:#2CA01C;">Connect to QuickBooks</button>
+<button class="btn-small" id="qb-connect-all-btn" onclick="connectAllQuickBooks()" title="Sign in once; after each company is authorized you come straight back to pick the next. Cancel the picker when you're done.">Connect all companies (one sign-in)</button>
 </div>
 </div>
 </div>
@@ -8404,6 +8406,13 @@ try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) 
 
 // QuickBooks-only workspaces: one click hands off to Intuit's sign-in screen;
 // clAIms brings the admin back here and imports everything itself.
+function connectAllQuickBooks(){
+const me = (window.__me && window.__me.ok) ? window.__me : null;
+if (me && me.quickbooksOAuth === false) { showToast('The QuickBooks connection is being finalized \u2014 please try again shortly.'); return; }
+const btn = document.getElementById('qb-connect-all-btn');
+if (btn){ btn.disabled = true; btn.textContent = 'Opening QuickBooks\u2026'; }
+window.location.href = '/api/quickbooks/connect?chain=1&n=0';
+}
 function connectQuickBooks(reconnectId){
 const me = (window.__me && window.__me.ok) ? window.__me : null;
 if (me && me.quickbooksOAuth === false) { showToast('The QuickBooks connection is being finalized \u2014 please try again shortly.'); return; }
@@ -8460,6 +8469,7 @@ const result = params.get('qbo');
 if (result) {
 const messages = {
 connected: 'QuickBooks company connected \u2014 importing its open invoices now. Connect another company any time.',
+chain_done: (function(){ var n = parseInt(params.get('n'), 10) || 0; return n ? ('All set \u2014 ' + n + ' QuickBooks compan' + (n === 1 ? 'y' : 'ies') + ' connected and importing. Check each one\u2019s business below.') : 'No new companies were connected.'; })(),
 declined: 'QuickBooks connection was cancelled.',
 expired: 'That took a little too long \u2014 please click Connect to QuickBooks again.',
 token_failed: 'QuickBooks did not accept the sign-in. Please try connecting again.',
@@ -8471,7 +8481,7 @@ disconnected: 'QuickBooks was disconnected from the QuickBooks side.',
 failed: 'Could not connect QuickBooks. Please try again.'
 };
 showToast(messages[result] || messages.failed);
-params.delete('qbo');
+params.delete('qbo'); params.delete('n');
 const qs = params.toString();
 try { history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash); } catch (e) {}
 const nav = document.querySelector('.nav-item[data-view=integrations]'); if (nav) nav.click();
