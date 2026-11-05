@@ -1844,7 +1844,8 @@
     <div class="form-row"><label>Full Name</label><input id="invite-name" type="text" placeholder="Jane Smith"></div>
     <div class="form-row"><label>Role</label><select id="invite-role" onchange="inviteRoleChanged()"><option value="employee">Employee</option><option value="manager">Manager</option><option value="admin">Admin</option></select></div>
     <div class="form-row" id="invite-office-row"><label>Office</label><select id="invite-office"><option value="arizona">Arizona</option><option value="dallas">Dallas</option><option value="houston">Houston</option><option value="hillcountry">Hill Country</option></select></div>
-    <button class="btn-primary" onclick="submitInviteTeamMember()">Send Invite</button>
+    <div class="form-row" id="invite-send-row" style="display:none;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;"><input type="checkbox" id="invite-send-now" checked onchange="inviteSendChanged()" style="width:auto;margin:0;"> Send the invite email now</label><div style="font-size:11.5px;color:var(--slate);margin-top:4px;">Uncheck to add them now and send the invite later with the <b>Send invite</b> button on the Team list.</div></div>
+    <button class="btn-primary" id="invite-submit-btn" onclick="submitInviteTeamMember()">Send Invite</button>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -2629,6 +2630,7 @@ async function renderTeam() {
       wrap.innerHTML = planLine + '<p style="color:#5B6B73;font-size:13px;">No team members yet.</p>';
       return;
     }
+    const isAdminViewer = !state.currentUser || state.currentUser.role === 'admin';
     const officeLabel = function(o){ var om = inviteOfficeMap(); return om[o] || ({ arizona:'Arizona', dallas:'Dallas', houston:'Houston', hillcountry:'Hill Country' })[o] || o || String.fromCharCode(8212); };
     wrap.innerHTML = planLine + '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Name</th>' +
@@ -2643,9 +2645,11 @@ async function renderTeam() {
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + hEsc(m.email) + '</td>' +
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-transform:capitalize;">' + hEsc(m.role) + '</td>' +
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + officeLabel(m.office) + '</td>' +
-          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-transform:capitalize;">' + (m.status || '') + '</td>' +
-          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:right;">' +
-            (m.role === 'admin' ? '' : ('<button class="btn-small" onclick="removeTeamMember(' + JSON.stringify(m.id).replace(/"/g, '&quot;') + ')">Remove</button>')) +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + (m.status === 'pending' ? '<span style="background:#FFF4E5;border:1px solid #F2C879;color:#7A4B00;border-radius:999px;padding:2px 8px;font-size:11.5px;">Invite not sent</span>' : '<span style="text-transform:capitalize;">' + hEsc(m.status || '') + '</span>') + '</td>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:right;white-space:nowrap;">' +
+            (isAdminViewer && m.status === 'pending' ? '<button class="btn-solid" style="margin-right:6px;" data-id="' + hEsc(m.id) + '" onclick="sendTeamInvite(this.dataset.id, false)">Send invite</button>' : '') +
+            (isAdminViewer && m.status !== 'pending' && m.status !== 'disabled' && !(state.currentUser && String(m.email || '').toLowerCase() === String(state.currentUser.email || '').toLowerCase()) ? '<button class="btn-small" style="margin-right:6px;" data-id="' + hEsc(m.id) + '" onclick="sendTeamInvite(this.dataset.id, true)" title="Send a fresh set-your-password link">Resend invite</button>' : '') +
+            (m.role === 'admin' ? '' : ('<button class="btn-small" data-id="' + hEsc(m.id) + '" onclick="removeTeamMember(this.dataset.id)">Remove</button>')) +
           '</td></tr>';
       }).join('') + '</tbody></table>';
   } catch (err) {
@@ -2661,6 +2665,13 @@ function openInviteTeamMember() {
   if (emailEl) emailEl.value = '';
   if (nameEl) nameEl.value = '';
   if (roleEl) roleEl.value = 'employee';
+  // Adding an admin is itself an admin-only action; the option never renders otherwise.
+  const isAdmin = !!(state.currentUser && state.currentUser.role === 'admin');
+  const adminOpt = roleEl ? roleEl.querySelector('option[value="admin"]') : null;
+  if (adminOpt) { adminOpt.hidden = !isAdmin; adminOpt.disabled = !isAdmin; }
+  const sendRow = document.getElementById('invite-send-row'); if (sendRow) sendRow.style.display = isAdmin ? '' : 'none';
+  const sendNow = document.getElementById('invite-send-now'); if (sendNow) sendNow.checked = true;
+  inviteSendChanged();
   inviteRoleChanged();
   if (officeEl) officeEl.value = Object.keys(inviteOfficeMap())[0] || 'arizona';
   const overlay = document.getElementById('overlay-invite');
@@ -2672,6 +2683,11 @@ function closeInviteTeamMember() {
   if (overlay) overlay.classList.remove('open');
 }
 
+function inviteSendChanged() {
+  const sendNow = document.getElementById('invite-send-now');
+  const btn = document.getElementById('invite-submit-btn');
+  if (btn) btn.textContent = (sendNow && !sendNow.checked) ? 'Add Without Sending' : 'Send Invite';
+}
 function inviteRoleChanged() {
   const role = (document.getElementById('invite-role') || {}).value || 'employee';
   const row = document.getElementById('invite-office-row');
@@ -2693,14 +2709,16 @@ async function submitInviteTeamMember() {
   const fullName = (document.getElementById('invite-name') || {}).value || '';
   const role = (document.getElementById('invite-role') || {}).value || 'employee';
   const office = (document.getElementById('invite-office') || {}).value || Object.keys(inviteOfficeMap())[0] || 'arizona';
+  const sendNowEl = document.getElementById('invite-send-now');
+  const sendInvite = !(sendNowEl && !sendNowEl.checked);
   if (!state.currentUser) {
     // Demo: the roster lives in this tab only.
     state.team = state.team || [];
     if (state.team.some(function(m){ return String(m.email).toLowerCase() === email.toLowerCase(); })) { showToast('That email is already on the team.'); return; }
     if (state.team.filter(function(m){ return m.status !== 'disabled'; }).length >= 8) { showToast('Your Growth plan includes 8 seats. Remove a teammate or upgrade to add more.'); return; }
-    state.team.push({ id: 'demo-' + Date.now(), full_name: fullName.trim(), email: email, role: role, office: office, status: 'invited' });
+    state.team.push({ id: 'demo-' + Date.now(), full_name: fullName.trim(), email: email, role: role, office: office, status: sendInvite ? 'invited' : 'pending' });
     saveState(); closeInviteTeamMember(); renderTeam();
-    showToast(email + ' has been invited.');
+    showToast(sendInvite ? (email + ' has been invited.') : (email + ' added \u2014 invite not sent yet.'));
     return;
   }
   try {
@@ -2708,7 +2726,7 @@ async function submitInviteTeamMember() {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email, fullName: fullName, role: role, office: office })
+      body: JSON.stringify({ email: email, fullName: fullName, role: role, office: office, sendInvite: sendInvite })
     });
     const data = await res.json();
     if (!data.ok) {
@@ -2718,10 +2736,25 @@ async function submitInviteTeamMember() {
     closeInviteTeamMember();
     renderTeam();
     if (typeof loadCurrentUser === 'function') loadCurrentUser();
-    if (typeof showToast === 'function') showToast(email + ' has been invited.');
+    if (typeof showToast === 'function') showToast(sendInvite ? (email + ' has been invited.') : (email + ' added \u2014 use Send invite on the Team list when you\u2019re ready.'));
   } catch (err) {
     if (typeof showToast === 'function') showToast('Unable to add team member.'); else alert('Unable to add team member.');
   }
+}
+
+async function sendTeamInvite(id, resend) {
+  if (!state.currentUser) {
+    state.team = (state.team || []).map(function(m){ return String(m.id) === String(id) ? Object.assign({}, m, { status: 'invited' }) : m; });
+    saveState(); renderTeam(); showToast('Invite sent.'); return;
+  }
+  if (resend && !confirm('Send a fresh set-your-password link to this team member?')) return;
+  try {
+    const res = await fetch('/api/team/send-invite', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) });
+    const data = await res.json().catch(function(){ return null; });
+    if (!res.ok || !data || !data.ok) { showToast((data && data.error) || 'Could not send the invite.'); return; }
+    renderTeam();
+    showToast(resend ? 'Invite re-sent.' : 'Invite sent \u2014 they have 7 days to set a password.');
+  } catch (e) { showToast('Could not send the invite.'); }
 }
 
 async function removeTeamMember(id) {
