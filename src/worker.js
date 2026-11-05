@@ -4871,7 +4871,9 @@ out.credentials = 'unexpected_success';
 } catch (e) {
 const msg = String(e && e.message || '');
 out.tokenEndpoint = msg.slice(0, 200);
-out.credentials = /invalid_grant/i.test(msg) ? 'accepted' : (/invalid_client|unauthorized|401/i.test(msg) ? 'rejected' : 'unknown');
+// Intuit answers a dummy code with 400 invalid_grant / "Invalid authorization code"
+// once the client id + secret pair has been accepted; a bad pair is 401 invalid_client.
+out.credentials = /invalid_grant|invalid authorization code|status=400/i.test(msg) ? 'accepted' : (/invalid_client|unauthorized|status=401/i.test(msg) ? 'rejected' : 'unknown');
 }
 return json(out);
 }
