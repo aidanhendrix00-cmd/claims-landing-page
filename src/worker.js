@@ -5065,9 +5065,9 @@ if (!conns.length) return;
 // what carries first imports forward: several rounds per firing, as many as
 // the invocation's request budget allows, until nothing is left importing.
 let pending = conns.slice();
-const budget = 45;
+const budget = Math.max(10, parseInt(env.QBO_SWEEP_BUDGET || '45', 10) || 45);
 let used = 0;
-for (let round = 0; round < 12 && pending.length && used + pending.length <= budget; round++) {
+for (let round = 0; round < 20 && pending.length && used + pending.length <= budget; round++) {
 used += pending.length;
 const results = await Promise.all(pending.map(function (conn) { return qboContinue(env, conn, null, { wait: true }); }));
 pending = pending.filter(function (conn, i) { const r = results[i]; return !!(r && r.ran && r.importing); });
