@@ -725,6 +725,13 @@
   @media (prefers-reduced-motion: reduce){
     *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important;scroll-behavior:auto !important;}
   }
+
+  /* Paged tables: 100 rows at a time; search, sort and filters still span
+     every row. Keeps the page light with thousands of invoices. */
+  .pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:12px 0 4px;flex-wrap:wrap;}
+  .pager .pager-info{font-size:12.5px;color:var(--slate);}
+  .pager .btn-small[disabled]{opacity:.45;cursor:default;}
+  .pager.top{padding:0 0 10px;}
 </style>
 
 
@@ -952,6 +959,7 @@
           <tfoot id="sheet-foot"></tfoot>
         </table>
       </div>
+      <div id="sheet-pager"></div>
     </section>
 
     <!-- ===================== REPORT VIEW ===================== -->
@@ -3275,7 +3283,24 @@ async function loadRealAccountsNow(){
     __reloadDeferred = false;
     loadRealAccounts();
   }
-  setInterval(refreshRealAccountsIfIdle, 30000);
+  // Reloads are change-driven, never on a blind timer: the 5-second probe
+  // below asks the server "anything new?" and only then is the list pulled.
+  // Bursts of changes (a QuickBooks import adding rows every few seconds) are
+  // coalesced so the 3 MB list is fetched and re-rendered at most once every
+  // REFRESH_MIN_GAP_MS, not on every ping.
+  const REFRESH_MIN_GAP_MS = 20000;
+  let __lastAccountsRefreshAt = 0;
+  let __refreshTimer = null;
+  function requestAccountsRefresh(){
+    if (!state.currentUser) return;
+    const wait = Math.max(0, __lastAccountsRefreshAt + REFRESH_MIN_GAP_MS - Date.now());
+    if (__refreshTimer) return; // one already queued
+    __refreshTimer = setTimeout(function(){
+      __refreshTimer = null;
+      __lastAccountsRefreshAt = Date.now();
+      refreshRealAccountsIfIdle();
+    }, wait);
+  }
   setInterval(function(){ if (__reloadDeferred) refreshRealAccountsIfIdle(); }, 4000);
 
   // Real-time sync: a lightweight change probe every 8 seconds. The moment the
@@ -3341,11 +3366,13 @@ async function loadRealAccountsNow(){
           __pingV = d.v;
           __pingMaxId = d.maxId;
           if (changed) {
-            await loadRealAccounts();
+            requestAccountsRefresh();
             // The Employees Activity feed is server-fed; refresh it too when
             // it is the tab on screen, so what a teammate just did shows up.
             if (typeof actViewOpen === 'function' && actViewOpen() && typeof loadEmployeeActivity === 'function') loadEmployeeActivity(true, true);
-            if (newAccount && typeof showToast === 'function') showToast('New invoice synced from your connected system.');
+            // During a first import rows arrive every few seconds; one toast
+            // per batch, not one per ping.
+            if (newAccount && typeof showToast === 'function' && !(window.__qbStatus && window.__qbStatus.importing)) showToast('New invoice synced from your connected system.');
           }
           // Plan or billing-state change (upgrade, downgrade, hold): refresh
           // the user/plan context so limits, banners and the Team page update
@@ -3369,17 +3396,82 @@ document.addEventListener('visibilitychange', function(){
 if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadRealIntegrations(); }
 });
 
+  // Which renderers paint which tab. renderAll() paints the shared pieces
+  // (counts, KPIs, filters) plus only the tab on screen; the others are
+  // marked stale and painted the moment they are opened. With thousands of
+  // invoices, repainting every table on every change was the lag.
+  const VIEW_RENDERERS = {
+    queue: ['renderTodoList', 'renderQueue'],
+    accounts: ['renderAccountsTab'],
+    sheet: ['renderSheet'],
+    report: ['renderReport'],
+    invoicedmtd: ['renderInvoicedMTD'],
+    collectedmtd: ['renderCollectedMTD'],
+    collected: ['renderCollectedAll'],
+    sent: ['renderSent'],
+    responses: ['renderResponses'],
+    escalations: ['renderEscalations'],
+    automations: ['renderAutomationsFeed'],
+    integrations: ['renderCustomIntegrations'],
+    activity: ['renderActivityIfOpen']
+  };
+  const __staleViews = {};
+  function activeViewName(){
+    const v = document.querySelector('.view.active');
+    return v && v.id ? v.id.replace(/^view-/, '') : 'queue';
+  }
+  function renderView(name){
+    (VIEW_RENDERERS[name] || []).forEach(function(fnName){
+      const fn = window[fnName];
+      if (typeof fn !== 'function') return;
+      try { fn(); } catch(e){ console.error('render failed:', fnName, e); }
+    });
+    delete __staleViews[name];
+  }
+  // Called whenever a tab becomes visible: paint it if data changed since it
+  // was last painted.
+  function renderViewIfStale(name){ if (__staleViews[name]) renderView(name); }
+  // Paging. Each big table asks for its slice with pageOf(key, rows, sig):
+  // `sig` is the table's filter/sort signature, so changing a search, filter
+  // or sort returns to page 1 while a data refresh keeps the current page.
+  const PAGE_SIZE = 100;
+  const __pageState = {};
+  function pageOf(key, rows, sig){
+    const st = __pageState[key] || (__pageState[key] = { page: 0, sig: null });
+    if (st.sig !== sig) { st.page = 0; st.sig = sig; }
+    const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    if (st.page > pages - 1) st.page = pages - 1;
+    const from = st.page * PAGE_SIZE;
+    return { rows: rows.slice(from, from + PAGE_SIZE), page: st.page, pages: pages, from: from, to: Math.min(rows.length, from + PAGE_SIZE), total: rows.length, key: key };
+  }
+  function pagerHTML(pg, noun, cls){
+    if (!pg || pg.total <= PAGE_SIZE) return '';
+    noun = noun || 'invoices';
+    return '<div class="pager' + (cls ? ' ' + cls : '') + '">' +
+      '<button type="button" class="btn-small"' + (pg.page === 0 ? ' disabled' : '') + ' onclick="setPage(\'' + pg.key + '\', -1)">&larr; Previous</button>' +
+      '<span class="pager-info">Showing ' + (pg.from + 1).toLocaleString() + '\u2013' + pg.to.toLocaleString() + ' of ' + pg.total.toLocaleString() + ' ' + noun + ' \u00b7 page ' + (pg.page + 1) + ' of ' + pg.pages + '</span>' +
+      '<button type="button" class="btn-small"' + (pg.page >= pg.pages - 1 ? ' disabled' : '') + ' onclick="setPage(\'' + pg.key + '\', 1)">Next &rarr;</button></div>';
+  }
+  const PAGE_VIEW = { queue: 'queue', sheet: 'sheet', accounts: 'accounts', sent: 'sent', responses: 'responses', escalations: 'escalations', collected: 'collected', collectedmtd: 'collectedmtd' };
+  function setPage(key, delta){
+    const st = __pageState[key]; if (!st) return;
+    st.page = Math.max(0, st.page + delta);
+    const view = PAGE_VIEW[key] || key;
+    renderView(view);
+    const top = document.querySelector('#view-' + view + ' .topbar') || document.getElementById('view-' + view);
+    if (top && top.scrollIntoView) top.scrollIntoView({ block: 'start' });
+  }
   function renderAll(){
-    const steps = [
-      renderScopePanels, renderKpis, renderTodoList, renderQueue, renderAccountsTab, renderSheet, renderReport, renderSent, renderResponses,
-      renderEscalations, renderAutomationsFeed, renderNavCounts, renderSfSimOptions,
-      renderCustomIntegrations, renderRespSimOptions, renderNotifications,
-      renderInvoicedMTD, renderCollectedMTD, renderCollectedAll, renderNetSuitePaymentOptions, renderMoneyPanel,
-      renderActivityIfOpen
+    const shared = [
+      renderScopePanels, renderKpis, renderNavCounts, renderSfSimOptions,
+      renderRespSimOptions, renderNotifications, renderNetSuitePaymentOptions, renderMoneyPanel
     ];
-    steps.forEach(fn => {
+    shared.forEach(fn => {
       try{ fn(); }catch(e){ console.error('renderAll step failed:', fn.name, e); }
     });
+    const active = activeViewName();
+    Object.keys(VIEW_RENDERERS).forEach(function(name){ __staleViews[name] = true; });
+    renderView(active);
     try{
       const setChecked = (id, val) => { const el = document.getElementById(id); if(el) el.checked = !!val; };
       const setValue = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
@@ -3414,6 +3506,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     const view = btn.dataset.view;
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     document.getElementById('view-' + view).classList.add('active');
+    renderViewIfStale(view);
     if(view === 'sheet') setTimeout(function(){ fitSheetWrap(); scrollSheetIntoPlace(); }, 0);
     else if(document.body.classList.contains('sheet-fullscreen')) sheetFullscreen(false);
     if(view === 'activity' && typeof loadEmployeeActivity === 'function') loadEmployeeActivity(false);
@@ -3490,6 +3583,14 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     document.getElementById('nav-count-sent').textContent = state.commsLog.length;
     document.getElementById('nav-count-resp').textContent = state.responsesLog.length;
     document.getElementById('nav-count-esc').textContent = state.invoices.filter(i=>i.escalated).length;
+    // Counts the month/collected tabs used to set while painting themselves;
+    // those tabs now paint only when opened, so keep their badges fresh here.
+    try {
+      const { start, end } = monthRange();
+      const mtd = document.getElementById('nav-count-mtd'); if (mtd) mtd.textContent = state.invoices.filter(inv => dateInRange(inv.invoiceDate, start, end)).length;
+      const col = document.getElementById('nav-count-collected'); if (col) col.textContent = state.paymentsLog.filter(p => dateInRange(p.paidDate, start, end)).filter(paymentPassesFilters).length;
+      const colAll = document.getElementById('nav-count-collectedall'); if (colAll) colAll.textContent = state.paymentsLog.filter(paymentPassesFilters).filter(paymentInCollectedWindow).length;
+    } catch (e) {}
   }
 
   /* ============================================================
@@ -3950,7 +4051,8 @@ function todoRowHTML(item, num, priority){
     });
 
     if(items.length === 0){ el.innerHTML = `<div class="empty">${realEmptyQueueMessage() || 'No invoices match your current filters.'}</div>`; return; }
-    el.innerHTML = items.map(inv => cardHTML(inv)).join('');
+    const pg = pageOf('queue', items, [searchVal, payerFilter, sortVal, state.deptFilter, (scopeOffices() || []).join(','), (scopeDepts() || []).join(',')].join('|'));
+    el.innerHTML = pagerHTML(pg, 'invoices', 'top') + pg.rows.map(inv => cardHTML(inv)).join('') + pagerHTML(pg, 'invoices');
   }
 
   // Flag or clear "DO NOT CONTACT - Sent to Collections Agency" on an account.
@@ -4356,7 +4458,7 @@ function todoRowHTML(item, num, priority){
     const rows = sortSheetRows(openRows.filter(matchesSheetFilters));
     const countEl = document.getElementById('sheet-count');
     if (countEl) countEl.textContent = rows.length === openRows.length ? (rows.length + ' invoice' + (rows.length === 1 ? '' : 's')) : (rows.length + ' of ' + openRows.length + ' invoices');
-    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center;padding:24px;color:var(--slate);">${(openRows.length ? 'No open invoices match your search or filters.' : (realEmptyQueueMessage() || 'No open invoices match the current filters. Paid invoices have moved to the Collected tab.'))}</td></tr>`; if(foot) foot.innerHTML = ''; return; }
+    if(rows.length === 0){ body.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center;padding:24px;color:var(--slate);">${(openRows.length ? 'No open invoices match your search or filters.' : (realEmptyQueueMessage() || 'No open invoices match the current filters. Paid invoices have moved to the Collected tab.'))}</td></tr>`; if(foot) foot.innerHTML = ''; const pe0 = document.getElementById('sheet-pager'); if (pe0) pe0.innerHTML = ''; return; }
     // Totals for exactly the rows on screen, so the number always matches the table.
     if(foot){
       const totalInvoiced = rows.reduce(function(sum, i){ return sum + (Number(i.amount) || 0); }, 0);
@@ -4369,8 +4471,12 @@ function todoRowHTML(item, num, priority){
         <td colspan="${colCount - before - 1}"></td>
       </tr>`;
     }
-    if (tracker) { body.innerHTML = rows.map(trackerRowHTML).join(''); return; }
-    body.innerHTML = rows.map(inv => `
+    const sheetSig = [state.sheetSearch, state.sheetDateFrom, state.sheetDateTo, state.sheetShow, state.sheetSort, state.deptFilter, state.officeFilter, weeksOn.join(',')].map(function(v){ return v == null ? '' : String(v); }).join('|');
+    const pg = pageOf('sheet', rows, sheetSig);
+    const pagerEl = document.getElementById('sheet-pager');
+    if (pagerEl) pagerEl.innerHTML = pagerHTML(pg, 'invoices');
+    if (tracker) { body.innerHTML = pg.rows.map(trackerRowHTML).join(''); return; }
+    body.innerHTML = pg.rows.map(inv => `
       <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
         <td>${inv.invoiceNumber}</td>
         <td style="font-family:var(--font-mono);">${inv.jobNumber}</td>
@@ -4852,8 +4958,9 @@ function todoRowHTML(item, num, priority){
     if(payments.length === 0){
       wrap.innerHTML = `<div class="empty">No payments recorded yet this month${(scopeOffices().length || scopeDepts().length) ? ' for ' + hEsc(scopeLabel()) : ''}. ${window.__CLMS_REAL ? 'Payments posted in ' + hEsc(dataSourcesLabel()) + ' land here automatically, and you can record one from an invoice\'s Manage drawer.' : 'Use Integrations &rarr; "Simulate a NetSuite Payment" to test this.'}</div>`;
     } else {
-      wrap.innerHTML = `<table class="log"><thead><tr><th>Customer</th><th>Invoice #</th><th>Office</th><th>Department</th><th>Amount</th><th>Remaining</th><th>Method</th><th>Date Applied</th><th>Source</th></tr></thead><tbody>
-        ${payments.slice().reverse().map(p => `<tr>
+      const pg = pageOf('collectedmtd', payments.slice().reverse(), [state.deptFilter, state.officeFilter, String(start), String(end)].join('|'));
+      wrap.innerHTML = pagerHTML(pg, 'payments', 'top') + `<table class="log"><thead><tr><th>Customer</th><th>Invoice #</th><th>Office</th><th>Department</th><th>Amount</th><th>Remaining</th><th>Method</th><th>Date Applied</th><th>Source</th></tr></thead><tbody>
+        ${pg.rows.map(p => `<tr>
           <td>${acctLink(p.invoiceId, p.invoiceName)}${paymentIsPartial(p) ? ' <span class="badge partial">PARTIAL PAYMENT</span>' : ''}</td>
           <td style="font-family:var(--font-mono);font-size:11.5px;">${p.invoiceNumber || (findInv(p.invoiceId) || {}).invoiceNumber || '\u2014'}</td>
           <td>${OFFICE_LABELS[p.officeLocation] || p.officeLocation || '\u2014'}</td>
@@ -4864,7 +4971,7 @@ function todoRowHTML(item, num, priority){
           <td>${fmtDate(p.paidDate)}</td>
           <td><span class="status-pill ${(p.source==='automation'||p.source==='integration')?'auto-tag':''}">${p.source==='automation' ? 'NETSUITE' : (p.source==='integration' ? 'INTEGRATION' : 'MANUAL')}</span></td>
         </tr>`).join('')}
-      </tbody></table>`;
+      </tbody></table>` + pagerHTML(pg, 'payments');
     }
   }
 
@@ -4981,12 +5088,19 @@ function todoRowHTML(item, num, priority){
     if(years.length === 0){
       bodyEl.innerHTML = collectedFilter.period !== 'all' ? `<div class="empty">No payments in this period. <span class="hist-link" onclick="clearCollectedFilter()">Show all time</span></div>` : `<div class="empty">No payments recorded yet. ${window.__CLMS_REAL ? 'Payments posted in ' + hEsc(dataSourcesLabel()) + ' land here automatically, or record one manually from an invoice\'s Manage drawer.' : 'Post one via Integrations &rarr; "Simulate a NetSuite Payment," or record one manually from an invoice\'s Manage drawer.'}</div>`;
     } else {
-      bodyEl.innerHTML = years.map(y => {
-        const months = Object.keys(byYear[y]).map(Number).sort((a,b) => b - a);
-        const yearTotal = months.reduce((s,m) => s + byYear[y][m].reduce((s2,p) => s2 + p.amount, 0), 0);
+      // One page of payments at a time (newest first); year and month totals
+      // still cover every payment in the period, not just the rows on screen.
+      const flat = payments.slice().sort((a,b) => (new Date(b.paidDate) - new Date(a.paidDate)) || (String(b.id).localeCompare(String(a.id))));
+      const pg = pageOf('collected', flat, [collectedFilter.period, collectedFilter.from, collectedFilter.to, state.deptFilter, state.officeFilter].map(function(v){ return v == null ? '' : String(v); }).join('|'));
+      const onPage = {};
+      pg.rows.forEach(p => { const d = new Date(p.paidDate + 'T00:00:00'); const y = d.getFullYear(), m = d.getMonth(); (onPage[y] = onPage[y] || {})[m] = (onPage[y][m] || []).concat([p]); });
+      const pageYears = Object.keys(onPage).map(Number).sort((a,b) => b - a);
+      bodyEl.innerHTML = pagerHTML(pg, 'payments', 'top') + pageYears.map(y => {
+        const months = Object.keys(onPage[y]).map(Number).sort((a,b) => b - a);
+        const yearTotal = Object.keys(byYear[y] || {}).reduce((s,m) => s + byYear[y][m].reduce((s2,p) => s2 + p.amount, 0), 0);
         const monthsHTML = months.map(m => {
-          const rows = byYear[y][m].slice().sort((a,b) => new Date(b.paidDate) - new Date(a.paidDate));
-          const monthTotal = rows.reduce((s,p) => s + p.amount, 0);
+          const rows = onPage[y][m];
+          const monthTotal = (byYear[y] && byYear[y][m] ? byYear[y][m] : rows).reduce((s,p) => s + p.amount, 0);
           return `
             <div class="collected-month-block">
               <div class="collected-month-head">${monthNames[m]} ${y}<span class="collected-month-total">$${monthTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
@@ -5010,7 +5124,7 @@ function todoRowHTML(item, num, priority){
             <div class="collected-year-head"><h3>${y}</h3><span class="collected-year-total">$${yearTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</span></div>
             ${monthsHTML}
           </div>`;
-      }).join('');
+      }).join('') + pagerHTML(pg, 'payments');
     }
 
     const navCount = document.getElementById('nav-count-collectedall');
@@ -5093,11 +5207,12 @@ function todoRowHTML(item, num, priority){
     const wrap = document.getElementById('sent-wrap');
     const rows = state.commsLog.filter(s => invoiceDeptMatches(s.invoiceId)).slice().sort((a, b) => logTime(b.sentTs || b.sentAt) - logTime(a.sentTs || a.sentAt));
     if(rows.length === 0){ wrap.innerHTML = `<div class="empty">Nothing sent yet${state.deptFilter!=='all' ? ' for this department' : ''}. Cadence follow-ups will appear here automatically as invoices reach each checkpoint.</div>`; return; }
-    wrap.innerHTML = `
+    const pg = pageOf('sent', rows, [state.deptFilter, state.officeFilter].join('|'));
+    wrap.innerHTML = pagerHTML(pg, 'messages', 'top') + `
       <table class="log">
         <thead><tr><th>Customer</th><th>Office</th><th>Department</th><th>Amount</th><th>Sent</th><th>Type</th><th>Sent To</th><th>Subject</th><th>Source</th><th>Status</th><th>Message</th></tr></thead>
         <tbody>
-          ${rows.map(s => `
+          ${pg.rows.map(s => `
             <tr>
               <td>${acctLink(s.invoiceId, s.invoiceName)}</td>
 <td>${OFFICE_LABELS[(findInv(s.invoiceId)||{}).officeLocation] || '\u2014'}</td>
@@ -5113,7 +5228,7 @@ function todoRowHTML(item, num, priority){
             </tr>
           `).join('')}
         </tbody>
-      </table>`;
+      </table>` + pagerHTML(pg, 'messages');
   }
 
   /* ============================================================
@@ -5173,11 +5288,12 @@ function todoRowHTML(item, num, priority){
     });
     const countEl = document.getElementById('resp-count'); if (countEl) countEl.textContent = rows.length === all.length ? (rows.length + ' response' + (rows.length === 1 ? '' : 's')) : (rows.length + ' of ' + all.length + ' responses');
     if(rows.length === 0){ wrap.innerHTML = `<div class="empty">${all.length ? 'No responses match your search or filters.' : 'No responses logged yet' + (state.deptFilter!=='all' ? ' for this department' : '') + '. Responses are captured automatically whenever a sent email comes back as "replied" &mdash; or trigger one above to see it flow through live.'}</div>`; return; }
-    wrap.innerHTML = `
+    const pg = pageOf('responses', rows, [q, f.type, f.status, f.from, f.to, f.sort, state.deptFilter, state.officeFilter].join('|'));
+    wrap.innerHTML = pagerHTML(pg, 'responses', 'top') + `
       <table class="log">
         <thead><tr><th>Customer</th><th>Amount</th><th>Received</th><th>In Response To</th><th>Job Status</th><th>Response Summary</th><th>Response</th></tr></thead>
         <tbody>
-          ${rows.map(r => `
+          ${pg.rows.map(r => `
             <tr>
               <td>${acctLink(r.invoiceId, r.invoiceName)}</td>
               <td class="amt">$${r.amount.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
@@ -5189,7 +5305,7 @@ function todoRowHTML(item, num, priority){
             </tr>
           `).join('')}
         </tbody>
-      </table>`;
+      </table>` + pagerHTML(pg, 'responses');
   }
 
   function renderRespSimOptions(){
@@ -5457,11 +5573,12 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     if(!groups.length){ wrap.innerHTML = '<div class="empty">No accounts' + (q ? ' match that search' : ' with open invoices') + '.</div>'; return; }
     const totOpen = groups.reduce(function(s2, g){ return s2 + g.openTotal; }, 0);
     const totInv = groups.reduce(function(s2, g){ return s2 + (f.includePaid ? g.count : g.openCount); }, 0);
-    wrap.innerHTML = `
+    const pg = pageOf('accounts', groups, [q, f.sort, f.includePaid ? 1 : 0, state.deptFilter, state.officeFilter].join('|'));
+    wrap.innerHTML = pagerHTML(pg, 'accounts', 'top') + `
       <table class="log">
         <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>City</th><th>Total open</th><th>Avg age</th><th>Last contact</th><th></th></tr></thead>
         <tbody>
-          ${groups.map(g => `
+          ${pg.rows.map(g => `
             <tr class="acct-row" data-key="${hEsc(g.key)}" onclick="openAccountPanel(this.dataset.key)">
               <td><div class="acct-name">${hEsc(g.name)}</div><div class="acct-sub">${hEsc(g.contact || 'No contact on file')}${g.contactEmail ? ' · ' + hEsc(g.contactEmail) : ''}${g.escalated ? ' · <span style="color:var(--rust);font-weight:600;">' + g.escalated + ' escalated</span>' : ''}${g.dnc ? ' · <span style="color:var(--rust);font-weight:600;">Do not contact</span>' : ''}</div></td>
               <td><b>${f.includePaid ? g.count : g.openCount}</b>${f.includePaid && g.openCount !== g.count ? '<div class="acct-sub">' + g.openCount + ' open</div>' : ''}</td>
@@ -5474,7 +5591,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
             </tr>`).join('')}
         </tbody>
         <tfoot><tr><td style="font-weight:600;padding:10px 16px;">${groups.length} account${groups.length === 1 ? '' : 's'}</td><td style="font-weight:600;">${totInv}</td><td></td><td></td><td class="amt" style="font-weight:600;">$${totOpen.toLocaleString(undefined,{minimumFractionDigits:2})}</td><td></td><td></td><td></td></tr></tfoot>
-      </table>`;
+      </table>` + pagerHTML(pg, 'accounts');
   }
 
   // Pull from QuickBooks / IES: runs Sync Now on every connected Intuit
@@ -5943,7 +6060,8 @@ Hard rules - these override everything above:
     });
     const countEl = document.getElementById('esc-count'); if (countEl) countEl.textContent = items.length === all.length ? (items.length + ' escalated') : (items.length + ' of ' + all.length + ' escalated');
     if(items.length === 0){ wrap.innerHTML = `<div class="empty">${all.length ? 'No escalated accounts match your search or filters.' : 'No escalations right now. Use "Manage &rarr; Escalate" on any invoice to pull it out of the autonomous cadence.'}</div>`; return; }
-    wrap.innerHTML = items.map(inv => `
+    const pg = pageOf('escalations', items, [q, JSON.stringify(f), state.deptFilter, state.officeFilter].join('|'));
+    wrap.innerHTML = pagerHTML(pg, 'escalations', 'top') + pg.rows.map(inv => `
       <div class="card">
         <div class="who">
           <div class="name">${acctLink(inv.id, inv.name)}</div>
@@ -5973,7 +6091,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
           <button class="btn-primary" onclick="openDrawer(${inv.id}, 'followup')">Draft Follow-Up</button>
         </div>
       </div>
-    `).join('');
+    `).join('') + pagerHTML(pg, 'escalations');
   }
 
   /* ============================================================
@@ -8458,9 +8576,11 @@ if (btn){ btn.disabled = st.configured === false; btn.textContent = st.needsReco
 const needs = (st.connections || []).find(function(c){ return c.needsReconnect; });
 btn.onclick = function(){ connectQuickBooks(st.needsReconnect && needs ? needs.id : undefined); }; }
 if (wasImporting && !st.importing) { loadRealIntegrations(); if (typeof loadRealAccounts === 'function') loadRealAccounts(); showToast('QuickBooks import finished \u2014 your open invoices are in.'); }
-else if (st.importing && typeof loadRealAccounts === 'function') { loadRealAccounts(); }
+// While importing, the change probe already notices the new rows; just make
+// sure a (coalesced) refresh is queued rather than reloading on every poll.
+else if (st.importing && typeof requestAccountsRefresh === 'function') { requestAccountsRefresh(); }
 clearTimeout(qbPollTimer);
-if (st.importing) qbPollTimer = setTimeout(qbRefreshStatus, 6000);
+if (st.importing) qbPollTimer = setTimeout(qbRefreshStatus, 10000);
 return st;
 }
 async function qbInit(){
