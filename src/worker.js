@@ -4246,10 +4246,10 @@ return (cfg && typeof cfg === 'object' && !Array.isArray(cfg)) ? cfg : {};
 function qboConnFromRow(row) {
 const cfg = qboParseConfig(row.config_json);
 if (!cfg.oauth) return null;
-return { id: row.id, tenant_id: row.tenant_id, status: row.status, connected_at: row.connected_at, last_synced_at: row.last_synced_at, cfg: cfg };
+return { id: row.id, tenant_id: row.tenant_id, status: row.status, connected_at: row.connected_at, last_synced_at: row.last_synced_at, api_key: row.api_key || null, cfg: cfg };
 }
 async function qboLoadConns(env, query) {
-const rows = await pgSelect(env, 'integrations', query + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,tenant_id,status,connected_at,last_synced_at,config_json&order=id.asc');
+const rows = await pgSelect(env, 'integrations', query + '&provider=' + pgEq(QBO_PROVIDER) + '&select=id,tenant_id,status,connected_at,last_synced_at,api_key,config_json&order=id.asc');
 return (rows || []).map(qboConnFromRow).filter(Boolean);
 }
 // Per-connection external-id prefixes (see the header note on multi-company).
@@ -4653,6 +4653,13 @@ const hold = await integrationBillingHold(env, conn.tenant_id);
 if (hold) return { ran: false, held: true };
 if (!(await qboAcquireLock(env, conn))) return { ran: false, busy: true };
 try {
+// Housekeeping left by the connect step (demo rows, the previous company's
+// rows) runs here, in its own invocation, before any import touches the book.
+if (conn.cfg.cleanup) {
+const more = await qboCleanupStep(env, conn);
+if (opts.chain !== false) qboContinue(env, conn, opts.ctx);
+return { ran: true, cleanup: true, more: more };
+}
 const importing = conn.cfg.import && conn.cfg.import.phase !== 'done';
 if (importing) {
 await qboImportStep(env, conn);
@@ -4678,13 +4685,47 @@ await qboReleaseLock(env, conn);
 function qboContinue(env, conn, ctx) {
 const run = (async function () {
 try {
-const row = await pgSelectOne(env, 'integrations', 'id=' + pgEq(conn.id) + '&select=api_key');
-if (!row || !row.api_key) return;
-await fetch(SITE_URL + '/api/quickbooks/continue', { method: 'POST', headers: { 'Authorization': 'Bearer ' + row.api_key, 'Content-Type': 'application/json' }, body: '{}' });
+let key = conn.api_key || null;
+if (!key) { const row = await pgSelectOne(env, 'integrations', 'id=' + pgEq(conn.id) + '&select=api_key'); key = row && row.api_key; }
+if (!key) return;
+await fetch(SITE_URL + '/api/quickbooks/continue', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: '{}' });
 } catch (e) { console.log('QBO_CONTINUE_FAILED ' + (e && e.message)); }
 })();
 if (ctx && ctx.waitUntil) ctx.waitUntil(run);
 return run;
+}
+// Several companies at once (the 5-minute sweep, a webhook burst, the status
+// poll): each one gets its own invocation. A Worker invocation has a fixed
+// budget of outbound requests (50 on the free plan), and one company's sync
+// step can use most of it - running them back to back in one invocation made
+// every company after the first fail with "Too many subrequests".
+async function qboDispatch(env, conns, ctx) {
+for (const conn of conns) {
+if (!conn || conn.status !== 'connected' || qboEnvMismatch(env, conn)) continue;
+await qboContinue(env, conn, ctx);
+}
+}
+// Housekeeping deferred from the connect step. cfg.cleanup = { demo: bool,
+// purge: { idPrefix, payPrefix, realmId } | null }. Each call does a bounded
+// amount of work (so it fits one invocation) and returns true while more
+// remains; the caller chains another invocation.
+async function qboCleanupStep(env, conn) {
+const job = Object.assign({}, conn.cfg.cleanup || {});
+if (job.demo) {
+try { await demoRemove(env, conn.tenant_id); } catch (e) { console.log('DEMO_REMOVE_FAILED ' + (e && e.message)); }
+job.demo = false;
+await qboSaveConfig(env, conn, { cleanup: job });
+return true;
+}
+if (job.purge) {
+const prevConn = { id: conn.id, tenant_id: conn.tenant_id, cfg: { idPrefix: job.purge.idPrefix || null, payPrefix: job.purge.payPrefix || null } };
+const r = await qboPurgeCompanyRows(env, prevConn, { limit: 300 });
+console.log('QBO_PREVIOUS_COMPANY_PURGED rows=' + r.deleted + ' more=' + r.more + ' realm=' + job.purge.realmId);
+if (r.more) return true;
+job.purge = null;
+}
+await qboSaveConfig(env, conn, { cleanup: null });
+return false;
 }
 async function handleQuickBooksContinue(request, env, ctx) {
 const authHeader = request.headers.get('Authorization') || '';
@@ -4784,26 +4825,27 @@ const sameCompany = !!(prev.oauth && String(prev.realmId) === String(realmId) &&
 // The first connection in a workspace keeps the original "qbo-" ids; every
 // later company gets ids scoped to its realm so the two never collide.
 const prefixes = existing ? { idPrefix: prev.idPrefix || null, payPrefix: prev.payPrefix || null } : (mine.length ? qboRealmPrefixes(realmId) : { idPrefix: null, payPrefix: null });
+// Housekeeping is handed to the first sync step (its own invocation) rather
+// than done here: real books arriving clear any demo invoices/employees, and
+// a different company than before (the sandbox company replaced by the real
+// one) has its mirrored rows removed before the new import starts. Doing it
+// inline blew the per-invocation request budget and left sandbox rows behind.
+const cleanup = { demo: !qboSandbox(env),
+purge: (existing && prev.realmId && !sameCompany) ? { idPrefix: prev.idPrefix || null, payPrefix: prev.payPrefix || null, realmId: String(prev.realmId) } : null };
 const cfg = Object.assign({ provider: 'quickbooks', oauth: true, realmId: String(realmId), environment: qboSandbox(env) ? 'sandbox' : 'production',
 connectedBy: owner.id, connectedByEmail: owner.email, connectedAt: nowIso, needsReconnect: false, lastError: null,
 department: chosenDept || (sameCompany ? (prev.department || null) : (prev.department || null)),
 cdcAt: sameCompany ? prev.cdcAt : null, lastFullSyncAt: sameCompany ? (prev.lastFullSyncAt || null) : null,
-import: sameCompany ? (prev.import || null) : qboStartImport(prev, true).import }, prefixes,
+import: sameCompany ? (prev.import || null) : qboStartImport(prev, true).import,
+cleanup: (cleanup.demo || cleanup.purge) ? cleanup : null }, prefixes,
 await qboTokenFields(env, tokens));
-const rowPatch = { status: 'connected', api_key: randomToken(), connected_at: nowIso, realm_id: String(realmId), config_json: JSON.stringify(cfg) };
+const apiKey = randomToken();
+const rowPatch = { status: 'connected', api_key: apiKey, connected_at: nowIso, realm_id: String(realmId), config_json: JSON.stringify(cfg) };
 let integrationId;
 if (existing) { await pgUpdate(env, 'integrations', 'id=' + pgEq(existing.id), rowPatch); integrationId = existing.id; }
 else { const ins = await pgInsert(env, 'integrations', Object.assign({ tenant_id: owner.tenant_id, provider: QBO_PROVIDER }, rowPatch)); integrationId = ins && ins.id; }
 try { await pgUpdate(env, 'tenants', 'id=' + pgEq(owner.tenant_id), { integration_status: 'complete' }); } catch (e) {}
-// Real books arriving: clear any demo invoices/employees so nothing fake mixes in.
-if (!qboSandbox(env)) { try { await demoRemove(env, owner.tenant_id); } catch (e) { console.log('DEMO_REMOVE_FAILED ' + (e && e.message)); } }
-// A different company than before (e.g. the sandbox company replaced by the
-// real one): its mirrored rows go before the new import starts.
-if (existing && prev.realmId && !sameCompany) {
-try { const n = await qboPurgeCompanyRows(env, existing); console.log('QBO_PREVIOUS_COMPANY_PURGED rows=' + n + ' realm=' + prev.realmId); }
-catch (e) { console.log('QBO_PURGE_FAILED ' + (e && e.message)); }
-}
-const conn = { id: integrationId, tenant_id: owner.tenant_id, status: 'connected', cfg: cfg, _access: tokens.access_token, _accessUntil: Date.now() + 3000000 };
+const conn = { id: integrationId, tenant_id: owner.tenant_id, status: 'connected', api_key: apiKey, cfg: cfg, _access: tokens.access_token, _accessUntil: Date.now() + 3000000 };
 try {
 const info = await qboGet(env, conn, 'companyinfo/' + encodeURIComponent(realmId));
 const name = info && info.CompanyInfo && info.CompanyInfo.CompanyName;
@@ -4815,8 +4857,9 @@ if (!cfg.department) { const guess = qboGuessDepartment(name, tenantDepartments)
 await qboSaveConfig(env, conn, patch);
 }
 } catch (e) { console.log('QBO_COMPANYINFO_FAILED ' + (e && e.message)); }
-// First import starts right away; the dashboard's status poll carries it on.
-if (ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
+// Cleanup, then the first import, start right away in their own invocations;
+// the dashboard's status poll and the 5-minute sweep carry them on.
+qboContinue(env, conn, ctx);
 if (chain && chainCount < 50) return redirectTo('/api/quickbooks/connect?chain=1&n=' + chainCount);
 return redirectTo('/dashboard?qbo=connected');
 }
@@ -4833,8 +4876,9 @@ const cfg = conn.cfg;
 const envSwitched = qboEnvMismatch(env, conn);
 const connected = !!(conn.status === 'connected' && !cfg.needsReconnect && !envSwitched);
 const importing = !!(connected && cfg.import && cfg.import.phase !== 'done');
-// Viewing the dashboard nudges an unfinished first import forward.
-if (importing && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
+// Viewing the dashboard nudges an unfinished first import forward (in its
+// own invocation; several companies importing at once must not share one).
+if (importing && ctx && ctx.waitUntil) qboContinue(env, conn, ctx);
 const needsReconnect = !!(cfg.needsReconnect || (envSwitched && conn.status === 'connected'));
 return { id: conn.id, status: conn.status, realmId: cfg.realmId || null, companyName: cfg.companyName || null,
 environment: cfg.environment || null, department: cfg.department || null, departmentLabel: cfg.department && departments[cfg.department] ? departments[cfg.department] : null,
@@ -4897,7 +4941,7 @@ const patch = { department: key || null };
 if (!key && conn.status === 'connected' && !(conn.cfg.import && conn.cfg.import.phase !== 'done')) Object.assign(patch, qboStartImport(conn.cfg, false));
 await qboSaveConfig(env, conn, patch);
 if (key) { try { await qboRetagDepartment(env, conn, key); } catch (e) { console.log('QBO_RETAG_FAILED ' + (e && e.message)); } }
-else if (patch.import && ctx && ctx.waitUntil) ctx.waitUntil(qboRunStep(env, conn, { ctx: ctx }));
+else if (patch.import && ctx && ctx.waitUntil) qboContinue(env, conn, ctx);
 try { await logUserActivity(env, user, null, 'integration', (conn.cfg.companyName || 'QuickBooks company') + ' mapped to ' + (key ? departments[key] : 'automatic (QuickBooks class/department)')); } catch (e) {}
 return json({ ok: true, department: key || null, departmentLabel: key ? departments[key] : null });
 }
@@ -4922,7 +4966,7 @@ else if (body.eventNotifications) { for (const n of body.eventNotifications) { c
 else { const r = realmOf(body); if (r) realms[String(r)] = true; } // single event
 const work = (async function () {
 const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
-for (const conn of conns) { if (realms[String(conn.cfg.realmId)]) await qboRunStep(env, conn, { ctx: ctx }); }
+await qboDispatch(env, conns.filter(function (conn) { return !!realms[String(conn.cfg.realmId)]; }), ctx);
 })();
 if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
 return new Response('ok', { status: 200 });
@@ -4931,11 +4975,24 @@ return new Response('ok', { status: 200 });
 // A different QuickBooks company is being connected (sandbox -> production,
 // or a new file): everything mirrored from the previous company is removed
 // so its invoices, payments and notes never show beside the new books.
-async function qboPurgeCompanyRows(env, conn) {
+async function qboPurgeCompanyRows(env, conn, opts) {
+opts = opts || {};
 const tid = pgEq(conn.tenant_id);
-const rows = await pgSelect(env, 'accounts', 'tenant_id=' + tid + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix)) + '&select=id') || [];
-const ids = rows.map(function (a) { return a.id; });
-await purgeAccountExtras(env, conn.tenant_id, ids);
+// Bounded per call so it fits one invocation's request budget; the caller
+// runs it again while `more` is true.
+const limit = opts.limit > 0 ? opts.limit : 0;
+const rows = await pgSelect(env, 'accounts', 'tenant_id=' + tid + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix)) + '&select=id&order=id.asc' + (limit ? '&limit=' + (limit + 1) : '')) || [];
+const more = !!(limit && rows.length > limit);
+const ids = (more ? rows.slice(0, limit) : rows).map(function (a) { return a.id; });
+await purgeAccountRows(env, conn.tenant_id, ids);
+if (!more) { try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + tid + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboPayPrefix))); } catch (e) {} }
+return { deleted: ids.length, more: more };
+}
+// Delete these accounts and everything hanging off them.
+async function purgeAccountRows(env, tenantId, ids) {
+const tid = pgEq(tenantId);
+if (!ids.length) return 0;
+await purgeAccountExtras(env, tenantId, ids);
 for (const chunk of qboChunks(ids, 100)) {
 const inList = 'in.(' + chunk.join(',') + ')';
 for (const t of ['user_activity', 'account_activity', 'account_notes', 'invoice_payments', 'invoice_comms', 'documents']) {
@@ -4943,8 +5000,38 @@ try { await pgDelete(env, t, 'tenant_id=' + tid + '&account_id=' + inList); } ca
 }
 await pgDelete(env, 'accounts', 'tenant_id=' + tid + '&id=' + inList);
 }
-try { await pgDelete(env, 'invoice_payments', 'tenant_id=' + tid + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboPayPrefix))); } catch (e) {}
 return ids.length;
+}
+// Intuit's sandbox company ships with a fixed cast of sample customers. Rows
+// mirrored from it before a workspace went live are recognisable by that cast
+// and by the sample contact addresses, so they can be cleared without touching
+// a single real invoice (which never carries an @intuit.com sample contact).
+const QBO_SANDBOX_CUSTOMERS = ["amy's bird sanctuary", "bill's windsurf shop", 'cool cars', 'diego rodriguez', 'dukes basketball camp', 'dylan sollfrank', 'freeman sporting goods', '55 twin lane', '0969 ocean view road', 'geeta kalapatapu', 'gevelber photography', "jeff's jalopies", 'john melton', 'kate whelan', 'kookies by kathy', 'mark cho', 'paulsen medical supplies', "pye's cakes", 'rago travel agency', 'red rock diner', 'rondonuwu fruit and vegi', 'shara barnett', 'barnett design', 'sonnenschein family store', 'sushi by katsuyuki', 'travis waldron', 'video games by dan', 'wedding planning by whitney', 'weiskopf consulting'];
+function qboLooksSandboxRow(a) {
+const email = String(a.contact_email || '').trim().toLowerCase();
+const name = String(a.customer_name || '').trim().toLowerCase();
+const sampleEmail = /@intuit\.com$/.test(email) || email === 'qbwebsamplecompany@yahoo.com';
+const sampleName = QBO_SANDBOX_CUSTOMERS.indexOf(name) !== -1;
+return sampleEmail || sampleName;
+}
+// Rows left behind by a sandbox company (legacy "qbo-<n>" ids, sample cast).
+async function qboFindSandboxRows(env, tenantId) {
+const rows = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(QBO_EXTERNAL_PREFIX + '*') + '&select=id,external_id,invoice_number,customer_name,contact_email,amount,invoiced_at&order=id.asc') || [];
+return rows.filter(function (a) { return /^qbo-\d+$/.test(String(a.external_id || '')) && qboLooksSandboxRow(a); });
+}
+// Admin: list (dry run) or clear the sandbox sample rows in their own workspace.
+async function handleQuickBooksSandboxCleanup(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin') return json({ ok: false, error: 'Admins only' }, 403);
+let body; try { body = await request.json(); } catch (e) { body = {}; }
+const rows = await qboFindSandboxRows(env, user.tenant_id);
+const listed = rows.map(function (a) { return { id: a.id, invoiceNumber: a.invoice_number, customer: a.customer_name, contactEmail: a.contact_email, amount: Number(a.amount || 0), invoicedAt: a.invoiced_at }; });
+if (!body.apply) return json({ ok: true, applied: false, count: listed.length, rows: listed });
+const ids = rows.map(function (a) { return a.id; });
+const n = await purgeAccountRows(env, user.tenant_id, ids);
+try { await logUserActivity(env, user, null, 'integration', 'Cleared ' + n + ' QuickBooks sandbox sample invoice' + (n === 1 ? '' : 's') + ' left over from testing'); } catch (e) {}
+return json({ ok: true, applied: true, count: n, rows: listed });
 }
 // Re-tag every invoice mirrored from a connection with its (new) department.
 async function qboRetagDepartment(env, conn, department) {
@@ -4966,11 +5053,9 @@ await qboSaveConfig(env, conn, { accessToken: null, refreshToken: null, accessEx
 async function runQuickBooksSweep(env, centralHour) {
 if (!qboConfigured(env)) return;
 const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
-for (const conn of conns) {
 // First imports are carried forward; otherwise every firing pulls the
-// changes since the last sync (Intuit's CDC call, one request per company).
-await qboRunStep(env, conn, {});
-}
+// changes since the last sync. Each company runs in its own invocation.
+await qboDispatch(env, conns, null);
 }
 
 /* ---------------------------------------------------------------------------
@@ -10271,6 +10356,7 @@ if (url.pathname === '/api/quickbooks/callback' && request.method === 'GET') { r
 if (url.pathname === '/api/quickbooks/status' && request.method === 'GET') { return handleQuickBooksStatus(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/department' && request.method === 'POST') { return handleQuickBooksDepartment(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/diagnose' && request.method === 'GET') { return handleQuickBooksDiagnose(request, env); }
+if (url.pathname === '/api/quickbooks/sandbox-cleanup' && request.method === 'POST') { return handleQuickBooksSandboxCleanup(request, env); }
 if (url.pathname === '/api/quickbooks/webhook' && request.method === 'POST') { return handleQuickBooksWebhook(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/continue' && request.method === 'POST') { return handleQuickBooksContinue(request, env, ctx); }
 if (url.pathname === '/api/mailbox' && request.method === 'GET') { return handleMailboxStatus(request, env); }
