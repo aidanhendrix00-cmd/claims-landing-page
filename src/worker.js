@@ -4682,28 +4682,23 @@ await qboReleaseLock(env, conn);
 
 // Self-chaining: after a step, call our own /api/quickbooks/continue so the next
 // step runs in a new Worker invocation. The integration's api_key is the bearer.
-function qboContinue(env, conn, ctx) {
+function qboContinue(env, conn, ctx, opts) {
+opts = opts || {};
 const run = (async function () {
 try {
 let key = conn.api_key || null;
 if (!key) { const row = await pgSelectOne(env, 'integrations', 'id=' + pgEq(conn.id) + '&select=api_key'); key = row && row.api_key; }
-if (!key) return;
-await fetch(SITE_URL + '/api/quickbooks/continue', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: '{}' });
-} catch (e) { console.log('QBO_CONTINUE_FAILED ' + (e && e.message)); }
+if (!key) return null;
+const res = await fetch(SITE_URL + '/api/quickbooks/continue', { method: 'POST', headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify(opts.wait ? { wait: true } : {}) });
+// Only a JSON reply means the step actually ran in a fresh invocation; a
+// self-call Cloudflare short-circuited comes back as the site's HTML.
+const ct = res.headers.get('content-type') || '';
+if (!res.ok || ct.indexOf('application/json') === -1) { console.log('QBO_CONTINUE_SKIPPED status=' + res.status + ' type=' + ct.slice(0, 40)); return null; }
+return await res.json();
+} catch (e) { console.log('QBO_CONTINUE_FAILED ' + (e && e.message)); return null; }
 })();
 if (ctx && ctx.waitUntil) ctx.waitUntil(run);
 return run;
-}
-// Several companies at once (the 5-minute sweep, a webhook burst, the status
-// poll): each one gets its own invocation. A Worker invocation has a fixed
-// budget of outbound requests (50 on the free plan), and one company's sync
-// step can use most of it - running them back to back in one invocation made
-// every company after the first fail with "Too many subrequests".
-async function qboDispatch(env, conns, ctx) {
-for (const conn of conns) {
-if (!conn || conn.status !== 'connected' || qboEnvMismatch(env, conn)) continue;
-await qboContinue(env, conn, ctx);
-}
 }
 // Housekeeping deferred from the connect step. cfg.cleanup = { demo: bool,
 // purge: { idPrefix, payPrefix, realmId } | null }. Each call does a bounded
@@ -4733,7 +4728,16 @@ const match = authHeader.match(/^Bearer\s+(.+)$/i);
 if (!match) return json({ ok: false }, 401);
 const conn = (await qboLoadConns(env, 'api_key=' + pgEq(match[1].trim())))[0];
 if (!conn) return json({ ok: false }, 401);
-const work = qboRunStep(env, conn, { ctx: ctx });
+let body; try { body = await request.json(); } catch (e) { body = {}; }
+// The step never chains itself: a Worker's call to its own URL is only
+// honoured from the cron handler, which drives the next step instead.
+const work = qboRunStep(env, conn, { ctx: ctx, chain: false });
+// wait=1 (the cron sweep): answer once the step is done, with what is left.
+if (body && body.wait) {
+const r = await work;
+const importing = !!(conn.status === 'connected' && ((conn.cfg.import && conn.cfg.import.phase !== 'done') || conn.cfg.cleanup));
+return json({ ok: true, ran: !!(r && r.ran), busy: !!(r && r.busy), error: !!(r && r.error), importing: importing });
+}
 if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
 return json({ ok: true });
 }
@@ -4857,9 +4861,8 @@ if (!cfg.department) { const guess = qboGuessDepartment(name, tenantDepartments)
 await qboSaveConfig(env, conn, patch);
 }
 } catch (e) { console.log('QBO_COMPANYINFO_FAILED ' + (e && e.message)); }
-// Cleanup, then the first import, start right away in their own invocations;
-// the dashboard's status poll and the 5-minute sweep carry them on.
-qboContinue(env, conn, ctx);
+// Cleanup, then the first import, are carried forward by the every-minute
+// sync sweep (a web request cannot start a fresh invocation of this Worker).
 if (chain && chainCount < 50) return redirectTo('/api/quickbooks/connect?chain=1&n=' + chainCount);
 return redirectTo('/dashboard?qbo=connected');
 }
@@ -4876,9 +4879,7 @@ const cfg = conn.cfg;
 const envSwitched = qboEnvMismatch(env, conn);
 const connected = !!(conn.status === 'connected' && !cfg.needsReconnect && !envSwitched);
 const importing = !!(connected && cfg.import && cfg.import.phase !== 'done');
-// Viewing the dashboard nudges an unfinished first import forward (in its
-// own invocation; several companies importing at once must not share one).
-if (importing && ctx && ctx.waitUntil) qboContinue(env, conn, ctx);
+// Unfinished first imports are carried forward by the every-minute sweep.
 const needsReconnect = !!(cfg.needsReconnect || (envSwitched && conn.status === 'connected'));
 return { id: conn.id, status: conn.status, realmId: cfg.realmId || null, companyName: cfg.companyName || null,
 environment: cfg.environment || null, department: cfg.department || null, departmentLabel: cfg.department && departments[cfg.department] ? departments[cfg.department] : null,
@@ -4941,7 +4942,7 @@ const patch = { department: key || null };
 if (!key && conn.status === 'connected' && !(conn.cfg.import && conn.cfg.import.phase !== 'done')) Object.assign(patch, qboStartImport(conn.cfg, false));
 await qboSaveConfig(env, conn, patch);
 if (key) { try { await qboRetagDepartment(env, conn, key); } catch (e) { console.log('QBO_RETAG_FAILED ' + (e && e.message)); } }
-else if (patch.import && ctx && ctx.waitUntil) qboContinue(env, conn, ctx);
+// (A restarted import is picked up by the every-minute sweep.)
 try { await logUserActivity(env, user, null, 'integration', (conn.cfg.companyName || 'QuickBooks company') + ' mapped to ' + (key ? departments[key] : 'automatic (QuickBooks class/department)')); } catch (e) {}
 return json({ ok: true, department: key || null, departmentLabel: key ? departments[key] : null });
 }
@@ -4966,7 +4967,10 @@ else if (body.eventNotifications) { for (const n of body.eventNotifications) { c
 else { const r = realmOf(body); if (r) realms[String(r)] = true; } // single event
 const work = (async function () {
 const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
-await qboDispatch(env, conns.filter(function (conn) { return !!realms[String(conn.cfg.realmId)]; }), ctx);
+// Pull the changed company's updates now (one or two companies fit one
+// invocation's request budget); a bigger burst is left to the minute sweep.
+const hit = conns.filter(function (conn) { return !!realms[String(conn.cfg.realmId)]; }).slice(0, 2);
+for (const conn of hit) { await qboRunStep(env, conn, { ctx: ctx, chain: false }); }
 })();
 if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
 return new Response('ok', { status: 200 });
@@ -5052,10 +5056,22 @@ await qboSaveConfig(env, conn, { accessToken: null, refreshToken: null, accessEx
 // night pull every company's changes (which also keeps refresh tokens alive).
 async function runQuickBooksSweep(env, centralHour) {
 if (!qboConfigured(env)) return;
-const conns = await qboLoadConns(env, 'status=' + pgEq('connected'));
-// First imports are carried forward; otherwise every firing pulls the
-// changes since the last sync. Each company runs in its own invocation.
-await qboDispatch(env, conns, null);
+const conns = (await qboLoadConns(env, 'status=' + pgEq('connected'))).filter(function (c) { return !qboEnvMismatch(env, c); });
+if (!conns.length) return;
+// Each company's step runs in its own invocation (/api/quickbooks/continue,
+// called with wait=1 so the call returns when the step is done). A Worker
+// may only call its own URL from here, the cron handler - from a web
+// request Cloudflare's loop protection swallows the call - so this sweep is
+// what carries first imports forward: several rounds per firing, as many as
+// the invocation's request budget allows, until nothing is left importing.
+let pending = conns.slice();
+const budget = 45;
+let used = 0;
+for (let round = 0; round < 12 && pending.length && used + pending.length <= budget; round++) {
+used += pending.length;
+const results = await Promise.all(pending.map(function (conn) { return qboContinue(env, conn, null, { wait: true }); }));
+pending = pending.filter(function (conn, i) { const r = results[i]; return !!(r && r.ran && r.importing); });
+}
 }
 
 /* ---------------------------------------------------------------------------
@@ -10519,6 +10535,10 @@ return injectHelpWidget(assetResponse);
 },
 
 async scheduled(event, env, ctx) {
+// The every-minute trigger only carries QuickBooks / IES syncs and first
+// imports forward (see runQuickBooksSweep); everything else keeps the
+// 5-minute / hourly rhythm below.
+if (event && event.cron === '* * * * *') { ctx.waitUntil(runQuickBooksSweep(env)); return; }
 const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour12: false, weekday: 'short', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date());
 const weekday = (parts.find(p => p.type === 'weekday') || {}).value;
 const hour = parseInt((parts.find(p => p.type === 'hour') || {}).value, 10) % 24;
@@ -10535,11 +10555,8 @@ ctx.waitUntil(runWeeklyUsersReport(env));
 // Follow-up cadence runs every hour; each tenant's own quiet hours and
 // weekly send cap decide whether anything actually goes out.
 if (topOfHour) ctx.waitUntil(runCadenceSweep(env));
-// QuickBooks / IES: pull every connected company's changes every 5 minutes
-// (webhooks still trigger a pull within seconds of a change; this is the
-// safety net so nothing waits more than a few minutes), finish first imports,
-// and keep refresh tokens alive.
-ctx.waitUntil(runQuickBooksSweep(env, hour));
+// QuickBooks / IES syncs and first imports run from the every-minute
+// trigger handled above (wrangler.jsonc: "* * * * *"), not from here.
 // Customer replies: read every connected inbox for answers to clAIms threads.
 ctx.waitUntil(runInboundReplySweep(env));
 }
