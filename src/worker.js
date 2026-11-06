@@ -4597,6 +4597,8 @@ await qboSaveConfig(env, conn, { import: imp });
 }
 // Everything that changed since the last pull, in one call.
 async function qboCdcStep(env, conn) {
+// A change batch too big for one step is worked through across steps.
+if (conn.cfg.cdcPending) return qboCdcDrain(env, conn);
 const startedAt = new Date().toISOString();
 const since = conn.cfg.cdcAt ? new Date(conn.cfg.cdcAt) : null;
 if (!since || Date.now() - since.getTime() > QBO_CDC_MAX_DAYS * 86400000) {
@@ -4625,17 +4627,38 @@ if (lt && lt.TxnType === 'Invoice' && !liveInvoices[String(lt.TxnId)]) toRead[St
 }
 for (const id of await qboRemovePayments(env, conn, deletedPayments)) { if (!liveInvoices[id]) toRead[id] = true; }
 const count = Object.keys(liveInvoices).length + Object.keys(toRead).length;
-// A burst bigger than one run can carry (a bulk edit, a long outage) is
-// handled by re-importing the open book in steps instead.
+// A burst bigger than one step can carry (a bulk edit, a long outage) is
+// queued and worked through a page at a time by the following steps. Only
+// an absurd burst falls back to re-importing the book.
 if (count > qboPageSize(env)) {
-await qboSaveConfig(env, conn, qboStartImport(conn.cfg));
-return qboImportStep(env, conn);
+const ids = Object.keys(liveInvoices).concat(Object.keys(toRead));
+if (ids.length > 5000) { await qboSaveConfig(env, conn, qboStartImport(conn.cfg)); return qboImportStep(env, conn); }
+await qboSaveConfig(env, conn, { cdcPending: { ids: ids, deleted: deletedInvoices, startedAt: startedAt, total: ids.length } });
+return qboCdcDrain(env, conn);
 }
 const invoices = Object.keys(liveInvoices).map(function (k) { return liveInvoices[k]; });
 const fetched = await qboFetchByIds(env, conn, 'Invoice', Object.keys(toRead));
 await qboIngestInvoices(env, conn, invoices.concat(fetched));
 await qboMarkInvoicesDeleted(env, conn, deletedInvoices);
 await qboSaveConfig(env, conn, { cdcAt: startedAt, lastError: null }, { last_synced_at: new Date().toISOString() });
+}
+// One page of a queued change batch per step; the last page marks deletions
+// and moves the change cursor forward.
+async function qboCdcDrain(env, conn) {
+const pend = conn.cfg.cdcPending;
+if (!pend) return;
+const ids = (pend.ids || []).slice();
+const page = ids.splice(0, qboPageSize(env));
+if (page.length) {
+const fetched = await qboFetchByIds(env, conn, 'Invoice', page);
+await qboIngestInvoices(env, conn, fetched);
+}
+if (ids.length) {
+await qboSaveConfig(env, conn, { cdcPending: Object.assign({}, pend, { ids: ids }) }, { last_synced_at: new Date().toISOString() });
+return;
+}
+await qboMarkInvoicesDeleted(env, conn, pend.deleted || []);
+await qboSaveConfig(env, conn, { cdcPending: null, cdcAt: pend.startedAt, lastError: null }, { last_synced_at: new Date().toISOString() });
 }
 // Run whatever this connection needs next. Safe to call from anywhere: it
 // skips quietly when another run holds the lock or the company is on hold.
@@ -4735,7 +4758,7 @@ const work = qboRunStep(env, conn, { ctx: ctx, chain: false });
 // wait=1 (the cron sweep): answer once the step is done, with what is left.
 if (body && body.wait) {
 const r = await work;
-const importing = !!(conn.status === 'connected' && ((conn.cfg.import && conn.cfg.import.phase !== 'done') || conn.cfg.cleanup));
+const importing = !!(conn.status === 'connected' && ((conn.cfg.import && conn.cfg.import.phase !== 'done') || conn.cfg.cleanup || conn.cfg.cdcPending));
 return json({ ok: true, ran: !!(r && r.ran), busy: !!(r && r.busy), error: !!(r && r.error), importing: importing });
 }
 if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
