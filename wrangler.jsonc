@@ -10,11 +10,13 @@
     "SUPABASE_URL": "https://ievwycehuzhurxkcczra.supabase.co",
     // QuickBooks: "sandbox" while using Intuit development keys; "production" once Intuit issues live keys
     "QBO_ENV": "production",
-    // Invoices per QuickBooks sync step. Each invoice costs ~5 database calls and
-    // a Worker invocation on the free plan may make 50 outbound calls in total,
-    // so 3 keeps a step well inside the budget (8 did not). Raise to 10-20 on
-    // the Workers Paid plan (1,000 calls per invocation).
-    "QBO_PAGE_SIZE": "3"
+    // Invoices per QuickBooks sync step. Each invoice costs ~5 database calls.
+    // Workers Paid plan (1,000 outbound calls per invocation): 15 per step.
+    // On the free plan (50 calls) this must come back down to 3.
+    "QBO_PAGE_SIZE": "15",
+    // Self-calls the every-minute sync sweep may make per firing (one per
+    // company per round). Paid plan: 400; free plan: 45.
+    "QBO_SWEEP_BUDGET": "400"
   },
   "triggers": {
     // Every minute: QuickBooks / IES change pulls and first imports (each
