@@ -825,7 +825,7 @@
       <button class="nav-item" data-view="escalations"><span class="left"><span class="ic">E</span> Escalations</span><span class="count" id="nav-count-esc"></span></button>
       <button class="nav-item" data-view="automations"><span class="left"><span class="ic">A</span> Automations</span></button>
       <button class="nav-item" data-view="integrations"><span class="left"><span class="ic">I</span> Integrations</span></button>
-      <a class="nav-item" href="/account#reports" title="Run any tab as a report and download it as a PDF or spreadsheet" style="text-decoration:none;"><span class="left"><span class="ic">D</span> Reports</span><span class="count" style="font-size:9.5px;">PDF / XLSX</span></a>
+      <button class="nav-item" data-view="reports" title="Run any tab as a report and download it as a PDF or spreadsheet"><span class="left"><span class="ic">D</span> Reports</span><span class="count" style="font-size:9.5px;">PDF / XLSX</span></button>
       <button class="nav-item" data-view="team" data-admin-only="1"><span class="left"><span class="ic">T</span> Team</span></button>
       <button class="nav-item" data-view="activity" data-admin-only="1"><span class="left"><span class="ic">U</span> Employees Activity</span><span class="count" id="nav-count-activity"></span></button>
     </nav>
@@ -1236,6 +1236,10 @@
 
       
     </section>
+  <section class="view" id="view-reports">
+    <div class="topbar"><div><h1>Reports</h1><p>Run any tab as a report, narrowed to a city, business, payer, status and date range, then download it as a PDF or spreadsheet. Reports read exactly what this dashboard shows.</p></div></div>
+    <div id="reports-mount"><div class="hint" style="padding:18px;color:var(--slate);">Loading the report builder&hellip;</div></div>
+  </section>
   <section class="view" id="view-team">
     <div class="topbar">
       <div><h1>Team</h1><p>Manage who has access to this dashboard</p></div>
@@ -3645,7 +3649,8 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     escalations: ['renderEscalations'],
     automations: ['renderAutomationsFeed'],
     integrations: ['renderCustomIntegrations'],
-    activity: ['renderActivityIfOpen']
+    activity: ['renderActivityIfOpen'],
+    reports: ['renderReports']
   };
   const __staleViews = {};
   function activeViewName(){
@@ -7279,6 +7284,60 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     }
     paint();
   }
+  /* ============================================================
+     REPORTS TAB - the same report builder as My Account, mounted here and
+     fed from this page's own data so it matches the screen (and works on
+     the interactive demo, which has no sign-in). /assets/reports.js
+     mounts itself into #reports-mount.
+     ============================================================ */
+  function reportsMe(){
+    if (window.__me && window.__me.ok) return window.__me;
+    // Demo / no sign-in: describe the sample company from what the page knows.
+    return { ok: true, role: 'admin', companyName: companyDisplayName() || 'clAIms Demo', offices: OFFICE_LABELS, departments: DEPARTMENT_LABELS,
+      integrationMode: TENANT_DEPTS_CUSTOM ? 'quickbooks' : 'crm', features: {}, access: {} };
+  }
+  function reportsAccounts(){
+    return (state.invoices || []).map(function(inv){
+      return { id: inv.id, name: inv.name, invoiceNumber: inv.invoiceNumber, invoicedDate: inv.invoiceDate, days: inv.days,
+        officeLocation: inv.officeLocation, department: inv.department, payer: inv.payer, jobStatus: inv.jobStatus,
+        amount: inv.amount, paidAmount: inv.amountPaid, paidDate: inv.paidDate || null, followups: inv.followups || 0,
+        lastContact: inv.lastContact, responded: inv.responded, responseSummary: inv.responseSummary, contact: inv.contact,
+        contactEmail: inv.contactEmail, contactInfo: inv.contactInfo, note: inv.note, lastFollowUpAt: inv.lastFollowUpAt,
+        lastFollowUpBy: inv.lastFollowUpBy, lastFollowUpKind: inv.lastFollowUpKind, projectedPaymentDate: inv.projectedPaymentDate,
+        paymentType: inv.paymentType, doNotContact: !!inv.doNotContact, escalated: !!inv.escalated, notifiedName: inv.notifiedName,
+        claimStatus: inv.claimStatus || null, demandLetterSentAt: inv.demandLetterSentAt, noilSentAt: inv.noilSentAt, noilSent: !!inv.noilSent,
+        lienFiled: !!inv.lienFiled, currentlyWith: inv.currentlyWith };
+    });
+  }
+  function reportsPayments(){
+    return (state.paymentsLog || []).map(function(p){
+      return { id: p.id, account_id: p.invoiceId, deposited_on: p.paidDate, created_at: p.paidDate, amount: p.amount,
+        method: p.paymentMethod || p.method || null, reference: p.referenceNumber || p.checkNumber || null, payer_name: p.payerName || null,
+        bank_name: p.bankName || null, memo: p.memo || null, source: p.source || (p.paymentMethod === 'integration' ? 'integration' : 'manual') };
+    });
+  }
+  function reportsComms(){
+    return (state.commsLog || []).map(function(c){
+      const when = c.sentAtIso || c.at || c.sentAt || null;
+      return { id: c.id, accountId: c.invoiceId, accountName: c.invoiceName, at: when, kind: c.draftType, label: c.draftType,
+        recipientRole: c.recipient || c.recipientRole || '', recipientEmail: c.recipientEmail || '', subject: c.subject || c.preview || '',
+        status: c.status || 'sent', source: c.source || 'manual', sentBy: c.sentBy || c.by || '' };
+    });
+  }
+  window.__clmsReportsSource = {
+    me: reportsMe,
+    load: function(kind){
+      if (kind === 'accounts') return reportsAccounts();
+      if (kind === 'payments') return reportsPayments();
+      if (kind === 'comms') return reportsComms();
+      // Employee Activity: real companies read the API (admin only); the demo has none.
+      if (kind === 'activity') return state.currentUser ? null : [];
+      return null;
+    }
+  };
+  function renderReports(){
+    if (window.__clmsReports && typeof window.__clmsReports.refresh === 'function') window.__clmsReports.refresh();
+  }
   function renderActivityIfOpen(){
     if(!actViewOpen()) return;
     if(actIsRealAdmin()){ renderActivityView(); } else { employeeActivity = synthesizeEmployeeActivity(); renderActivityView(); }
@@ -9264,3 +9323,4 @@ let toastTimer = null;
     if(document.readyState !== 'loading'){ boot(); } else { document.addEventListener('DOMContentLoaded', boot); }
   })();
 </script>
+<script src="/assets/reports.js" defer></script>
