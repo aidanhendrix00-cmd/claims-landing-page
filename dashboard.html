@@ -1901,13 +1901,17 @@
 <div class="overlay" id="overlay-invite">
   <div class="drawer">
     <div class="drawer-head"><h3>Invite Team Member</h3><button class="close" onclick="closeInviteTeamMember()">Close &times;</button></div>
-    <div class="drawer-sub" data-feat-text="New team members receive an email to set their password. Managers and employees can be limited to one city and to specific businesses - they see only those invoices, accounts and reports. Admins see everything and manage the team, settings and billing.">New team members receive an email to set their password. Manager and employee accounts are scoped to a single office; admins see every office and can manage the team, integrations and settings.</div>
+    <div class="drawer-sub" data-feat-text="New team members receive an email to set their password. Managers and employees can be limited to specific cities and businesses - they see only those invoices, accounts and reports. Admins see everything and manage the team, settings and billing.">New team members receive an email to set their password. Manager and employee accounts are scoped to a single office; admins see every office and can manage the team, integrations and settings.</div>
     <div class="form-row"><label>New User&#39;s Email *</label><input id="invite-email" type="email" placeholder="name@company.com" required></div>
     <div class="form-row"><label>Full Name</label><input id="invite-name" type="text" placeholder="Jane Smith"></div>
     <div class="form-row"><label>Role</label><select id="invite-role" onchange="inviteRoleChanged()"><option value="employee">Employee</option><option value="manager">Manager</option><option value="admin">Admin</option></select></div>
     <div class="form-row" id="invite-dept-row" data-feat="claimsOps" style="display:none;"><label>Business access</label>
       <div id="invite-dept-list" class="dept-access-list"></div>
       <div class="hint" style="font-size:12px;color:var(--slate);margin-top:4px;">Leave "All businesses" on, or tick the businesses this person covers (e.g. TAS Houston and TAS DFW, not TAS Atlanta).</div>
+    </div>
+    <div class="form-row" id="invite-city-row" data-feat="claimsOps" style="display:none;"><label>City access</label>
+      <div id="invite-city-list" class="dept-access-list"></div>
+      <div class="hint" style="font-size:12px;color:var(--slate);margin-top:4px;">Leave "All cities" on, or tick each city this person works.</div>
     </div>
     <div class="form-row" id="invite-office-row"><label>City / office</label><select id="invite-office"><option value="arizona">Arizona</option><option value="dallas">Dallas</option><option value="houston">Houston</option><option value="hillcountry">Hill Country</option></select></div>
     <div class="form-row" id="invite-send-row" style="display:none;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;"><input type="checkbox" id="invite-send-now" checked onchange="inviteSendChanged()" style="width:auto;margin:0;"> Send the invite email now</label><div style="font-size:11.5px;color:var(--slate);margin-top:4px;">Uncheck to add them now and send the invite later with the <b>Send invite</b> button on the Team list.</div></div>
@@ -1919,7 +1923,7 @@
     <div class="drawer-head"><h3>Edit access</h3><button class="close" onclick="closeEditAccess()">Close &times;</button></div>
     <div class="drawer-sub" id="access-sub">Choose the city and businesses this teammate can see. Everything on their dashboard - invoices, accounts, reports, cadence - follows this.</div>
     <div class="form-row"><label>Business access</label><div id="access-dept-list" class="dept-access-list"></div></div>
-    <div class="form-row"><label>City / office</label><select id="access-office"></select></div>
+    <div class="form-row"><label>City access</label><div id="access-city-list" class="dept-access-list"></div></div>
     <button class="btn-primary" onclick="submitEditAccess()">Save access</button>
   </div>
 </div>
@@ -2835,6 +2839,7 @@ function openInviteTeamMember() {
     officeEl.value = claimsOps() ? '' : (Object.keys(om)[0] || 'arizona');
   }
   const dl = document.getElementById('invite-dept-list'); if (dl) dl.innerHTML = deptAccessListHTML('invite', null);
+  const cl = document.getElementById('invite-city-list'); if (cl) cl.innerHTML = cityAccessListHTML(null);
   const overlay = document.getElementById('overlay-invite');
   if (overlay) overlay.classList.add('open');
 }
@@ -2852,12 +2857,23 @@ function inviteSendChanged() {
 function inviteRoleChanged() {
   const role = (document.getElementById('invite-role') || {}).value || 'employee';
   const row = document.getElementById('invite-office-row');
-  if (row) row.style.display = role === 'admin' ? 'none' : '';
+  if (row) row.style.display = (role === 'admin' || claimsOps()) ? 'none' : '';
   const drow = document.getElementById('invite-dept-row');
   if (drow) drow.style.display = (claimsOps() && role !== 'admin') ? '' : 'none';
+  const crow = document.getElementById('invite-city-row');
+  if (crow) crow.style.display = (claimsOps() && role !== 'admin') ? '' : 'none';
 }
 // The company's businesses as a checkbox list. "All businesses" on means no
 // limit; ticking any business turns it off. `selected` = null for all.
+// Cities as a checklist, alphabetical by name. Same toggles and reader as
+// the business list ("All cities" = no limit).
+function cityAccessListHTML(selected){
+  const om = inviteOfficeMap();
+  const keys = Object.keys(om).sort(function(a, b){ return String(om[a]).localeCompare(String(om[b])); });
+  const isAll = !selected || !selected.length;
+  return '<label class="all"><input type="checkbox" data-all="1" ' + (isAll ? 'checked' : '') + ' onchange="deptAccessToggleAll(this)"> All cities</label>' +
+    keys.map(function(k){ return '<label><input type="checkbox" value="' + hEsc(k) + '" ' + (!isAll && selected.indexOf(k) !== -1 ? 'checked' : '') + ' onchange="deptAccessToggleOne(this)"> ' + hEsc(om[k]) + '</label>'; }).join('');
+}
 function deptAccessListHTML(idPrefix, selected){
   const all = (window.__me && window.__me.allDepartments) || DEPARTMENT_LABELS || {};
   const keys = Object.keys(all);
@@ -2888,9 +2904,10 @@ function accessLabelHTML(m){
   if (m.role === 'admin') return '<span class="access-pill">All cities</span><span class="access-pill">All businesses</span>';
   const om = inviteOfficeMap();
   const all = (window.__me && window.__me.allDepartments) || DEPARTMENT_LABELS || {};
-  const city = m.office ? (om[m.office] || m.office) : 'All cities';
+  const cityKeys = (m.offices && m.offices.length) ? m.offices : (m.office ? [m.office] : null);
+  const cities = cityKeys ? cityKeys.map(function(k){ return '<span class="access-pill">' + hEsc(om[k] || k) + '</span>'; }).join('') : '<span class="access-pill">All cities</span>';
   const depts = (m.departments && m.departments.length) ? m.departments.map(function(k){ return '<span class="access-pill">' + hEsc(all[k] || k) + '</span>'; }).join('') : '<span class="access-pill">All businesses</span>';
-  return '<span class="access-pill">' + hEsc(city) + '</span>' + depts;
+  return cities + depts;
 }
 async function submitInviteTeamMember() {
   const emailEl = document.getElementById('invite-email');
@@ -2907,7 +2924,8 @@ async function submitInviteTeamMember() {
   }
   const fullName = (document.getElementById('invite-name') || {}).value || '';
   const role = (document.getElementById('invite-role') || {}).value || 'employee';
-  const office = (document.getElementById('invite-office') || {}).value || (claimsOps() ? '' : (Object.keys(inviteOfficeMap())[0] || 'arizona'));
+  const cities = claimsOps() ? deptAccessRead(document.getElementById('invite-city-list')) : null;
+  const office = claimsOps() ? (cities ? cities[0] : '') : ((document.getElementById('invite-office') || {}).value || (Object.keys(inviteOfficeMap())[0] || 'arizona'));
   const departments = claimsOps() ? deptAccessRead(document.getElementById('invite-dept-list')) : null;
   const sendNowEl = document.getElementById('invite-send-now');
   const sendInvite = !(sendNowEl && !sendNowEl.checked);
@@ -2916,7 +2934,7 @@ async function submitInviteTeamMember() {
     state.team = state.team || [];
     if (state.team.some(function(m){ return String(m.email).toLowerCase() === email.toLowerCase(); })) { showToast('That email is already on the team.'); return; }
     if (state.team.filter(function(m){ return m.status !== 'disabled'; }).length >= 8) { showToast('Your Growth plan includes 8 seats. Remove a teammate or upgrade to add more.'); return; }
-    state.team.push({ id: 'demo-' + Date.now(), full_name: fullName.trim(), email: email, role: role, office: office || null, departments: departments, status: sendInvite ? 'invited' : 'pending' });
+    state.team.push({ id: 'demo-' + Date.now(), full_name: fullName.trim(), email: email, role: role, office: office || null, offices: cities, departments: departments, status: sendInvite ? 'invited' : 'pending' });
     saveState(); closeInviteTeamMember(); renderTeam();
     showToast(sendInvite ? (email + ' has been invited.') : (email + ' added \u2014 invite not sent yet.'));
     return;
@@ -2926,7 +2944,7 @@ async function submitInviteTeamMember() {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email, fullName: fullName, role: role, office: office, departments: departments, sendInvite: sendInvite })
+      body: JSON.stringify({ email: email, fullName: fullName, role: role, office: office, offices: claimsOps() ? cities : undefined, departments: departments, sendInvite: sendInvite })
     });
     const data = await res.json();
     if (!data.ok) {
@@ -2950,17 +2968,16 @@ async function openEditAccess(id){
   __accessEditingId = id;
   const sub = document.getElementById('access-sub'); if (sub) sub.textContent = (m.full_name || m.email) + ' - choose the city and businesses they can see. Their invoices, accounts, reports and cadence follow this.';
   const dl = document.getElementById('access-dept-list'); if (dl) dl.innerHTML = deptAccessListHTML('access', m.departments || null);
-  const oe = document.getElementById('access-office');
-  if (oe) { const om = inviteOfficeMap(); oe.innerHTML = '<option value="">All cities</option>' + Object.keys(om).map(function(k){ return '<option value="' + hEsc(k) + '">' + hEsc(om[k]) + '</option>'; }).join(''); oe.value = m.office && om[m.office] ? m.office : ''; }
+  const cl = document.getElementById('access-city-list'); if (cl) cl.innerHTML = cityAccessListHTML(m.offices || (m.office ? [m.office] : null));
   const ov = document.getElementById('overlay-access'); if (ov) ov.classList.add('open');
 }
 function closeEditAccess(){ const ov = document.getElementById('overlay-access'); if (ov) ov.classList.remove('open'); __accessEditingId = null; }
 async function submitEditAccess(){
   if (!__accessEditingId) return;
   const departments = deptAccessRead(document.getElementById('access-dept-list'));
-  const office = (document.getElementById('access-office') || {}).value || '';
+  const cities = deptAccessRead(document.getElementById('access-city-list'));
   try {
-    const res = await fetch('/api/team/update', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: __accessEditingId, office: office, departments: departments }) });
+    const res = await fetch('/api/team/update', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: __accessEditingId, office: cities ? cities[0] : '', offices: cities, departments: departments }) });
     const data = await res.json().catch(function(){ return null; });
     if (!res.ok || !data || !data.ok) { showToast((data && data.error) || 'Could not save access.'); return; }
     closeEditAccess(); renderTeam(); showToast('Access updated.');
