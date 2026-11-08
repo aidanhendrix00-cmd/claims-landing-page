@@ -7494,28 +7494,37 @@ const url = new URL(request.url);
 let limit = parseInt(url.searchParams.get('limit'), 10);
 if (!isFinite(limit) || limit < 1) limit = 1000;
 if (limit > 2000) limit = 2000;
-// Same visibility rule as /api/accounts: admins see the company, everyone else
-// sees their own office.
-let accountQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,customer_name,invoice_number,amount,office,department&order=invoiced_at.desc';
-accountQuery += accountScopeQuery(user);
-const accounts = await pgSelectAll(env, 'accounts', accountQuery) || [];
-if (!accounts.length) return json({ ok: true, comms: [] });
+// Newest messages first, then only the invoices they refer to - never the
+// whole invoice table. Visibility follows /api/accounts: an invoice outside
+// the user's office or businesses is not returned by the scoped lookup, so
+// its messages fall out of the list.
+const scope = accountScopeQuery(user);
+// A limited user sees a subset of the company's messages, so read extra rows
+// before scoping and trim to the limit afterwards.
+const readLimit = scope ? Math.min(limit * 3, 5000) : limit;
+let rows = [];
+for (let offset = 0; offset < readLimit; offset += 1000) {
+const page = await pgSelect(env, 'invoice_comms',
+'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=sent_at.desc.nullslast,id.desc&limit=' + Math.min(1000, readLimit - offset) + '&offset=' + offset) || [];
+rows = rows.concat(page);
+if (page.length < 1000) break;
+}
+if (!rows.length) return json({ ok: true, comms: [] });
+const idList = Array.from(new Set(rows.map(function (c) { return c.account_id; }).filter(function (v) { return v !== null && v !== undefined; })));
 const byId = {};
-accounts.forEach(function (a) { byId[a.id] = a; });
-let rows;
-if (user.role === 'admin') {
-rows = await pgSelect(env, 'invoice_comms',
-'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=sent_at.desc.nullslast&limit=' + limit) || [];
-} else {
-// Keep the id list bounded; the accounts query is newest-invoiced first.
-const ids = accounts.slice(0, 900).map(function (a) { return a.id; });
-rows = await pgSelect(env, 'invoice_comms',
-'tenant_id=' + pgEq(user.tenant_id) + '&account_id=in.(' + ids.join(',') + ')&select=*&order=sent_at.desc.nullslast&limit=' + limit) || [];
+const chunks = [];
+for (let i = 0; i < idList.length; i += 200) chunks.push(idList.slice(i, i + 200));
+for (let i = 0; i < chunks.length; i += PG_PARALLEL) {
+const got = await Promise.all(chunks.slice(i, i + PG_PARALLEL).map(function (ids) {
+return pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + scope + '&id=in.(' + ids.join(',') + ')&select=id,customer_name,invoice_number,amount,office,department');
+}));
+got.forEach(function (list) { (list || []).forEach(function (a) { byId[a.id] = a; }); });
 }
 const comms = [];
 rows.forEach(function (c) {
+if (comms.length >= limit) return;
 const a = byId[c.account_id];
-if (!a) return; // outside this user's office
+if (!a) return; // outside this user's office or businesses
 comms.push(Object.assign(commsToJson(c, true), {
 accountId: c.account_id,
 accountName: a.customer_name || null,
