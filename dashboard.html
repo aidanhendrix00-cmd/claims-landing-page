@@ -2705,6 +2705,7 @@ qbInit();
     if (!data.ok) return;
     window.__me = data;
     applyFeatureFlags();
+    if (window.__clmsReports && window.__clmsReports.refresh) window.__clmsReports.refresh();
     applyTenantConfig(data);
     showSenderBanner(false);
     state.currentUser = { email: data.email, role: data.role, office: data.office || null, fullName: data.fullName || null };
