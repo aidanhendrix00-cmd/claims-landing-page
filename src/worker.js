@@ -777,6 +777,23 @@ const THANK_YOU_HTML = '<!doctype html><html lang="en"><head><meta charset="UTF-
   '</div>' +
   '</body></html>';
 
+// The Reports panel (controls + result area) and its styles, shared by the
+// My Account page and the dashboard's Reports tab.
+const REPORTS_PANEL_HTML = "<div class=\"rpt-fields\"> <div class=\"acct-field\"><label>Report</label><div class=\"rpt-chips\" id=\"rptType\"></div></div> <div class=\"acct-field\"><label id=\"rptCityLabel\">City</label><div class=\"rpt-chips\" id=\"rptCity\"></div></div> <div class=\"acct-field\"><label id=\"rptBizLabel\">Business</label><div class=\"rpt-chips\" id=\"rptBiz\"></div></div> <div class=\"acct-field\"><label>Payer</label><div class=\"rpt-chips\" id=\"rptPayer\"></div></div> <div class=\"acct-field\"><label>Status</label><div class=\"rpt-chips\" id=\"rptStatus\"></div></div> <div class=\"acct-field\"><label><span id=\"rptDateLabel\">Date</span> range</label><div class=\"rpt-range\"><input type=\"date\" id=\"rptFrom\"><span>to</span><input type=\"date\" id=\"rptTo\"></div><div class=\"rpt-presets\"><button type=\"button\" class=\"btn-outline btn-sm\" data-rpt-range=\"month\">This month</button><button type=\"button\" class=\"btn-outline btn-sm\" data-rpt-range=\"last-month\">Last month</button><button type=\"button\" class=\"btn-outline btn-sm\" data-rpt-range=\"quarter\">This quarter</button><button type=\"button\" class=\"btn-outline btn-sm\" data-rpt-range=\"year\">This year</button><button type=\"button\" class=\"btn-outline btn-sm\" data-rpt-range=\"30\">Last 30 days</button><button type=\"button\" class=\"btn-outline btn-sm\" data-rpt-range=\"all\">All time</button></div></div> </div> <div class=\"rpt-actions\"><button class=\"btn-dark\" id=\"rptRun\">Run report</button><div id=\"rptExports\" style=\"display:none;\"><span>Download:</span><button type=\"button\" class=\"btn-outline btn-sm\" id=\"rptPdf\">PDF</button><button type=\"button\" class=\"btn-outline btn-sm\" id=\"rptXlsx\">Spreadsheet (.xlsx)</button><button type=\"button\" class=\"btn-outline btn-sm\" id=\"rptCsv\">CSV</button></div></div> <div id=\"rptMsg\" style=\"display:none;font-size:12.5px;margin-top:10px;\"></div> </div> <div class=\"acct-card\"><div id=\"rptPreview\"><div class=\"restricted-box\">Pick a report above and press <b>Run report</b>. The result shows here first, then download it in the format you need.</div></div></div> ";
+const REPORTS_CSS = ".rpt-fields{display:flex;flex-direction:column;gap:14px;} .rpt-chips{display:flex;flex-wrap:wrap;gap:6px;padding-top:2px;} .rpt-chip{font-family:inherit;font-size:12.5px;font-weight:600;padding:6px 13px;border-radius:20px;border:1px solid #E5E0D2;background:#fff;color:#615D53;cursor:pointer;transition:all .12s ease;} .rpt-chip:hover{border-color:#171717;color:#171717;} .rpt-chip.active{background:#171717;border-color:#171717;color:#fff;} .rpt-chip.multi.active::before{content:\"\\2713\";margin-right:6px;font-size:11px;} .rpt-range{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} .rpt-range input{font:inherit;font-size:13px;padding:7px 9px;border:1px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} .rpt-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;} .rpt-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:18px;} #rptExports{display:flex;gap:8px;align-items:center;font-size:12.5px;color:#615D53;} .rpt-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;} .rpt-dl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} .rpt-dl .btn-dark{font-size:13.5px;padding:10px 16px;} .rpt-count{font-size:12px;color:#615D53;} .rpt-table{font-size:12px;min-width:900px;} .rpt-table th,.rpt-table td{padding:7px 9px;white-space:nowrap;} .rpt-table td{max-width:320px;overflow:hidden;text-overflow:ellipsis;} .rpt-foot{margin-top:10px;font-weight:700;font-size:13px;} #rptExports{display:flex;gap:8px;align-items:center;font-size:12.5px;color:#615D53;} @media (max-width:760px){.rpt-chips{gap:5px;}} ";
+// Base rules the panel relies on when it is mounted inside the dashboard
+// (the My Account page already has them), scoped to the mount.
+const REPORTS_EMBED_CSS = ['.acct-card{background:#fff;border:1px solid #E5E0D2;border-radius:14px;padding:22px 24px;margin-bottom:18px;box-shadow:0 12px 30px -18px rgba(23,23,23,0.15);}',
+'.acct-card h3{margin:0 0 4px;font-size:16px;}', '.acct-card .acct-card-sub{font-size:12.5px;color:#615D53;margin-bottom:16px;}',
+'.acct-field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#8A8578;font-weight:700;margin-bottom:5px;}',
+'.btn-dark{background:#171717;color:#fff;border:none;font-weight:600;font-size:13px;padding:10px 18px;border-radius:9px;cursor:pointer;font-family:inherit;}', '.btn-dark:hover{opacity:.88;}',
+'.btn-outline{background:none;color:#171717;border:1.5px solid #E5E0D2;font-weight:600;font-size:13px;padding:9px 16px;border-radius:9px;cursor:pointer;font-family:inherit;}', '.btn-outline:hover{border-color:#C29B57;color:#C29B57;}',
+'.btn-sm{font-size:12px;padding:6px 12px;border-radius:7px;}',
+'.restricted-box{background:#FBFAF6;border:1px dashed #E5E0D2;border-radius:12px;padding:32px 24px;text-align:center;color:#8A8578;font-size:13.5px;}', '.restricted-box b{color:#3B3A35;}',
+'table.acct-table{width:100%;border-collapse:collapse;font-size:13.5px;}', 'table.acct-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8A8578;font-weight:700;padding:10px 12px;border-bottom:1.5px solid #E5E0D2;}',
+'table.acct-table td{padding:12px 12px;border-bottom:1px solid #F0EDE3;vertical-align:middle;}', '.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}'
+].map(function (r) { return '#reports-mount ' + r; }).join('') + REPORTS_CSS.split('} ').filter(Boolean).map(function (r) { r = r.trim(); if (!r) return ''; if (r[r.length - 1] !== '}') r += '}'; return r.indexOf('@media') === 0 ? r.replace('{.', '{#reports-mount .') : '#reports-mount ' + r; }).join('');
+
 // The Reports tab's own script (My Account): kept apart from the page string
 // so it reads as plain JavaScript. Backslashes are doubled for the template
 // literal, so the page receives them as written above.
@@ -840,8 +857,19 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     activity: { label: 'Employee Activity', dateField: 'When', needs: ['accounts', 'activity'], adminOnly: true }
   };
 
+  // The dashboard mounts this same panel as a tab and hands over its own data
+  // (window.__clmsReportsSource = { me(), load(kind) }), so a report there
+  // reads exactly what is on screen - including on the interactive demo,
+  // which has no sign-in and no API. Anything the source does not provide
+  // falls back to the API.
+  function source(){ return window.__clmsReportsSource || null; }
   function load(kind){
     if(R[kind]) return Promise.resolve(R[kind]);
+    var src = source();
+    if(src && typeof src.load === 'function'){
+      var given = null; try { given = src.load(kind); } catch(e) { given = null; }
+      if(given){ return Promise.resolve(given).then(function(d){ R[kind] = d || []; return R[kind]; }); }
+    }
     var url = { accounts: '/api/accounts', payments: '/api/invoices/payments', comms: '/api/invoices/comms?limit=1000', activity: '/api/team/activity?days=365' }[kind];
     return fetch(url, { credentials: 'same-origin', cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(d){
       if(!d || !d.ok) throw new Error((d && d.error) || ('Could not load ' + kind + '.'));
@@ -1028,6 +1056,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
 
   function run(){
     var f = filters(); var spec = REPORTS[f.type]; if(!spec) return;
+    if(source()){ R.accounts = null; R.payments = null; R.comms = null; R.activity = null; }
     msg('');
     var btn = $('rptRun'); btn.disabled = true; btn.textContent = 'Running…';
     Promise.all(spec.needs.map(load)).then(function(){
@@ -1177,8 +1206,14 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     else { from = ''; to = ''; }
     $('rptFrom').value = from; $('rptTo').value = to;
   }
+  function setMe(m){ if(m && m.ok){ R.me = m; fillSelects(); } }
   function init(){
-    if(!$('rptType')) return;
+    if(!$('rptType')){
+      var mount = $('reports-mount');
+      if(!mount) return;
+      if(!document.getElementById('rpt-embed-style')){ var st = document.createElement('style'); st.id = 'rpt-embed-style'; st.textContent = ${JSON.stringify(REPORTS_EMBED_CSS)}; document.head.appendChild(st); }
+      mount.innerHTML = ${JSON.stringify(REPORTS_PANEL_HTML)};
+    }
     wireChips();
     $('rptRun').addEventListener('click', run);
     $('rptCsv').addEventListener('click', exportCsv);
@@ -1191,10 +1226,13 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     // The dashboard's "Edit signature" link lands on the user's own messaging identity.
     if(window.location.hash === '#identity'){ var ftab = document.querySelector('.acct-tab[data-tab="frequency"]'); if(ftab) setTimeout(function(){ ftab.click(); var card = document.getElementById('identityCard'); if(card && card.scrollIntoView) card.scrollIntoView({ block: 'start' }); }, 300); }
     document.querySelectorAll('[data-rpt-range]').forEach(function(b){ b.addEventListener('click', function(){ presetRange(b.getAttribute('data-rpt-range')); }); });
-    fetch('/api/me', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){ if(d && d.ok){ R.me = d; fillSelects(); } }).catch(function(){});
+    var src = source();
+    var m = (src && typeof src.me === 'function') ? src.me() : null;
+    if(m) setMe(m);
+    else fetch('/api/me', { credentials: 'same-origin' }).then(function(r){ return r.json(); }).then(function(d){ if(d && d.ok){ R.me = d; fillSelects(); } }).catch(function(){});
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-  window.__clmsReports = { run: run, build: build, filters: filters, pick: pick, planColumns: planColumns, _R: R, _SEL: SEL };
+  window.__clmsReports = { run: run, build: build, filters: filters, pick: pick, planColumns: planColumns, setMe: setMe, refresh: function(){ var src = source(); if(src && src.me) setMe(src.me()); R.accounts = null; R.payments = null; R.comms = null; R.activity = null; }, _R: R, _SEL: SEL };
 })();
 </script>`;
 
@@ -1249,27 +1287,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   'table.acct-table td{padding:12px 12px;border-bottom:1px solid #F0EDE3;vertical-align:middle;} ' +
   'table.acct-table tr:last-child td{border-bottom:none;} ' +
   '.filters-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px;} ' +
-  '.rpt-fields{display:flex;flex-direction:column;gap:14px;} ' +
-  '.rpt-chips{display:flex;flex-wrap:wrap;gap:6px;padding-top:2px;} ' +
-  '.rpt-chip{font-family:inherit;font-size:12.5px;font-weight:600;padding:6px 13px;border-radius:20px;border:1px solid #E5E0D2;background:#fff;color:#615D53;cursor:pointer;transition:all .12s ease;} ' +
-  '.rpt-chip:hover{border-color:#171717;color:#171717;} ' +
-  '.rpt-chip.active{background:#171717;border-color:#171717;color:#fff;} ' +
-  '.rpt-chip.multi.active::before{content:"\\2713";margin-right:6px;font-size:11px;} ' +
-  '.rpt-range{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} ' +
-  '.rpt-range input{font:inherit;font-size:13px;padding:7px 9px;border:1px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
-  '.rpt-presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;} ' +
-  '.rpt-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:18px;} ' +
-  '#rptExports{display:flex;gap:8px;align-items:center;font-size:12.5px;color:#615D53;} ' +
-  '.rpt-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;} ' +
-  '.rpt-dl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} ' +
-  '.rpt-dl .btn-dark{font-size:13.5px;padding:10px 16px;} ' +
-  '.rpt-count{font-size:12px;color:#615D53;} ' +
-  '.rpt-table{font-size:12px;min-width:900px;} ' +
-  '.rpt-table th,.rpt-table td{padding:7px 9px;white-space:nowrap;} ' +
-  '.rpt-table td{max-width:320px;overflow:hidden;text-overflow:ellipsis;} ' +
-  '.rpt-foot{margin-top:10px;font-weight:700;font-size:13px;} ' +
-  '@media (max-width:760px){.rpt-chips{gap:5px;}} ' +
-  '.filters-row select{font-family:inherit;font-size:13px;padding:9px 12px;border:1.5px solid #E5E0D2;border-radius:8px;background:#fff;color:#171717;} ' +
+  REPORTS_CSS +
   '.team-name-cell{display:flex;align-items:center;gap:10px;} ' +
   '.team-avatar{width:32px;height:32px;border-radius:50%;background:#F0EDE3;color:#615D53;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;} ' +
   '.role-pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;} ' +
@@ -1521,18 +1539,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-card"> ' +
   '<h3>Reports</h3> ' +
   '<div class="acct-card-sub">Run any dashboard tab as a report, narrowed to a city, business, payer, status and date range, then download it as a PDF or a spreadsheet. Reports read the same live data the dashboard shows.</div> ' +
-  '<div class="rpt-fields"> ' +
-  '<div class="acct-field"><label>Report</label><div class="rpt-chips" id="rptType"></div></div> ' +
-  '<div class="acct-field"><label id="rptCityLabel">City</label><div class="rpt-chips" id="rptCity"></div></div> ' +
-  '<div class="acct-field"><label id="rptBizLabel">Business</label><div class="rpt-chips" id="rptBiz"></div></div> ' +
-  '<div class="acct-field"><label>Payer</label><div class="rpt-chips" id="rptPayer"></div></div> ' +
-  '<div class="acct-field"><label>Status</label><div class="rpt-chips" id="rptStatus"></div></div> ' +
-  '<div class="acct-field"><label><span id="rptDateLabel">Date</span> range</label><div class="rpt-range"><input type="date" id="rptFrom"><span>to</span><input type="date" id="rptTo"></div><div class="rpt-presets"><button type="button" class="btn-outline btn-sm" data-rpt-range="month">This month</button><button type="button" class="btn-outline btn-sm" data-rpt-range="last-month">Last month</button><button type="button" class="btn-outline btn-sm" data-rpt-range="quarter">This quarter</button><button type="button" class="btn-outline btn-sm" data-rpt-range="year">This year</button><button type="button" class="btn-outline btn-sm" data-rpt-range="30">Last 30 days</button><button type="button" class="btn-outline btn-sm" data-rpt-range="all">All time</button></div></div> ' +
-  '</div> ' +
-  '<div class="rpt-actions"><button class="btn-dark" id="rptRun">Run report</button><div id="rptExports" style="display:none;"><span>Download:</span><button type="button" class="btn-outline btn-sm" id="rptPdf">PDF</button><button type="button" class="btn-outline btn-sm" id="rptXlsx">Spreadsheet (.xlsx)</button><button type="button" class="btn-outline btn-sm" id="rptCsv">CSV</button></div></div> ' +
-  '<div id="rptMsg" style="display:none;font-size:12.5px;margin-top:10px;"></div> ' +
-  '</div> ' +
-  '<div class="acct-card"><div id="rptPreview"><div class="restricted-box">Pick a report above and press <b>Run report</b>. The result shows here first, then download it in the format you need.</div></div></div> ' +
+  REPORTS_PANEL_HTML +
   '</div> ' +
   ' ' +
   '</div> ' +
@@ -10807,6 +10814,11 @@ return handleThankYou(request, env);
 }
 if (url.pathname === '/api/stripe-webhook' && request.method === 'POST') {
 return handleStripeWebhook(request, env);
+}
+if (url.pathname === '/assets/reports.js' && request.method === 'GET') {
+// The Reports panel script, for the dashboard's Reports tab (My Account embeds the same code).
+const body = ACCOUNT_REPORTS_SCRIPT.replace(/^<script>\s*/, '').replace(/\s*<\/script>$/, '');
+return new Response(body, { status: 200, headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=300' } });
 }
 if (url.pathname === '/account') {
 return handleAccountPage(request, env);
