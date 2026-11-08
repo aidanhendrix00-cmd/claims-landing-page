@@ -98,6 +98,36 @@ function resolveDepartments(raw) {
   }
   return entries;
 }
+// Which part of the company a teammate may see. Admins see everything. For
+// managers and employees two optional limits apply together: their office
+// (city) and their businesses (users.departments, a list of department keys;
+// null = every business). A member with neither limit sees the whole company.
+function userDepartments(user) {
+  if (!user) return null;
+  let d = user.departments;
+  if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { d = null; } }
+  if (!Array.isArray(d)) return null;
+  const keys = d.map(function (k) { return String(k || '').trim(); }).filter(Boolean);
+  return keys.length ? keys : null;
+}
+// PostgREST filter fragment ('&office=eq.x&department=in.(...)') for the
+// accounts a user may see; '' for admins and unrestricted members.
+function accountScopeQuery(user) {
+  if (!user || user.role === 'admin') return '';
+  let q = '';
+  if (user.office) q += '&office=' + pgEq(user.office);
+  const depts = userDepartments(user);
+  if (depts) q += '&department=in.(' + depts.map(function (k) { return '"' + k.replace(/["\\]/g, '') + '"'; }).join(',') + ')';
+  return q;
+}
+// Same rule applied to one account row already in hand.
+function accountInScope(user, acct) {
+  if (!user || user.role === 'admin') return true;
+  if (user.office && String(acct.office || '') !== String(user.office)) return false;
+  const depts = userDepartments(user);
+  if (depts && depts.indexOf(String(acct.department || '')) === -1) return false;
+  return true;
+}
 // Companies whose admins connect their own accounting system from the
 // dashboard (tenants.integration_mode). 'quickbooks' shows a QuickBooks-only
 // setup card; null keeps the concierge flow where the clAIms team wires it.
@@ -121,6 +151,22 @@ function tenantSettingsOf(t) {
   if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch (e) { raw = null; } }
   return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
 }
+// Optional feature packs, switched on per company in tenants.settings.features
+// ({ claimsOps: true }). 'claimsOps' is the claims-operations pack built for
+// Revolve: claim status, follow-up flags, business-level access for
+// teammates, team cadences, escalation pills everywhere and the
+// "Sent to Legal, DO NOT CONTACT" wording. Companies without it keep the
+// standard dashboard unchanged.
+function tenantFeatures(t) {
+  const f = tenantSettingsOf(t).features;
+  if (Array.isArray(f)) { const o = {}; f.forEach(function (k) { o[String(k)] = true; }); return o; }
+  return (f && typeof f === 'object') ? f : {};
+}
+function featureOn(t, name) { return !!tenantFeatures(t)[name]; }
+function claimsOpsOn(t) { return featureOn(t, 'claimsOps'); }
+const COLLECTIONS_LABEL = 'DO NOT CONTACT - Sent to Collections Agency';
+const LEGAL_LABEL = 'Sent to Legal, DO NOT CONTACT';
+function dncLabelFor(t) { return claimsOpsOn(t) ? LEGAL_LABEL : COLLECTIONS_LABEL; }
 function safeHexColor(v) {
   const s = String(v == null ? '' : v).trim();
   return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toUpperCase() : null;
@@ -772,7 +818,9 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
 
   // Every choice is a row of buttons you click, not a drop-down: what is
   // picked is always visible, and City / Business / Payer take several.
-  var STATUS_OPTS = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', 'Sent to collections'], ['escalated', 'Escalated'], ['replied', 'Replied']];
+  function legal(){ return !!(R.me && R.me.features && R.me.features.claimsOps); }
+  function dncWord(){ return legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'; }
+  function statusOpts(){ return [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; }
   var PAYER_OPTS = [['insurance', 'Insurance'], ['pm', 'Commercial or Property Management'], ['private', 'Private Pay']];
   function chipRow(id, opts, picked, multi, allLabel){
     var el = $(id); if(!el) return;
@@ -795,7 +843,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     chipRow('rptCity', cities, SEL.city, true, 'All ' + (cityWordV === 'City' ? 'cities' : 'offices'));
     chipRow('rptBiz', bizs, SEL.biz, true, 'All ' + (bizWordV === 'Business' ? 'businesses' : 'departments'));
     chipRow('rptPayer', PAYER_OPTS, SEL.payer, true, 'All payers');
-    chipRow('rptStatus', STATUS_OPTS, SEL.status, false);
+    chipRow('rptStatus', statusOpts(), SEL.status, false);
     syncDateLabel();
   }
   function pick(group, key){
@@ -869,7 +917,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       var ar = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f); });
       if(f.status === 'all') ar = ar.filter(function(a){ return !isPaid(a); });
       ar.sort(byName);
-      cols = baseCols().concat(['Contact', 'Contact email', 'Point of contact', 'Last contact', 'Responded?', 'Response summary', 'Notes', 'Last follow-up', 'Follow-up by', 'Projected payment', 'Payment type', 'Sent to collections', 'Escalated']);
+      cols = baseCols().concat(['Contact', 'Contact email', 'Point of contact', 'Last contact', 'Responded?', 'Response summary', 'Notes', 'Last follow-up', 'Follow-up by', 'Projected payment', 'Payment type', dncWord(), 'Escalated']);
       rows = ar.map(function(a){ return baseRow(a).concat([a.contact || '', a.contactEmail || '', a.contactInfo || '', fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), a.responseSummary || '', a.note || '', fmtDay(followUpDay(a.lastFollowUpAt)), a.lastFollowUpBy || '', fmtDay(a.projectedPaymentDate), PT[a.paymentType] || a.paymentType || '', a.doNotContact ? 'Yes' : 'No', a.escalated ? 'Yes' : 'No']); });
       foot = totals(ar);
     } else if(f.type === 'collected'){
@@ -925,7 +973,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     bits.push(f.city === 'all' ? ('All ' + (cityWord() === 'City' ? 'cities' : 'offices')) : f.city.map(officeLabel).join(', '));
     bits.push(f.biz === 'all' ? ('All ' + (bizWord() === 'Business' ? 'businesses' : 'departments')) : f.biz.map(deptLabel).join(', '));
     if(f.payer !== 'all') bits.push(f.payer.map(function(p){ return PAYER[p] || p; }).join(', '));
-    if(f.status !== 'all') bits.push({ open: 'Open only', paid: 'Paid only', collections: 'Sent to collections', escalated: 'Escalated', replied: 'Replied' }[f.status] || f.status);
+    if(f.status !== 'all') bits.push({ open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied' }[f.status] || f.status);
     if(f.from || f.to) bits.push((REPORTS[f.type].dateField || 'Date') + ' ' + (f.from ? fmtDay(f.from) : 'start') + ' – ' + (f.to ? fmtDay(f.to) : 'today'));
     return bits.join(' · ');
   }
@@ -2888,7 +2936,7 @@ const token = cookies[SESSION_COOKIE];
 if (!token) return null;
 const row = await pgSelectOne(env, 'sessions',
 'token=' + pgEq(token) +
-'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments,integration_mode,settings))'
+'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,departments,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments,integration_mode,settings))'
 );
 if (!row || !row.users) return null;
 if (new Date(row.expires_at) < new Date()) return null;
@@ -4958,16 +5006,32 @@ let body; try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
 const conn = id ? (await qboLoadConns(env, 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id)))[0] : null;
 if (!conn) return json({ ok: false, error: 'Connection not found' }, 404);
-const departments = resolveDepartments(user.tenant_departments);
-const key = String(body.department || '').trim();
-if (key && !departments[key]) return json({ ok: false, error: 'Pick one of your departments.' }, 400);
+let departments = resolveDepartments(user.tenant_departments);
+let key = String(body.department || '').trim();
+// "Add a business..." from the card: a new department is created on the
+// company and the connection mapped to it in one go.
+if (body.newDepartmentLabel) {
+if (!claimsOpsOn(user)) return json({ ok: false, error: 'Adding businesses from the dashboard is not enabled for this company.' }, 403);
+const label = String(body.newDepartmentLabel).trim().slice(0, 40);
+const newKey = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+if (!label || !newKey) return json({ ok: false, error: 'Enter a business name.' }, 400);
+if (!departments[newKey]) {
+if (Object.keys(departments).length >= MAX_DEPARTMENTS) return json({ ok: false, error: 'This company already has the maximum of ' + MAX_DEPARTMENTS + ' businesses.' }, 400);
+const pairs = Object.keys(departments).map(function (k) { return [k, departments[k]]; }).concat([[newKey, label]]);
+await pgUpdate(env, 'tenants', 'id=' + pgEq(user.tenant_id), { departments: pairs });
+departments = resolveDepartments(pairs);
+try { await logUserActivity(env, user, null, 'integration', 'Added the business "' + label + '"'); } catch (e) {}
+}
+key = newKey;
+}
+if (key && !departments[key]) return json({ ok: false, error: 'Pick one of your businesses.' }, 400);
 const patch = { department: key || null };
 if (!key && conn.status === 'connected' && !(conn.cfg.import && conn.cfg.import.phase !== 'done')) Object.assign(patch, qboStartImport(conn.cfg, false));
 await qboSaveConfig(env, conn, patch);
 if (key) { try { await qboRetagDepartment(env, conn, key); } catch (e) { console.log('QBO_RETAG_FAILED ' + (e && e.message)); } }
 // (A restarted import is picked up by the every-minute sweep.)
 try { await logUserActivity(env, user, null, 'integration', (conn.cfg.companyName || 'QuickBooks company') + ' mapped to ' + (key ? departments[key] : 'automatic (QuickBooks class/department)')); } catch (e) {}
-return json({ ok: true, department: key || null, departmentLabel: key ? departments[key] : null });
+return json({ ok: true, department: key || null, departmentLabel: key ? departments[key] : null, departments: departments });
 }
 
 // Intuit's change notifications. Verified with the webhook verifier token,
@@ -5175,7 +5239,7 @@ if (!accountId) return null;
 let q = 'id=' + pgEq(accountId) + '&tenant_id=' + pgEq(user.tenant_id);
 // Mirror the visibility rules used by /api/accounts so a guessed id cannot
 // reach another company, or another office within the same company.
-if (user.role !== 'admin') q += '&office=' + pgEq(user.office || '__none__');
+q += accountScopeQuery(user);
 // Enough columns to label an activity row without a second lookup.
 return await pgSelectOne(env, 'accounts', q + '&select=id,customer_name,invoice_number,external_id,office');
 }
@@ -5291,7 +5355,11 @@ return json({ ok: true });
    away. Everything a user changes now round-trips through Supabase, scoped to
    their tenant and office by accountForUser().
    --------------------------------------------------------------------------- */
+// Where a claim stands with the payer, set by the team on the invoice drawer
+// or the ledger. Separate from the job status that comes from the books.
+const CLAIM_STATUSES = ['under_review', 'approved', 'denied', 'pending_documentation', 'resolved'];
 const INVOICE_EDITABLE = {
+claimStatus: 'claim_status',
 noilSent: 'noil_sent_at',
 lienFiled: 'lien_filed',
 pa: 'pa',
@@ -5335,12 +5403,13 @@ return isNaN(d.getTime()) ? null : d.toISOString();
 }
 const PAYER_KEYS = ['insurance', 'pm', 'private'];
 
-// "DO NOT CONTACT - Sent to Collections Agency". Once an account carries this
-// flag nothing goes out to the customer from clAIms: the cadence skips it and
-// manual sends are refused. Reads its own columns so callers can pass any row.
-const DO_NOT_CONTACT_LABEL = 'DO NOT CONTACT - Sent to Collections Agency';
+// DO NOT CONTACT ("Sent to Collections Agency", or "Sent to Legal" for
+// companies on the claims-operations pack - see dncLabelFor). Once an account
+// carries this flag nothing goes out to the customer from clAIms: the cadence
+// skips it and manual sends are refused. Reads its own columns so callers can
+// pass any row.
 function isDoNotContact(account) { return !!(account && account.do_not_contact); }
-const DO_NOT_CONTACT_ERROR = 'This account is marked "' + DO_NOT_CONTACT_LABEL + '". Nothing can be sent to this customer while that flag is on. Clear the flag on the account first if contact should resume.';
+function dncErrorFor(user) { return 'This account is marked "' + dncLabelFor(user) + '". Nothing can be sent to this customer while that flag is on. Clear the flag on the account first if contact should resume.'; }
 
 function normalizeDateOnly(v) {
 if (v === null || v === undefined || v === '') return null;
@@ -5367,6 +5436,7 @@ if (column === 'demand_letter_sent_at' || column === 'last_follow_up_at') { patc
 if (column === 'payer') { const p = String(value || '').trim().toLowerCase(); patch[column] = PAYER_KEYS.indexOf(p) === -1 ? null : p; return; }
 if (column === 'cadence_sent') { patch[column] = (value && typeof value === 'object') ? value : {}; return; }
 if (column === 'lien_filed' || column === 'wa_sent' || column === 'cos_sent' || column === 'docs_complete' || column === 'escalated' || column === 'pa') { patch[column] = !!value; return; }
+if (column === 'claim_status') { if (!claimsOpsOn(user)) return; const v = String(value || '').trim().toLowerCase(); patch[column] = CLAIM_STATUSES.indexOf(v) === -1 ? null : v; return; }
 if (column === 'do_not_contact') {
 patch[column] = !!value;
 patch.do_not_contact_at = value ? new Date().toISOString() : null;
@@ -5387,8 +5457,8 @@ await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
 if (Object.prototype.hasOwnProperty.call(patch, 'do_not_contact')) {
 const flagged = !!patch.do_not_contact;
 const text = flagged
-? 'Marked "' + DO_NOT_CONTACT_LABEL + '". All automated cadences, follow-ups and manual sends to this customer are stopped.'
-: 'Cleared "' + DO_NOT_CONTACT_LABEL + '". Automated cadences and follow-ups may resume.';
+? 'Marked "' + dncLabelFor(user) + '". All automated cadences, follow-ups and manual sends to this customer are stopped.'
+: 'Cleared "' + dncLabelFor(user) + '". Automated cadences and follow-ups may resume.';
 await logUserActivity(env, user, account, 'escalation', text);
 try {
 await pgInsert(env, 'account_notes', { occurred_at: new Date().toISOString(),
@@ -5476,7 +5546,7 @@ q = 'account_id=' + pgEq(account.id) + '&' + q;
 let rows = await pgSelectAll(env, 'invoice_payments', q + ',id.desc');
 // Managers and employees only see payments on accounts in their own office.
 if (!accountId && user.role !== 'admin') {
-const mine = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=id&order=id.asc');
+const mine = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + accountScopeQuery(user) + '&select=id&order=id.asc');
 const allowed = {}; (mine || []).forEach(function (a) { allowed[String(a.id)] = true; });
 rows = (rows || []).filter(function (r) { return allowed[String(r.account_id)]; });
 }
@@ -5591,16 +5661,16 @@ const ownerHasOwnAddress = !!(ownerMailbox || (ownerSender && ownerSender.ownDom
 const ownerSig = buildSignature(settings, cadenceOwner || {}, cadenceTenant && cadenceTenant.company_name, ownerMailbox && ownerMailbox.email);
 if (ownSenderRequired && !ownerHasOwnAddress) { summary.skipped = -4; summary.reason = 'no_own_sender'; }
 
-// Accounts marked DO NOT CONTACT (sent to a collections agency) are never
+// Accounts marked SENT TO LEGAL - DO NOT CONTACT are never
 // even considered: the cadence must not touch them. `not.is.true` also
 // covers rows that predate the column.
 const statusFilter = 'status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')&do_not_contact=not.is.true';
 // A per-user settings row only automates accounts its owner can already see:
-// admins cover the whole tenant, everyone else their own office.
+// admins cover the whole tenant, everyone else their office and/or businesses.
 let officeFilter = '';
 if (settings.user_id) {
-const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + '&select=role,office');
-if (owner && owner.role !== 'admin' && owner.office) officeFilter = '&office=' + pgEq(owner.office);
+const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + '&select=role,office,departments');
+if (owner) officeFilter = accountScopeQuery(owner);
 }
 const accounts = await pgSelect(env, 'accounts',
 'tenant_id=' + pgEq(settings.tenant_id) + '&' + statusFilter + officeFilter + '&select=*&order=id.asc'
@@ -5784,6 +5854,33 @@ async function senderSettingsFor(env, user) {
 try { return await pgSelectOne(env, 'cadence_settings', 'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=*'); }
 catch (e) { return null; }
 }
+// Every teammate's cadence side by side, with the part of the company each
+// one covers, so the team can compare and learn from each other. Read-only
+// here; edits go through POST /api/cadence-settings (own row, or any row for
+// an admin).
+async function handleCadenceSettingsTeam(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (!claimsOpsOn(user)) return json({ ok: false, error: 'Team cadences are not enabled for this company.' }, 403);
+const users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&status=in.(active,pending)&select=id,email,full_name,role,office,departments&order=id.asc') || [];
+const rows = await pgSelect(env, 'cadence_settings', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*') || [];
+const byUser = {}; rows.forEach(function (r) { byUser[String(r.user_id)] = r; });
+const offices = resolveOffices(user.tenant_offices);
+const departments = resolveDepartments(user.tenant_departments);
+const team = users.map(function (u) {
+const r = byUser[String(u.id)] || Object.assign({}, CADENCE_DEFAULTS);
+const depts = userDepartments(u);
+return {
+userId: u.id, name: u.full_name || u.email, email: u.email, role: u.role,
+office: u.role === 'admin' ? null : (u.office || null), officeLabel: u.role === 'admin' ? 'All cities' : (u.office ? (offices[u.office] || u.office) : 'All cities'),
+departments: u.role === 'admin' ? null : depts, departmentLabels: (u.role === 'admin' || !depts) ? ['All businesses'] : depts.map(function (k) { return departments[k] || k; }),
+enabled: !!r.enabled, requireReview: r.require_review !== false, maxPerWeek: r.max_per_week, contactDays: r.contact_days || [], demandLetterDay: r.demand_letter_day || null, noilDay: r.noil_day || null,
+quietStart: r.quiet_start, quietEnd: r.quiet_end, timeZone: r.time_zone, configured: !!byUser[String(u.id)],
+canEdit: user.role === 'admin' || String(u.id) === String(user.id), isSelf: String(u.id) === String(user.id)
+};
+});
+return json({ ok: true, team: team });
+}
 async function handleCadenceSettingsSave(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -5822,11 +5919,22 @@ patch.reply_to = rt && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rt) ? rt : null;
 if (user.role !== 'admin' && (patch.enabled !== undefined || patch.require_review !== undefined)) {
 return json({ ok: false, error: 'Only an admin can switch the automated cadence on or off.' }, 403);
 }
+// Whose cadence: a user edits their own; an admin may edit any teammate's.
+// Everyone can see every cadence (GET /api/cadence-settings/team) but only
+// change the ones for the accounts they oversee - which is their own row.
+let targetUserId = user.id;
+if (body.userId !== undefined && String(body.userId) !== String(user.id)) {
+if (!claimsOpsOn(user)) return json({ ok: false, error: 'Editing a teammate\'s cadence is not enabled for this company.' }, 403);
+if (user.role !== 'admin') return json({ ok: false, error: 'You can only change your own cadence. Ask an admin to change a teammate\'s.' }, 403);
+const target = await pgSelectOne(env, 'users', 'id=' + pgEq(parseInt(body.userId, 10) || 0) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id');
+if (!target) return json({ ok: false, error: 'Teammate not found' }, 404);
+targetUserId = target.id;
+}
 const existing = await pgSelectOne(env, 'cadence_settings',
-'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=id');
+'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(targetUserId) + '&select=id');
 const write = async function (p) {
 if (existing) await pgUpdate(env, 'cadence_settings', 'id=' + pgEq(existing.id), p);
-else await pgInsert(env, 'cadence_settings', Object.assign({}, CADENCE_DEFAULTS, p, { tenant_id: user.tenant_id, user_id: user.id }));
+else await pgInsert(env, 'cadence_settings', Object.assign({}, CADENCE_DEFAULTS, p, { tenant_id: user.tenant_id, user_id: targetUserId }));
 };
 let warning = null;
 try { await write(patch); }
@@ -5948,7 +6056,7 @@ const accountId = url.searchParams.get('accountId');
 // ask once per invoice on every refresh). Office-scoped like /api/accounts.
 if (!accountId && url.searchParams.get('all')) {
 let acctQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id&order=id.asc';
-if (user.role !== 'admin') acctQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=id&order=id.asc';
+if (user.role !== 'admin') acctQuery = 'tenant_id=' + pgEq(user.tenant_id) + accountScopeQuery(user) + '&select=id&order=id.asc';
 const accts = await pgSelectAll(env, 'accounts', acctQuery);
 const allowed = {}; accts.forEach(function (a) { allowed[String(a.id)] = true; });
 const rows = await pgSelectAll(env, 'account_notes', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=occurred_at.desc,id.desc');
@@ -6151,7 +6259,7 @@ const account = await accountForUser(env, user, body.accountId);
 if (!account) return json({ ok: false, error: 'Account not found' }, 404);
 const full = await pgSelectOne(env, 'accounts', 'id=' + pgEq(account.id) + '&select=*');
 if (!full) return json({ ok: false, error: 'Account not found' }, 404);
-if (isDoNotContact(full)) return json({ ok: false, code: 'do_not_contact', error: DO_NOT_CONTACT_ERROR }, 409);
+if (isDoNotContact(full)) return json({ ok: false, code: 'do_not_contact', error: dncErrorFor(user) }, 409);
 // An escalated account is out of the cadence and in a manager's hands: only a
 // manager or admin sends to it manually.
 if (full.escalated && user.role !== 'admin' && user.role !== 'manager') {
@@ -6297,7 +6405,7 @@ async function statementAccountsFor(env, user, customerName, accountIds) {
 const ids = (Array.isArray(accountIds) ? accountIds : []).map(function (v) { return String(v); }).filter(function (v) { return /^[0-9]+$/.test(v); }).slice(0, STATEMENT_MAX_INVOICES);
 if (!ids.length) return [];
 let q = 'tenant_id=' + pgEq(user.tenant_id) + '&id=in.(' + ids.join(',') + ')&select=*';
-if (user.role !== 'admin') q += '&office=' + pgEq(user.office || '__none__');
+q += accountScopeQuery(user);
 const rows = await pgSelect(env, 'accounts', q) || [];
 const key = customerKey(customerName);
 return key ? rows.filter(function (a) { return customerKey(a.customer_name) === key; }) : rows;
@@ -6380,7 +6488,7 @@ const customerName = String(body.customerName || '').trim().slice(0, 200);
 const accounts = await statementAccountsFor(env, user, customerName, body.accountIds);
 if (!accounts.length) return json({ ok: false, error: 'Pick at least one invoice for this customer.' }, 400);
 const blocked = accounts.filter(isDoNotContact);
-if (blocked.length) return json({ ok: false, code: 'do_not_contact', error: DO_NOT_CONTACT_ERROR }, 409);
+if (blocked.length) return json({ ok: false, code: 'do_not_contact', error: dncErrorFor(user) }, 409);
 if (user.role !== 'admin' && user.role !== 'manager' && accounts.some(function (a) { return a.escalated; })) {
 return json({ ok: false, code: 'escalated', error: 'One of these invoices is escalated to a manager. Ask them before sending anything further, or leave it out of the statement.' }, 409);
 }
@@ -7342,7 +7450,7 @@ if (limit > 2000) limit = 2000;
 // Same visibility rule as /api/accounts: admins see the company, everyone else
 // sees their own office.
 let accountQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,customer_name,invoice_number,amount,office,department&order=invoiced_at.desc';
-if (user.role !== 'admin') accountQuery += '&office=' + pgEq(user.office || '__none__');
+accountQuery += accountScopeQuery(user);
 const accounts = await pgSelect(env, 'accounts', accountQuery) || [];
 if (!accounts.length) return json({ ok: true, comms: [] });
 const byId = {};
@@ -7398,7 +7506,7 @@ const comms = results[0], notes = results[1], payments = results[2], docs = resu
 let related = [];
 if (a.customer_name) {
 let relQ = 'tenant_id=' + tid + '&customer_name=' + pgEq(a.customer_name) + '&id=neq.' + encodeURIComponent(a.id) + '&select=id,invoice_number,amount,paid_amount,status,invoiced_at,paid_at,office,department,category,claim_number&order=invoiced_at.desc.nullslast&limit=50';
-if (user.role !== 'admin') relQ += '&office=' + pgEq(user.office || '__none__');
+relQ += accountScopeQuery(user);
 related = await safe(pgSelect(env, 'accounts', relQ));
 }
 const kindLabel = commsKindLabel;
@@ -7411,7 +7519,7 @@ push(a.cos_signed_at, 'document', 'Certificate of Satisfaction signed', null, 's
 push(a.demand_letter_sent_at, 'demand', 'Demand letter sent', null, 'system');
 push(a.noil_sent_at, 'noil', 'Notice of Intent to Lien sent', null, 'system');
 push(a.notified_at, 'escalation', 'Escalated' + (a.notified_name ? (' - ' + a.notified_name + ' notified') : ''), null, 'dashboard');
-if (a.do_not_contact) push(a.do_not_contact_at || a.updated_at, 'escalation', DO_NOT_CONTACT_LABEL, a.do_not_contact_by ? ('flagged by ' + a.do_not_contact_by) : null, 'dashboard');
+if (a.do_not_contact) push(a.do_not_contact_at || a.updated_at, 'escalation', dncLabelFor(user), a.do_not_contact_by ? ('flagged by ' + a.do_not_contact_by) : null, 'dashboard');
 push(a.paid_at, 'payment', 'Paid in full', null, 'system');
 const commsJson = comms.map(function (c) { return Object.assign(commsToJson(c), { accountId: c.account_id }); });
 await commsAttachSenders(env, user.tenant_id, commsJson);
@@ -7450,6 +7558,7 @@ waSent: !!a.wa_sent, waSignedAt: a.wa_signed_at, cosSent: !!a.cos_sent, cosSigne
 demandLetterSentAt: a.demand_letter_sent_at, noilSentAt: a.noil_sent_at, lienFiled: !!a.lien_filed, pa: !!a.pa,
 escalated: !!a.escalated, notifiedName: a.notified_name, notifiedAt: a.notified_at,
 doNotContact: !!a.do_not_contact, doNotContactAt: a.do_not_contact_at || null, doNotContactBy: a.do_not_contact_by || null,
+claimStatus: a.claim_status || null,
 projectedPaymentDate: a.projected_payment_date, paymentType: a.payment_type, lastDayOnSite: a.last_day_on_site || null,
 note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at,
 contactInfo: a.contact_info || null, lastFollowUpAt: a.last_follow_up_at || null, lastFollowUpBy: a.last_follow_up_by || null, lastFollowUpKind: a.last_follow_up_kind || null
@@ -7468,11 +7577,7 @@ async function handleAccounts(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 let list;
-if (user.role === 'admin') {
-list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=invoiced_at.desc,id.desc');
-} else {
-list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&office=' + pgEq(user.office || '__none__') + '&select=*&order=invoiced_at.desc,id.desc');
-}
+list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + accountScopeQuery(user) + '&select=*&order=invoiced_at.desc,id.desc');
 const accounts = list.map(function (a) {
 let days = null;
 if (a.invoiced_at) {
@@ -7597,16 +7702,33 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 let rows;
 if (user.role === 'admin') {
-rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,status&order=id.asc');
+rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,departments,status&order=id.asc');
 } else {
 // Managers and employees see only teammates at their own office; admins
 // (handled above) see everyone in the company. A user always sees their
 // own row, even if no office is set on their profile.
-rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&or=(office.eq.' + encodeURIComponent(user.office || '__none__') + ',id.eq.' + encodeURIComponent(user.id) + ')&select=id,email,full_name,role,office,status&order=id.asc');
+rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&or=(office.eq.' + encodeURIComponent(user.office || '__none__') + ',id.eq.' + encodeURIComponent(user.id) + ')&select=id,email,full_name,role,office,departments,status&order=id.asc');
 }
-return json({ ok: true, team: rows || [] });
+return json({ ok: true, team: (rows || []).map(function (r) { return Object.assign({}, r, { departments: userDepartments(r) }); }) });
 }
 
+// Business access for a teammate: null (all) or a list of valid department keys.
+function parseDepartmentAccess(raw, departments) {
+if (raw === undefined || raw === null || raw === '' || raw === 'all') return { value: null };
+const list = Array.isArray(raw) ? raw : String(raw).split(',');
+const keys = []; const bad = [];
+list.forEach(function (k) { k = String(k || '').trim(); if (!k) return; if (departments[k]) { if (keys.indexOf(k) === -1) keys.push(k); } else bad.push(k); });
+if (bad.length) return { error: 'Unknown business: ' + bad.join(', ') };
+if (!keys.length) return { value: null };
+if (keys.length >= Object.keys(departments).length) return { value: null };
+return { value: keys };
+}
+function describeAccess(office, departments, offices, deptLabels) {
+const parts = [];
+if (office) parts.push('at ' + (offices[office] || office));
+if (departments && departments.length) parts.push('for ' + departments.map(function (k) { return deptLabels[k] || k; }).join(', '));
+return parts.length ? ' ' + parts.join(' ') : ' (all offices and businesses)';
+}
 async function handleTeamInvite(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -7620,9 +7742,18 @@ const office = (body.office || '').toString();
 const inviteOffices = resolveOffices(user.tenant_offices);
 if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json({ ok: false, error: 'Enter a valid email address, e.g. name@company.com' }, 400);
 if (role !== 'admin' && role !== 'manager' && role !== 'employee') return json({ ok: false, error: "Role must be 'admin', 'manager' or 'employee'." }, 400);
-// Admins see every office; managers and employees are scoped to one.
-if (role !== 'admin' && !inviteOffices[office]) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
-const officeValue = role === 'admin' ? (inviteOffices[office] ? office : (user.office || Object.keys(inviteOffices)[0] || null)) : office;
+// Admins see every office and business. Managers and employees can be
+// limited to one office (city) and/or to a set of businesses; leaving a
+// limit off means "all" on that axis.
+// Without the pack (standard companies) the office stays required and no
+// business limit applies, exactly as before.
+const scopedAccess = claimsOpsOn(user);
+if (office && !inviteOffices[office]) return json({ ok: false, error: 'Unknown office.' }, 400);
+if (!scopedAccess && role !== 'admin' && !inviteOffices[office]) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
+const officeValue = role === 'admin' ? (inviteOffices[office] ? office : (user.office || Object.keys(inviteOffices)[0] || null)) : (office || null);
+const deptCheck = scopedAccess ? parseDepartmentAccess(body.departments, resolveDepartments(user.tenant_departments)) : { value: null };
+if (deptCheck.error) return json({ ok: false, error: deptCheck.error }, 400);
+const departmentsValue = role === 'admin' ? null : deptCheck.value;
 // sendInvite: false adds the teammate with the invite held; an admin sends it
 // later from the Team tab (POST /api/team/send-invite). Held accounts sit in
 // status 'pending' - they take a seat but cannot sign in until invited.
@@ -7637,11 +7768,11 @@ const resetToken = sendNow ? randomToken() : null;
 const resetExpires = sendNow ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() : null;
 const insertedUser = await pgInsert(env, 'users', {
 tenant_id: user.tenant_id, email: email, password_hash: throwawayHash, salt: throwawaySalt, role: role,
-email_verified: true, status: sendNow ? 'active' : 'pending', full_name: fullName || null, office: officeValue,
+email_verified: true, status: sendNow ? 'active' : 'pending', full_name: fullName || null, office: officeValue, departments: departmentsValue,
 reset_token: resetToken, reset_expires: resetExpires, invited_by: user.id
 });
 const newUserId = insertedUser ? insertedUser.id : null;
-const where = role === 'admin' ? '' : ' at ' + (inviteOffices[officeValue] || officeValue);
+const where = role === 'admin' ? '' : describeAccess(officeValue, departmentsValue, inviteOffices, resolveDepartments(user.tenant_departments));
 if (sendNow) {
 await sendEmail(env, Object.assign({ to: email, tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL },
 teamInviteEmail(user, { email: email, full_name: fullName, role: role, office: officeValue }, inviteOffices, resetToken)));
@@ -7702,7 +7833,7 @@ let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
 if (!id) return json({ ok: false, error: 'Missing id' }, 400);
-const target = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,status');
+const target = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,departments,status');
 if (!target) return json({ ok: false, error: 'User not found' }, 404);
 if (String(target.id) === String(user.id)) return json({ ok: false, error: 'Change your own details from the profile card on My Account.' }, 400);
 const patch = {};
@@ -7716,15 +7847,24 @@ const newRole = patch.role || target.role;
 if (body.office !== undefined) {
 const offices = resolveOffices(user.tenant_offices);
 const office = String(body.office || '');
-if (!offices[office] && newRole !== 'admin') return json({ ok: false, error: 'A valid office is required.' }, 400);
-if (offices[office]) patch.office = office;
+if (office && !offices[office]) return json({ ok: false, error: 'Unknown office.' }, 400);
+if (!claimsOpsOn(user) && newRole !== 'admin' && !offices[office]) return json({ ok: false, error: 'A valid office is required.' }, 400);
+patch.office = office || null; // null = every office (city)
 }
-if (newRole !== 'admin' && !(patch.office || target.office)) return json({ ok: false, error: 'Managers and employees need an office.' }, 400);
+if (!claimsOpsOn(user) && newRole !== 'admin' && !(patch.office || target.office)) return json({ ok: false, error: 'Managers and employees need an office.' }, 400);
+if (body.departments !== undefined && claimsOpsOn(user)) {
+const deptCheck = parseDepartmentAccess(body.departments, resolveDepartments(user.tenant_departments));
+if (deptCheck.error) return json({ ok: false, error: deptCheck.error }, 400);
+patch.departments = deptCheck.value; // null = every business
+}
+if (newRole === 'admin') patch.departments = null;
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to change.' }, 400);
 await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id), patch);
 const offices2 = resolveOffices(user.tenant_offices);
+const deptLabels2 = resolveDepartments(user.tenant_departments);
 await logUserActivity(env, user, null, 'team', 'Updated ' + (target.full_name || target.email) + ' (' + target.email + ')' +
-(patch.role ? ' to ' + patch.role : '') + (patch.office ? ' at ' + (offices2[patch.office] || patch.office) : ''));
+(patch.role ? ' to ' + patch.role : '') +
+((patch.office !== undefined || patch.departments !== undefined) && newRole !== 'admin' ? ' - access' + describeAccess(patch.office !== undefined ? patch.office : target.office, patch.departments !== undefined ? patch.departments : userDepartments(target), offices2, deptLabels2) : ''));
 return json({ ok: true });
 }
 
@@ -9325,9 +9465,16 @@ const m = String(body.integrationMode || '').trim().toLowerCase();
 if (m && !SELF_SERVE_INTEGRATION_MODES[m]) return json({ ok: false, error: 'Unknown integration mode' }, 400);
 patch.integration_mode = m || null;
 }
-if (body.theme !== undefined || body.requireOwnSender !== undefined) {
+if (body.theme !== undefined || body.requireOwnSender !== undefined || body.features !== undefined) {
 const current = await pgSelectOne(env, 'tenants', 'id=' + pgEq(tenantId) + '&select=settings');
 const next = Object.assign({}, tenantSettingsOf(current || {}));
+if (body.features !== undefined) {
+// { claimsOps: true } turns a pack on; false/null/missing keys turn it off.
+const cur = tenantFeatures(current || {});
+const f = (body.features && typeof body.features === 'object') ? body.features : {};
+Object.keys(f).forEach(function (k) { if (f[k]) cur[k] = true; else delete cur[k]; });
+if (Object.keys(cur).length) next.features = cur; else delete next.features;
+}
 if (body.theme !== undefined) {
 if (body.theme === null || body.theme === '') { delete next.theme; }
 else {
@@ -9540,15 +9687,14 @@ const tenantList = await pgSelect(env, 'tenants', 'select=id,company_name,office
 const weekAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
 for (const tenant of tenantList) {
 try {
-const userList = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenant.id) + '&status=' + pgEq('active') + '&email_verified=eq.true&select=id,email,role,office');
+const userList = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenant.id) + '&status=' + pgEq('active') + '&email_verified=eq.true&select=id,email,role,office,departments');
 if (!userList.length) continue;
 
 const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenant.id) + '&select=*');
 
 for (const user of userList) {
 try {
-const officeFilter = (user.role === 'admin') ? null : (user.office || null);
-const scoped = officeFilter ? accounts.filter(a => a.office === officeFilter) : accounts;
+const scoped = accounts.filter(function (a) { return accountInScope(user, a); });
 
 const collectedAccounts = scoped.filter(a => a.paid_at && new Date(a.paid_at).getTime() >= weekAgoMs);
 const amountCollected = collectedAccounts.reduce((sum, a) => sum + (a.paid_amount || a.amount || 0), 0);
@@ -10168,7 +10314,13 @@ async function handleMe(request, env) {
     recommendedPlan: user.recommended_plan,
     hasBilling: !!user.stripe_customer_id,
     offices: resolveOffices(user.tenant_offices),
-    departments: resolveDepartments(user.tenant_departments),
+    // Businesses this user works: the whole company list for admins and
+    // unrestricted members, otherwise only the ones on their access list.
+    // allDepartments always carries the full list (team views compare across it).
+    departments: (function () { const all = resolveDepartments(user.tenant_departments); const mine = userDepartments(user); if (user.role === 'admin' || !mine) return all; const out = {}; mine.forEach(function (k) { if (all[k]) out[k] = all[k]; }); return Object.keys(out).length ? out : all; })(),
+    allDepartments: resolveDepartments(user.tenant_departments),
+    access: { office: user.role === 'admin' ? null : (user.office || null), departments: user.role === 'admin' ? null : userDepartments(user) },
+    features: tenantFeatures(user),
     officesConfigured: !!user.tenant_offices,
     integrationMode: selfServeIntegrationMode(user),
     integrationProvider: selfServeIntegrationMode(user) ? SELF_SERVE_INTEGRATION_MODES[selfServeIntegrationMode(user)] : null,
@@ -10285,6 +10437,9 @@ return handleAiDraft(request, env);
 }
 if (url.pathname === '/api/cadence-settings' && request.method === 'GET') {
 return handleCadenceSettingsGet(request, env);
+}
+if (url.pathname === '/api/cadence-settings/team' && request.method === 'GET') {
+return handleCadenceSettingsTeam(request, env);
 }
 if (url.pathname === '/api/cadence-settings' && request.method === 'POST') {
 return handleCadenceSettingsSave(request, env);
