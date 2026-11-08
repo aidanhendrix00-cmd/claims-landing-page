@@ -193,7 +193,7 @@
   .amount .paid-line{display:block;font-family:var(--font-body);font-weight:500;font-size:11px;color:#8A4B18;margin-top:3px;}
   .amount .owed-label{display:block;font-family:var(--font-mono);font-weight:400;font-size:9.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--slate-soft);margin-bottom:2px;}
   .badge.partial{background:#FBE9D8;color:#8A4B18;border:1px solid #F1D3B4;}
-  /* DO NOT CONTACT - Sent to Collections Agency: the whole account reads red. */
+  /* Sent to Legal, DO NOT CONTACT: the whole account reads red. */
   .badge.dnc{background:#B42318;color:#fff;border:1px solid #912018;letter-spacing:0.04em;}
   .card.dnc{background:#FEF3F2;border-color:#F04438;box-shadow:inset 4px 0 0 #B42318;position:relative;}
   .card.dnc .name{color:#912018;}
@@ -732,6 +732,35 @@
   .pager .pager-info{font-size:12.5px;color:var(--slate);}
   .pager .btn-small[disabled]{opacity:.45;cursor:default;}
   .pager.top{padding:0 0 10px;}
+
+  .dept-access-list{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;max-height:190px;overflow:auto;background:#fff;}
+  .dept-access-list label{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;cursor:pointer;padding:2px 0;}
+  .dept-access-list label.all{grid-column:1 / -1;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:2px;font-weight:600;}
+  .access-pill{display:inline-block;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:999px;padding:1px 8px;font-size:11px;margin:1px 2px 1px 0;white-space:nowrap;}
+
+  /* Escalation flags, shown the same way everywhere an invoice appears. */
+  .badge.esc-demand{background:#FFF1E0;color:#9A3F00;border:1px solid #F5C58A;letter-spacing:0.03em;}
+  .badge.esc-noil{background:#EEE8FF;color:#4A2A9E;border:1px solid #C9B8FF;letter-spacing:0.03em;}
+  .badge.esc-lien{background:#2D1F4F;color:#fff;border:1px solid #1E1437;letter-spacing:0.03em;}
+  .badge.escalated{font-weight:700;}
+  .esc-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+  .esc-row:empty{display:none;}
+  .esc-cell .badge{font-size:9.5px;padding:2px 6px;}
+
+  /* Claim status and follow-up reminders */
+  .badge.claim{letter-spacing:0.03em;}
+  .badge.cs-review{background:#EEF2FF;color:#3730A3;border:1px solid #C7D2FE;}
+  .badge.cs-approved{background:#ECFDF3;color:#067647;border:1px solid #ABEFC6;}
+  .badge.cs-denied{background:#FEE4E2;color:#B42318;border:1px solid #FECDCA;}
+  .badge.cs-docs{background:#FFFAEB;color:#B54708;border:1px solid #FEDF89;}
+  .badge.cs-resolved{background:#F2F4F7;color:#344054;border:1px solid #D0D5DD;}
+  .badge.fu-due{background:#FFFAEB;color:#B54708;border:1px solid #FEC84B;font-weight:700;}
+  .badge.fu-overdue{background:#B42318;color:#fff;border:1px solid #912018;font-weight:700;}
+  .claim-select{font:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;}
+  .kpi.fu-kpi .value{color:#B54708;}
+
+  .chip.chip-fu.active{background:#B54708;border-color:#B54708;color:#fff;}
+  .chip.chip-esc.active{background:#B42318;border-color:#B42318;color:#fff;}
 </style>
 
 
@@ -871,6 +900,8 @@
             <div class="chip" data-payer="insurance">Insurance</div>
             <div class="chip" data-payer="pm">Commercial or Property Management</div>
             <div class="chip" data-payer="private">Private Pay</div>
+            <div class="chip chip-fu" data-feat="claimsOps" style="display:none;" data-payer="follow-up" title="No response in 3+ business days">Follow-up due</div>
+            <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="flagged" title="Escalated, demand letter, NOIL, lien or Sent to Legal">Flagged</div>
           </div>
         </div>
       </div>
@@ -930,15 +961,22 @@
           <option value="days-asc">Sort: Days outstanding (fewest → most)</option>
           <option value="followup-desc">Sort: Last follow-up (newest)</option>
           <option value="followup-asc">Sort: Last follow-up (oldest first)</option>
-          <option value="collections">Sort: Sent to collections first</option>
-          <option value="collections-last">Sort: Sent to collections last</option>
+          <option value="collections" data-feat-text="Sort: Sent to Legal first">Sort: Sent to collections first</option>
+          <option value="collections-last" data-feat-text="Sort: Sent to Legal last">Sort: Sent to collections last</option>
         </select>
         <select class="sort" id="sheet-show" onchange="setSheetShow(this.value)" title="Which invoices to show">
           <option value="all">Show: All open</option>
-          <option value="collections">Show: Sent to collections</option>
-          <option value="not-collections">Show: Not in collections</option>
+          <option value="collections" data-feat-text="Show: Sent to Legal (DNC)">Show: Sent to collections</option>
+          <option value="not-collections" data-feat-text="Show: Not sent to Legal">Show: Not in collections</option>
           <option value="replied">Show: Replied</option>
           <option value="no-reply">Show: No reply yet</option>
+          <option value="follow-up" data-feat="claimsOps" hidden disabled>Show: Follow-up due (3+ business days, no response)</option>
+          <option value="escalated" data-feat="claimsOps" hidden disabled>Show: Escalated / NOIL / Demand / Legal</option>
+          <option value="cs-under_review" data-feat="claimsOps" hidden disabled>Claim status: Under Review</option>
+          <option value="cs-approved" data-feat="claimsOps" hidden disabled>Claim status: Approved</option>
+          <option value="cs-denied" data-feat="claimsOps" hidden disabled>Claim status: Denied</option>
+          <option value="cs-pending_documentation" data-feat="claimsOps" hidden disabled>Claim status: Pending Documentation</option>
+          <option value="cs-resolved" data-feat="claimsOps" hidden disabled>Claim status: Resolved</option>
         </select>
         <button type="button" class="btn-small ghost" id="sheet-clear" onclick="clearSheetFilters()" style="display:none;">Clear</button>
         <span class="sheet-count" id="sheet-count"></span>
@@ -1114,6 +1152,14 @@
           <div class="rtrigger">APPLIES TO: Cadence follow-ups, demand letters, NOILs</div>
         </div>
         <label class="switch"><input type="checkbox" id="auto-review" onchange="toggleAutomation('requireReview', this.checked)"><span class="slider"></span></label>
+      </div>
+
+      <div class="rule-card" id="team-cadence-card" data-feat="claimsOps" style="display:none;">
+        <div>
+          <div class="rname">Team Cadences</div>
+          <div class="rdesc">Every teammate's follow-up cadence, side by side, so the team can compare and learn. Each cadence runs only on the businesses and city that person covers. You can change your own cadence on <b>My Account &rarr; Contact Frequency</b>; admins can change anyone's here.</div>
+          <div id="team-cadence-table" style="margin-top:12px;"></div>
+        </div>
       </div>
 
       <div class="rule-card">
@@ -1572,10 +1618,10 @@
     </div>
 
     <div class="drawer-section">
-      <h4>Collections Agency</h4>
+      <h4 data-feat-text="Sent to Legal">Collections Agency</h4>
       <label class="dnc-toggle" id="detail-dnc-toggle">
         <input type="checkbox" id="detail-dnc-check" onchange="setDoNotContact(currentDetailId, this.checked)">
-        <span><span class="t">DO NOT CONTACT &mdash; Sent to Collections Agency</span>
+        <span><span class="t" data-feat-text="Sent to Legal, DO NOT CONTACT">DO NOT CONTACT &mdash; Sent to Collections Agency</span>
         <span class="d" id="detail-dnc-desc">Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and Accounts Receivable, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.</span></span>
       </label>
     </div>
@@ -1849,13 +1895,26 @@
 <div class="overlay" id="overlay-invite">
   <div class="drawer">
     <div class="drawer-head"><h3>Invite Team Member</h3><button class="close" onclick="closeInviteTeamMember()">Close &times;</button></div>
-    <div class="drawer-sub">New team members receive an email to set their password. Manager and employee accounts are scoped to a single office; admins see every office and can manage the team, integrations and settings.</div>
+    <div class="drawer-sub" data-feat-text="New team members receive an email to set their password. Managers and employees can be limited to one city and to specific businesses - they see only those invoices, accounts and reports. Admins see everything and manage the team, settings and billing.">New team members receive an email to set their password. Manager and employee accounts are scoped to a single office; admins see every office and can manage the team, integrations and settings.</div>
     <div class="form-row"><label>New User&#39;s Email *</label><input id="invite-email" type="email" placeholder="name@company.com" required></div>
     <div class="form-row"><label>Full Name</label><input id="invite-name" type="text" placeholder="Jane Smith"></div>
     <div class="form-row"><label>Role</label><select id="invite-role" onchange="inviteRoleChanged()"><option value="employee">Employee</option><option value="manager">Manager</option><option value="admin">Admin</option></select></div>
-    <div class="form-row" id="invite-office-row"><label>Office</label><select id="invite-office"><option value="arizona">Arizona</option><option value="dallas">Dallas</option><option value="houston">Houston</option><option value="hillcountry">Hill Country</option></select></div>
+    <div class="form-row" id="invite-dept-row" data-feat="claimsOps" style="display:none;"><label>Business access</label>
+      <div id="invite-dept-list" class="dept-access-list"></div>
+      <div class="hint" style="font-size:12px;color:var(--slate);margin-top:4px;">Leave "All businesses" on, or tick the businesses this person covers (e.g. TAS Houston and TAS DFW, not TAS Atlanta).</div>
+    </div>
+    <div class="form-row" id="invite-office-row"><label>City / office</label><select id="invite-office"><option value="arizona">Arizona</option><option value="dallas">Dallas</option><option value="houston">Houston</option><option value="hillcountry">Hill Country</option></select></div>
     <div class="form-row" id="invite-send-row" style="display:none;"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;"><input type="checkbox" id="invite-send-now" checked onchange="inviteSendChanged()" style="width:auto;margin:0;"> Send the invite email now</label><div style="font-size:11.5px;color:var(--slate);margin-top:4px;">Uncheck to add them now and send the invite later with the <b>Send invite</b> button on the Team list.</div></div>
     <button class="btn-primary" id="invite-submit-btn" onclick="submitInviteTeamMember()">Send Invite</button>
+  </div>
+</div>
+<div class="overlay" id="overlay-access">
+  <div class="drawer">
+    <div class="drawer-head"><h3>Edit access</h3><button class="close" onclick="closeEditAccess()">Close &times;</button></div>
+    <div class="drawer-sub" id="access-sub">Choose the city and businesses this teammate can see. Everything on their dashboard - invoices, accounts, reports, cadence - follows this.</div>
+    <div class="form-row"><label>Business access</label><div id="access-dept-list" class="dept-access-list"></div></div>
+    <div class="form-row"><label>City / office</label><select id="access-office"></select></div>
+    <button class="btn-primary" onclick="submitEditAccess()">Save access</button>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -1868,6 +1927,65 @@
   let memoryFallback = null;
   const PAYER_LABELS = { insurance: "Insurance", pm: "Commercial or Property Management", private: "Private Pay" };
   const STATUS_LABELS = { pending_start: "Pending Start", in_progress: "In Progress", work_completed: "Work Completed", in_ar: "In A/R", paid: "Paid" };
+  // Where the claim stands with the payer (set by the team, independent of the
+  // job status that comes from the books).
+  const CLAIM_STATUS_LABELS = { under_review: 'Under Review', approved: 'Approved', denied: 'Denied', pending_documentation: 'Pending Documentation', resolved: 'Resolved' };
+  const CLAIM_STATUS_CLASS = { under_review: 'cs-review', approved: 'cs-approved', denied: 'cs-denied', pending_documentation: 'cs-docs', resolved: 'cs-resolved' };
+  function claimStatusBadgeHTML(inv, large){
+    if (!claimsOps()) return '';
+    const k = inv.claimStatus; if (!k || !CLAIM_STATUS_LABELS[k]) return '';
+    return '<span class="badge claim ' + CLAIM_STATUS_CLASS[k] + '"' + (large ? ' style="font-size:11px;padding:4px 9px;"' : '') + ' title="Claim status">' + CLAIM_STATUS_LABELS[k].toUpperCase() + '</span>';
+  }
+  function claimStatusSelectHTML(inv){
+    return '<select class="claim-select" onchange="setClaimStatus(' + inv.id + ', this.value)">' +
+      '<option value=""' + (!inv.claimStatus ? ' selected' : '') + '>\u2014 Set \u2014</option>' +
+      Object.keys(CLAIM_STATUS_LABELS).map(function(k){ return '<option value="' + k + '"' + (inv.claimStatus === k ? ' selected' : '') + '>' + CLAIM_STATUS_LABELS[k] + '</option>'; }).join('') + '</select>';
+  }
+  function setClaimStatus(id, value){
+    const inv = state.invoices.find(function(i){ return String(i.id) === String(id); }); if (!inv) return;
+    const v = CLAIM_STATUS_LABELS[value] ? value : null;
+    if ((inv.claimStatus || null) === v) return;
+    inv.claimStatus = v;
+    persistInvoice(inv, ['claimStatus']);
+    addActivity(inv, v ? ('Claim status set to ' + CLAIM_STATUS_LABELS[v] + '.') : 'Claim status cleared.', 'manual', 'update');
+    saveState(); renderAll();
+  }
+
+  // Follow-up reminders. A claim that has been contacted and has not answered
+  // is flagged after 3 business days (Due) and again after 5 (Overdue). Open
+  // invoices only; anything Sent to Legal or already answered is left alone.
+  function businessDaysSince(dateStr){
+    if (!dateStr) return null;
+    const start = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+    if (isNaN(start.getTime())) return null;
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    let n = 0; const d = new Date(start);
+    while (d < today) { d.setDate(d.getDate() + 1); const wd = d.getDay(); if (wd !== 0 && wd !== 6) n++; if (n > 400) break; }
+    return n;
+  }
+  function lastOutreachDay(inv){
+    const a = inv.lastFollowUpAt ? String(inv.lastFollowUpAt).slice(0, 10) : '';
+    const b = inv.lastContact ? String(inv.lastContact).slice(0, 10) : '';
+    return (a > b ? a : b) || '';
+  }
+  // null | { level: 'due' | 'overdue', days }
+  function followUpReminder(inv){
+    if (!claimsOps()) return null;
+    if (!inv || inv.jobStatus === 'paid' || isDoNotContact(inv)) return null;
+    if (balanceDue(inv) <= 0.005) return null;
+    if (inv.responded === 'replied') return null;
+    const since = lastOutreachDay(inv); if (!since) return null;
+    const days = businessDaysSince(since); if (days === null) return null;
+    if (days >= 5) return { level: 'overdue', days: days };
+    if (days >= 3) return { level: 'due', days: days };
+    return null;
+  }
+  function followUpBadgeHTML(inv){
+    const r = followUpReminder(inv); if (!r) return '';
+    return r.level === 'overdue'
+      ? '<span class="badge fu-overdue" title="No response in ' + r.days + ' business days - follow up now">FOLLOW-UP OVERDUE \u00b7 ' + r.days + 'd</span>'
+      : '<span class="badge fu-due" title="No response in ' + r.days + ' business days - follow up due">FOLLOW-UP DUE \u00b7 ' + r.days + 'd</span>';
+  }
   const DEPARTMENT_LABELS = { mitigation: "Mitigation", contents: "Contents", reconstruction: "Reconstruction" };
   const CATEGORY_LABELS = {
     board_up_tarping: "Board Up/Tarping", textiles: "Textiles", content_cleaning: "Content Cleaning",
@@ -1977,6 +2095,27 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   // The system of record's name in dynamic text: a QuickBooks workspace has no
   // CRM, so anything synced in is labelled QuickBooks there.
   function sysLabel(){ return (window.__me && window.__me.ok && window.__me.integrationMode === 'quickbooks') ? 'QuickBooks' : 'CRM'; }
+  // Feature packs are switched on per company (tenants.settings.features and
+  // /api/me.features). 'claimsOps' is the claims-operations pack: claim
+  // status, follow-up flags, business-level access, team cadences, escalation
+  // pills everywhere and "Sent to Legal" wording. Off (the default, and always
+  // on the interactive demo) the dashboard behaves exactly as before.
+  function featOn(name){ const f = window.__me && window.__me.ok && window.__me.features; return !!(f && f[name]); }
+  function claimsOps(){ return featOn('claimsOps'); }
+  // Elements marked data-feat="x" exist only with that pack; elements marked
+  // data-feat-text carry their pack wording there and their standard wording
+  // in the markup.
+  function applyFeatureFlags(){
+    document.querySelectorAll('[data-feat]').forEach(function(el){
+      const on = featOn(el.dataset.feat);
+      if (el.tagName === 'OPTION') { el.hidden = !on; el.disabled = !on; }
+      else el.style.display = on ? '' : 'none';
+    });
+    document.querySelectorAll('[data-feat-text]').forEach(function(el){
+      if (el.dataset.featOrig === undefined) el.dataset.featOrig = el.innerHTML;
+      el.innerHTML = claimsOps() ? el.dataset.featText : el.dataset.featOrig;
+    });
+  }
   function isoDate(d){ return d.toISOString().slice(0,10); }
   // The calendar day where the user is (a send at 10 pm Central is today, not
   // tomorrow's UTC date). isoDate() stays UTC for dates parsed from the API.
@@ -2551,6 +2690,7 @@ qbInit();
     const data = await res.json();
     if (!data.ok) return;
     window.__me = data;
+    applyFeatureFlags();
     applyTenantConfig(data);
     showSenderBanner(false);
     state.currentUser = { email: data.email, role: data.role, office: data.office || null, fullName: data.fullName || null };
@@ -2646,7 +2786,7 @@ async function renderTeam() {
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Name</th>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Email</th>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Role</th>' +
-      '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Office</th>' +
+      '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">' + (claimsOps() ? 'Access' : 'Office') + '</th>' +
       '<th style="text-align:left;padding:8px;border-bottom:2px solid #16233A;">Status</th>' +
       '<th style="padding:8px;border-bottom:2px solid #16233A;"></th></tr></thead><tbody>' +
       team.map(function(m){
@@ -2654,7 +2794,7 @@ async function renderTeam() {
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + hEsc(m.full_name || String.fromCharCode(8212)) + '</td>' +
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + hEsc(m.email) + '</td>' +
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-transform:capitalize;">' + hEsc(m.role) + '</td>' +
-          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + officeLabel(m.office) + '</td>' +
+          '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + (claimsOps() ? accessLabelHTML(m) : officeLabel(m.office)) + (claimsOps() && isAdminViewer && m.role !== 'admin' && !(state.currentUser && String(m.email || '').toLowerCase() === String(state.currentUser.email || '').toLowerCase()) ? ' <button class="btn-small" style="margin-left:6px;" data-id="' + hEsc(m.id) + '" onclick="openEditAccess(this.dataset.id)">Edit access</button>' : '') + '</td>' +
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;">' + (m.status === 'pending' ? '<span style="background:#FFF4E5;border:1px solid #F2C879;color:#7A4B00;border-radius:999px;padding:2px 8px;font-size:11.5px;">Invite not sent</span>' : '<span style="text-transform:capitalize;">' + hEsc(m.status || '') + '</span>') + '</td>' +
           '<td style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:right;white-space:nowrap;">' +
             (isAdminViewer && m.status === 'pending' ? '<button class="btn-solid" style="margin-right:6px;" data-id="' + hEsc(m.id) + '" onclick="sendTeamInvite(this.dataset.id, false)">Send invite</button>' : '') +
@@ -2683,7 +2823,12 @@ function openInviteTeamMember() {
   const sendNow = document.getElementById('invite-send-now'); if (sendNow) sendNow.checked = true;
   inviteSendChanged();
   inviteRoleChanged();
-  if (officeEl) officeEl.value = Object.keys(inviteOfficeMap())[0] || 'arizona';
+  if (officeEl) {
+    const om = inviteOfficeMap();
+    officeEl.innerHTML = (claimsOps() ? '<option value="">All cities</option>' : '') + Object.keys(om).map(function(k){ return '<option value="' + hEsc(k) + '">' + hEsc(om[k]) + '</option>'; }).join('');
+    officeEl.value = claimsOps() ? '' : (Object.keys(om)[0] || 'arizona');
+  }
+  const dl = document.getElementById('invite-dept-list'); if (dl) dl.innerHTML = deptAccessListHTML('invite', null);
   const overlay = document.getElementById('overlay-invite');
   if (overlay) overlay.classList.add('open');
 }
@@ -2702,6 +2847,44 @@ function inviteRoleChanged() {
   const role = (document.getElementById('invite-role') || {}).value || 'employee';
   const row = document.getElementById('invite-office-row');
   if (row) row.style.display = role === 'admin' ? 'none' : '';
+  const drow = document.getElementById('invite-dept-row');
+  if (drow) drow.style.display = (claimsOps() && role !== 'admin') ? '' : 'none';
+}
+// The company's businesses as a checkbox list. "All businesses" on means no
+// limit; ticking any business turns it off. `selected` = null for all.
+function deptAccessListHTML(idPrefix, selected){
+  const all = (window.__me && window.__me.allDepartments) || DEPARTMENT_LABELS || {};
+  const keys = Object.keys(all);
+  const isAll = !selected || !selected.length;
+  return '<label class="all"><input type="checkbox" data-all="1" ' + (isAll ? 'checked' : '') + ' onchange="deptAccessToggleAll(this)"> All businesses</label>' +
+    keys.map(function(k){ return '<label><input type="checkbox" value="' + hEsc(k) + '" ' + (!isAll && selected.indexOf(k) !== -1 ? 'checked' : '') + ' onchange="deptAccessToggleOne(this)"> ' + hEsc(all[k]) + '</label>'; }).join('');
+}
+function deptAccessToggleAll(cb){
+  const list = cb.closest('.dept-access-list'); if (!list) return;
+  if (cb.checked) list.querySelectorAll('input[value]').forEach(function(i){ i.checked = false; });
+  else { /* must have something: re-check All if nothing picked */ if (!list.querySelector('input[value]:checked')) cb.checked = true; }
+}
+function deptAccessToggleOne(cb){
+  const list = cb.closest('.dept-access-list'); if (!list) return;
+  const all = list.querySelector('input[data-all]');
+  const any = !!list.querySelector('input[value]:checked');
+  if (all) all.checked = !any;
+}
+// null = all businesses, else the ticked keys
+function deptAccessRead(list){
+  if (!list) return null;
+  const all = list.querySelector('input[data-all]');
+  if (all && all.checked) return null;
+  const keys = Array.from(list.querySelectorAll('input[value]:checked')).map(function(i){ return i.value; });
+  return keys.length ? keys : null;
+}
+function accessLabelHTML(m){
+  if (m.role === 'admin') return '<span class="access-pill">All cities</span><span class="access-pill">All businesses</span>';
+  const om = inviteOfficeMap();
+  const all = (window.__me && window.__me.allDepartments) || DEPARTMENT_LABELS || {};
+  const city = m.office ? (om[m.office] || m.office) : 'All cities';
+  const depts = (m.departments && m.departments.length) ? m.departments.map(function(k){ return '<span class="access-pill">' + hEsc(all[k] || k) + '</span>'; }).join('') : '<span class="access-pill">All businesses</span>';
+  return '<span class="access-pill">' + hEsc(city) + '</span>' + depts;
 }
 async function submitInviteTeamMember() {
   const emailEl = document.getElementById('invite-email');
@@ -2718,7 +2901,8 @@ async function submitInviteTeamMember() {
   }
   const fullName = (document.getElementById('invite-name') || {}).value || '';
   const role = (document.getElementById('invite-role') || {}).value || 'employee';
-  const office = (document.getElementById('invite-office') || {}).value || Object.keys(inviteOfficeMap())[0] || 'arizona';
+  const office = (document.getElementById('invite-office') || {}).value || (claimsOps() ? '' : (Object.keys(inviteOfficeMap())[0] || 'arizona'));
+  const departments = claimsOps() ? deptAccessRead(document.getElementById('invite-dept-list')) : null;
   const sendNowEl = document.getElementById('invite-send-now');
   const sendInvite = !(sendNowEl && !sendNowEl.checked);
   if (!state.currentUser) {
@@ -2726,7 +2910,7 @@ async function submitInviteTeamMember() {
     state.team = state.team || [];
     if (state.team.some(function(m){ return String(m.email).toLowerCase() === email.toLowerCase(); })) { showToast('That email is already on the team.'); return; }
     if (state.team.filter(function(m){ return m.status !== 'disabled'; }).length >= 8) { showToast('Your Growth plan includes 8 seats. Remove a teammate or upgrade to add more.'); return; }
-    state.team.push({ id: 'demo-' + Date.now(), full_name: fullName.trim(), email: email, role: role, office: office, status: sendInvite ? 'invited' : 'pending' });
+    state.team.push({ id: 'demo-' + Date.now(), full_name: fullName.trim(), email: email, role: role, office: office || null, departments: departments, status: sendInvite ? 'invited' : 'pending' });
     saveState(); closeInviteTeamMember(); renderTeam();
     showToast(sendInvite ? (email + ' has been invited.') : (email + ' added \u2014 invite not sent yet.'));
     return;
@@ -2736,7 +2920,7 @@ async function submitInviteTeamMember() {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email, fullName: fullName, role: role, office: office, sendInvite: sendInvite })
+      body: JSON.stringify({ email: email, fullName: fullName, role: role, office: office, departments: departments, sendInvite: sendInvite })
     });
     const data = await res.json();
     if (!data.ok) {
@@ -2752,6 +2936,30 @@ async function submitInviteTeamMember() {
   }
 }
 
+let __accessEditingId = null;
+async function openEditAccess(id){
+  let m = null;
+  try { const res = await fetch('/api/team', { credentials: 'include' }); const d = await res.json(); m = ((d && d.team) || []).find(function(x){ return String(x.id) === String(id); }); } catch (e) {}
+  if (!m) { showToast('Could not load that teammate.'); return; }
+  __accessEditingId = id;
+  const sub = document.getElementById('access-sub'); if (sub) sub.textContent = (m.full_name || m.email) + ' - choose the city and businesses they can see. Their invoices, accounts, reports and cadence follow this.';
+  const dl = document.getElementById('access-dept-list'); if (dl) dl.innerHTML = deptAccessListHTML('access', m.departments || null);
+  const oe = document.getElementById('access-office');
+  if (oe) { const om = inviteOfficeMap(); oe.innerHTML = '<option value="">All cities</option>' + Object.keys(om).map(function(k){ return '<option value="' + hEsc(k) + '">' + hEsc(om[k]) + '</option>'; }).join(''); oe.value = m.office && om[m.office] ? m.office : ''; }
+  const ov = document.getElementById('overlay-access'); if (ov) ov.classList.add('open');
+}
+function closeEditAccess(){ const ov = document.getElementById('overlay-access'); if (ov) ov.classList.remove('open'); __accessEditingId = null; }
+async function submitEditAccess(){
+  if (!__accessEditingId) return;
+  const departments = deptAccessRead(document.getElementById('access-dept-list'));
+  const office = (document.getElementById('access-office') || {}).value || '';
+  try {
+    const res = await fetch('/api/team/update', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: __accessEditingId, office: office, departments: departments }) });
+    const data = await res.json().catch(function(){ return null; });
+    if (!res.ok || !data || !data.ok) { showToast((data && data.error) || 'Could not save access.'); return; }
+    closeEditAccess(); renderTeam(); showToast('Access updated.');
+  } catch (e) { showToast('Could not save access.'); }
+}
 async function sendTeamInvite(id, resend) {
   if (!state.currentUser) {
     state.team = (state.team || []).map(function(m){ return String(m.id) === String(id) ? Object.assign({}, m, { status: 'invited' }) : m; });
@@ -3076,6 +3284,7 @@ async function loadRealAccountsNow(){
           documents: [],
           activity: [],
           escalated: !!a.escalated,
+          claimStatus: a.claimStatus || null,
           doNotContact: !!a.doNotContact,
           doNotContactAt: a.doNotContactAt || null,
           doNotContactBy: a.doNotContactBy || null,
@@ -3758,17 +3967,51 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   function money2(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); }
   function partialBadgeHTML(inv){ return isPartiallyPaid(inv) ? '<span class="badge partial" title="A payment has been applied; the balance shown is what is still owed">PARTIAL PAYMENT</span>' : ''; }
 
-  /* ---- DO NOT CONTACT - Sent to Collections Agency ----
+  /* ---- Sent to Legal, DO NOT CONTACT ----
      Set from an account's Manage drawer. While it is on, the account is shown
      in red on the Invoice Queue and A/R Spreadsheet, no follow-up can be
      drafted or sent, and the autonomous cadence skips it entirely. */
-  const DNC_LABEL = 'DO NOT CONTACT - Sent to Collections Agency';
+  function dncLabel(){ return claimsOps() ? 'Sent to Legal, DO NOT CONTACT' : 'DO NOT CONTACT - Sent to Collections Agency'; }
   function isDoNotContact(inv){ return !!(inv && inv.doNotContact); }
-  function dncBadgeHTML(inv){ return isDoNotContact(inv) ? '<span class="badge dnc" title="' + DNC_LABEL + '">DO NOT CONTACT &middot; COLLECTIONS AGENCY</span>' : ''; }
+  function dncBadgeHTML(inv){ return isDoNotContact(inv) ? '<span class="badge dnc" title="' + dncLabel() + '">' + (claimsOps() ? 'SENT TO LEGAL &middot; DO NOT CONTACT' : 'DO NOT CONTACT &middot; COLLECTIONS AGENCY') + '</span>' : ''; }
+  // Every escalation flag an invoice carries, as one consistent set of pills:
+  // Escalated (out of the cadence), Demand letter sent, NOIL sent, Lien filed,
+  // Sent to Legal (DNC). Used on queue cards, the A/R ledger, Accounts,
+  // Collected, Escalations and the invoice drawer so nothing is missed.
+  function escalationFlags(inv){
+    const f = [];
+    if (inv.escalated) f.push({ cls: 'escalated', text: 'ESCALATED', title: 'Escalated - out of the automated cadence' + (inv.notifiedName ? ' (' + inv.notifiedName + ' notified)' : '') });
+    if (inv.demandLetterSentAt) f.push({ cls: 'esc-demand', text: 'DEMAND LETTER SENT', title: 'Demand letter sent ' + fmtDate(inv.demandLetterSentAt) });
+    if (inv.noilSentAt || inv.noilSent) f.push({ cls: 'esc-noil', text: 'NOIL SENT', title: 'Notice of Intent to Lien sent' + (inv.noilSentAt ? ' ' + fmtDate(inv.noilSentAt) : '') });
+    if (inv.lienFiled) f.push({ cls: 'esc-lien', text: 'LIEN FILED', title: 'Lien filed' });
+    if (isDoNotContact(inv)) f.push({ cls: 'dnc', text: 'SENT TO LEGAL \u00b7 DO NOT CONTACT', title: dncLabel() + (inv.doNotContactAt ? ' - ' + fmtDate(inv.doNotContactAt) : '') });
+    return f;
+  }
+  function escalationBadgesHTML(inv, large){
+    const f = escalationFlags(inv);
+    if (!f.length) return '';
+    const style = large ? ' style="font-size:11px;padding:4px 9px;"' : '';
+    return f.map(function(x){ return '<span class="badge ' + x.cls + '"' + style + ' title="' + hEsc(x.title) + '">' + x.text + '</span>'; }).join('');
+  }
+  // For table cells: a wrapped row under the account name.
+  function escalationCellHTML(inv){
+    if (!claimsOps()) return isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : '';
+    const h = escalationBadgesHTML(inv); return h ? '<div class="esc-row esc-cell">' + h + '</div>' : '';
+  }
+  // The standard dashboard's ESCALATED pill beside the job status (the pack
+  // shows every flag under the account name instead).
+  function escStatusHTML(inv){ return (!claimsOps() && inv.escalated) ? ' <span class="badge escalated">ESCALATED</span>' : ''; }
+  // One account's flags across several invoices (Accounts tab groups).
+  function escalationGroupHTML(invoices){
+    if (!claimsOps()) return '';
+    const seen = {}; const out = [];
+    (invoices || []).forEach(function(inv){ escalationFlags(inv).forEach(function(x){ if (!seen[x.cls]) { seen[x.cls] = 1; out.push('<span class="badge ' + x.cls + '">' + x.text + '</span>'); } }); });
+    return out.length ? '<div class="esc-row esc-cell">' + out.join('') + '</div>' : '';
+  }
   function dncBannerHTML(inv){
     const by = inv.doNotContactBy ? (' by ' + hEsc(inv.doNotContactBy)) : '';
     const when = inv.doNotContactAt ? (' on ' + hEsc(hDate(inv.doNotContactAt))) : '';
-    return '<div class="dnc-banner"><span class="dnc-banner-title">' + DNC_LABEL + '</span><span class="dnc-banner-sub">Flagged' + by + when + '. All automated cadences and follow-ups are stopped for this account.</span></div>';
+    return '<div class="dnc-banner"><span class="dnc-banner-title">' + dncLabel() + '</span><span class="dnc-banner-sub">Flagged' + by + when + '. All automated cadences and follow-ups are stopped for this account.</span></div>';
   }
 
   /* ============================================================
@@ -3829,7 +4072,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   function renderTodoList(){
 const wrap = document.getElementById('todo-list');
 if(!wrap) return;
-// Accounts sent to a collections agency are not anyone's follow-up to do.
+// Accounts sent to Legal are not anyone's follow-up to do.
 const open = activeInvoices().filter(inv => !isDoNotContact(inv));
 const items = open.map(inv => {
 const cp = nextCadenceCheckpoint(inv);
@@ -3931,6 +4174,7 @@ function todoRowHTML(item, num, priority){
     const el = document.getElementById('kpis');
     el.innerHTML = `
       <div class="kpi"><div class="label">Total AR Outstanding</div><div class="value">$${totalAR.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">across ${active.length} open invoices${partialCount ? ' &middot; ' + partialCount + ' partially paid' : ''}</div></div>
+      ${claimsOps() ? `<div class="kpi fu-kpi" title="Open invoices with no response 3+ business days after the last outreach"><div class="label">Follow-ups Due</div><div class="value">${active.filter(function(i){ return !!followUpReminder(i); }).length}</div><div class="sub">${active.filter(function(i){ const r = followUpReminder(i); return r && r.level === 'overdue'; }).length} overdue (5+ business days)</div></div>` : ''}
       <div class="kpi"><div class="label">Avg. Days Outstanding</div><div class="value">${avgDays}</div><div class="sub">across all open invoices</div></div>
       <div class="kpi"><div class="label">In Active Cadence</div><div class="value">${active.filter(i=>!i.escalated).length}</div><div class="sub ${state.invoices.filter(i=>i.escalated).length?'up':''}">${state.invoices.filter(i=>i.escalated).length} escalated</div></div>
       <div class="kpi"><div class="label">Autonomous Sends</div><div class="value">${state.automationLog.length + state.commsLog.filter(c=>c.source==='automation').length}</div><div class="sub ${needsAttn ? 'up' : ''}">${needsAttn ? needsAttn + ' need attention' : 'all running cleanly'}</div></div>
@@ -3986,7 +4230,7 @@ function todoRowHTML(item, num, priority){
             ${catBadgeHTML(inv, true)}
             <span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus].toUpperCase()}</span>
             <span class="badge cw">WITH: ${CURRENTLY_WITH_LABELS[inv.currentlyWith].toUpperCase()}</span>
-            ${dncBadgeHTML(inv)}${partialBadgeHTML(inv)}${escBadge}${warnBadge}${staleBadge}
+            ${claimsOps() ? claimStatusBadgeHTML(inv) + followUpBadgeHTML(inv) + escalationBadgesHTML(inv) + partialBadgeHTML(inv) : dncBadgeHTML(inv) + partialBadgeHTML(inv) + escBadge}${warnBadge}${staleBadge}
           </div>
         </div>
         <div class="amount">${isPartiallyPaid(inv) ? '<span class="owed-label">Balance owed</span>' : ''}${money2(balanceDue(inv))}
@@ -4004,7 +4248,7 @@ function todoRowHTML(item, num, priority){
           <button class="btn-small" onclick="openAccountHistory(${inv.id})" title="Every follow-up, letter, payment, document and note on this account">Account History</button>
           <button class="btn-small" onclick="openDetail(${inv.id})">Manage</button>
           ${dnc
-            ? `<button class="btn-primary" disabled title="${DNC_LABEL}: no follow-ups can be drafted or sent">Contact stopped</button>`
+            ? `<button class="btn-primary" disabled title="${dncLabel()}: no follow-ups can be drafted or sent">Contact stopped</button>`
             : `<button class="btn-primary" onclick="openDrawer(${inv.id}, 'followup')">Draft Now</button>`}
         </div>
       </div>`;
@@ -4032,8 +4276,9 @@ function todoRowHTML(item, num, priority){
 
     let items = activeInvoices().filter(inv => !inv.escalated).filter(inv => {
       const matchesSearch = !searchVal || [inv.name, inv.meta, inv.invoiceNumber, inv.jobNumber, inv.claimNumber, inv.contact].some(v => String(v || '').toLowerCase().includes(searchVal));
-      const matchesPayer = payerFilter === 'all' || inv.payer === payerFilter;
-      return matchesSearch && matchesPayer;
+      const matchesPayer = payerFilter === 'all' || payerFilter === 'follow-up' || payerFilter === 'flagged' || inv.payer === payerFilter;
+      const matchesSpecial = payerFilter === 'follow-up' ? !!followUpReminder(inv) : (payerFilter === 'flagged' ? !!escalationFlags(inv).length : true);
+      return matchesSearch && matchesPayer && matchesSpecial;
     });
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true });
     const byDate = (a, b) => String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || ''));
@@ -4055,7 +4300,7 @@ function todoRowHTML(item, num, priority){
     el.innerHTML = pagerHTML(pg, 'invoices', 'top') + pg.rows.map(inv => cardHTML(inv)).join('') + pagerHTML(pg, 'invoices');
   }
 
-  // Flag or clear "DO NOT CONTACT - Sent to Collections Agency" on an account.
+  // Flag or clear "Sent to Legal, DO NOT CONTACT" on an account.
   // Persists for real tenants (the worker stops the cadence and refuses sends
   // server-side too); the demo applies the same rules locally.
   async function setDoNotContact(id, on){
@@ -4067,8 +4312,8 @@ function todoRowHTML(item, num, priority){
     inv.doNotContactAt = on ? new Date().toISOString() : null;
     inv.doNotContactBy = on ? ((state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || 'You') : null;
     const text = on
-      ? 'Marked "' + DNC_LABEL + '". All automated cadences, follow-ups and manual sends to this customer are stopped.'
-      : 'Cleared "' + DNC_LABEL + '". Automated cadences and follow-ups may resume.';
+      ? 'Marked "' + dncLabel() + '". All automated cadences, follow-ups and manual sends to this customer are stopped.'
+      : 'Cleared "' + dncLabel() + '". Automated cadences and follow-ups may resume.';
     // The worker writes its own note + activity entry for real accounts; the
     // demo records it locally so the drawer and history reflect it at once.
     if(isRemoteInvoice(inv)){
@@ -4246,7 +4491,10 @@ function todoRowHTML(item, num, priority){
   // Tracker columns for companies whose departments are operating companies
   // (QuickBooks-only workspaces): the ledger a collections desk actually works
   // from, with the free-text columns editable in place.
-  const TRACKER_COLS = ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?', 'Response Summary', 'Notes', 'Note Time', 'Last Follow-Up', 'Projected Collection', 'Payment Type', 'Sent to Collections'];
+  function trackerCols(){
+    const on = claimsOps();
+    return ['Account', 'Invoice #', 'Invoice Date', 'Age', 'Business', 'City', 'Amount', 'Point of Contact', 'Last Contact', 'Responded?'].concat(on ? ['Claim Status'] : []).concat(['Response Summary', 'Notes', 'Note Time', 'Last Follow-Up', 'Projected Collection', 'Payment Type', on ? 'Sent to Legal (DNC)' : 'Sent to Collections']);
+  }
   // A follow-up timestamp is shown on the calendar day it happened here (a
   // send at 10 pm Central is today, not tomorrow's UTC date).
   function followUpDay(ts){ const d = new Date(ts); return isNaN(d.getTime()) ? String(ts).slice(0, 10) : localDay(d); }
@@ -4269,8 +4517,8 @@ function todoRowHTML(item, num, priority){
     const age = agingDays(inv);
     const city = OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '\u2014';
     return `
-      <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
-        <td>${acctLink(inv.id, inv.name)}${isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : ''}</td>
+      <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + dncLabel() + '"' : ''}>
+        <td>${acctLink(inv.id, inv.name)}${escalationCellHTML(inv)}</td>
         <td style="font-family:var(--font-mono);">${hEsc(inv.invoiceNumber || '\u2014')}</td>
         <td>${fmtDate(inv.invoiceDate)}</td>
         <td><span class="age-pill ${agingBucketClass(age)}">${age} day${age===1?'':'s'}</span></td>
@@ -4279,7 +4527,8 @@ function todoRowHTML(item, num, priority){
         <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}</td>
         <td class="tracker-text"><textarea rows="2" placeholder="Name, email, phone\u2026" onchange="setTrackerText(${inv.id}, 'contactInfo', this.value)">${hEsc(inv.contactInfo || '')}</textarea></td>
         <td>${inv.lastContact ? fmtDate(inv.lastContact) + fromAccountsBadge(inv) : '\u2014'}</td>
-        <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span></td>
+        <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span>${followUpBadgeHTML(inv) ? '<div class="esc-row esc-cell">' + followUpBadgeHTML(inv) + '</div>' : ''}</td>
+        ${claimsOps() ? '<td>' + claimStatusSelectHTML(inv) + '</td>' : ''}
         <td class="tracker-text qb-notes resp-cell" title="${hEsc(inv.responseSummary || '')}"><div class="resp-wrap">${inv.responseSummary ? '<div class="clamp">' + hEsc(inv.responseSummary) + '</div>' : '<span class="none">No reply yet</span>'}<button class="btn-small reply-btn" onclick="openReplyBox(${inv.id})" title="Paste the email you received \u2014 clAIms summarizes it here">${inv.responseSummary ? 'Log another reply' : 'Log reply'}</button></div></td>
         <td class="tracker-text"><textarea rows="2" placeholder="Notes\u2026" onchange="setTrackerText(${inv.id}, 'note', this.value)">${hEsc(inv.note || '')}</textarea></td>
         <td class="note-time" id="note-stamp-${inv.id}">${noteStampHTML(inv, 'cell')}</td>
@@ -4295,7 +4544,7 @@ function todoRowHTML(item, num, priority){
             <option value="wire" ${inv.paymentType==='wire'?'selected':''}>Wire/Direct Deposit</option>
           </select>
         </td>
-        <td style="text-align:center;"><input type="checkbox" ${isDoNotContact(inv)?'checked':''} onchange="setDoNotContact(${inv.id}, this.checked)" title="${DNC_LABEL}"/>${inv.doNotContactBy ? '<div style="font-size:10.5px;color:var(--slate-soft);white-space:nowrap;">' + hEsc(inv.doNotContactBy) + '</div>' : ''}</td>
+        <td style="text-align:center;"><input type="checkbox" ${isDoNotContact(inv)?'checked':''} onchange="setDoNotContact(${inv.id}, this.checked)" title="${dncLabel()}"/>${inv.doNotContactBy ? '<div style="font-size:10.5px;color:var(--slate-soft);white-space:nowrap;">' + hEsc(inv.doNotContactBy) + '</div>' : ''}</td>
       </tr>`;
   }
   function setTrackerText(id, field, val){
@@ -4338,7 +4587,7 @@ function todoRowHTML(item, num, priority){
   // state so they survive a refresh; the inputs are only written when they
   // differ, so typing is never interrupted by a background render.
   const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'days-desc': 1, 'days-asc': 1, 'followup-desc': 1, 'followup-asc': 1, 'collections': 1, 'collections-last': 1 };
-  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1 };
+  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, 'follow-up': 1, 'escalated': 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
   function sheetSearchValue(){
     const box = document.getElementById('sheet-search');
     if (!box) return String(state.sheetSearch || '');
@@ -4382,6 +4631,9 @@ function todoRowHTML(item, num, priority){
     if (show === 'not-collections' && isDoNotContact(inv)) return false;
     if (show === 'replied' && inv.responded !== 'replied') return false;
     if (show === 'no-reply' && inv.responded === 'replied') return false;
+    if (show === 'follow-up' && !followUpReminder(inv)) return false;
+    if (show === 'escalated' && !escalationFlags(inv).length) return false;
+    if (show.indexOf('cs-') === 0 && (inv.claimStatus || '') !== show.slice(3)) return false;
     return true;
   }
   function sortSheetRows(rows){
@@ -4440,11 +4692,11 @@ function todoRowHTML(item, num, priority){
       if (!head.dataset.standard) head.dataset.standard = head.innerHTML; // the markup's own header, captured before any swap
       const want = tracker ? 'tracker' : 'standard';
       if (head.dataset.mode !== want) {
-        head.innerHTML = tracker ? ('<tr>' + TRACKER_COLS.map(function(c){ return '<th' + (c === 'Amount' ? ' class="amt"' : '') + '>' + c + '</th>'; }).join('') + '</tr>') : head.dataset.standard;
+        head.innerHTML = tracker ? ('<tr>' + trackerCols().map(function(c){ return '<th' + (c === 'Amount' ? ' class="amt"' : '') + '>' + c + '</th>'; }).join('') + '</tr>') : head.dataset.standard;
         head.dataset.mode = want;
       }
     }
-    const colCount = tracker ? TRACKER_COLS.length : 24;
+    const colCount = tracker ? trackerCols().length : 24;
 
     const weeksOn = paymentWeeksSelected();
     document.querySelectorAll('#payment-week-filter input[type=checkbox]').forEach(function(cb){
@@ -4477,11 +4729,11 @@ function todoRowHTML(item, num, priority){
     if (pagerEl) pagerEl.innerHTML = pagerHTML(pg, 'invoices');
     if (tracker) { body.innerHTML = pg.rows.map(trackerRowHTML).join(''); return; }
     body.innerHTML = pg.rows.map(inv => `
-      <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
+      <tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + dncLabel() + '"' : ''}>
         <td>${inv.invoiceNumber}</td>
         <td style="font-family:var(--font-mono);">${inv.jobNumber}</td>
         <td>${fmtDate(inv.invoiceDate)}</td>
-        <td>${acctLink(inv.id, inv.name)}${isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : ''}</td>
+        <td>${acctLink(inv.id, inv.name)}${escalationCellHTML(inv)}</td>
         <td><span class="badge office">${hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '')}</span></td>
         <td>${deptBadgeHTML(inv, false)}</td>
         <td><span class="badge cat">${hEsc(CATEGORY_LABELS[inv.category] || inv.category || '')}</span></td>
@@ -4689,12 +4941,12 @@ function todoRowHTML(item, num, priority){
           <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Category</th><th>Payer</th><th>Status</th><th>Age</th><th>Since contact</th><th class="amt">Balance owed</th><th></th></tr></thead><tbody>
           ${rows.map(inv => {
             const age = agingDays(inv);
-            return `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
-              <td><div style="font-weight:600;color:var(--ink);">${acctLink(inv.id, inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${inv.meta || ''}</div>${isDoNotContact(inv) ? '<div class="dnc-cell">' + dncBadgeHTML(inv) + '</div>' : ''}</td>
+            return `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + dncLabel() + '"' : ''}>
+              <td><div style="font-weight:600;color:var(--ink);">${acctLink(inv.id, inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${inv.meta || ''}</div>${escalationCellHTML(inv)}</td>
               <td style="font-family:var(--font-mono);font-size:11.5px;white-space:nowrap;">${hEsc(inv.invoiceNumber || '—')}${inv.invoiceDate ? `<div style="font-size:10.5px;color:var(--slate-soft);">${fmtDate(inv.invoiceDate)}</div>` : ''}</td>
               <td><span class="badge cat">${CATEGORY_LABELS[inv.category] || inv.category || '—'}</span></td>
               <td><span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer] || inv.payer || '—'}</span></td>
-              <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '—'}</span>${inv.escalated ? ' <span class="badge escalated">ESCALATED</span>' : ''}</td>
+              <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '—'}</span>${escStatusHTML(inv)}</td>
               <td><span class="age-pill ${agingBucketClass(age)}">${age} day${age===1?'':'s'}</span></td>
               <td style="white-space:nowrap;">${inv.lastContact ? fmtDate(inv.lastContact) + ((hDaysSince(inv.lastContact) !== null) ? ` <span style="color:var(--slate-soft);font-size:11px;">(${hDaysSince(inv.lastContact)}d ago)</span>` : '') : '<span style="color:var(--slate-soft);">No contact yet</span>'}</td>
               <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span><span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}</td>
@@ -4913,14 +5165,14 @@ function todoRowHTML(item, num, priority){
       return `<div class="aging-dept">
         <div class="aging-dept-head"><span>${label}<span class="cnt">${list.length} invoice${list.length===1?'':'s'}</span></span><span class="tot">${money2(mTotal)}</span></div>
         <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Invoice date</th><th>${TENANT_DEPTS_CUSTOM ? 'Business' : 'Department'}</th><th>${TENANT_DEPTS_CUSTOM ? 'City' : 'Office'}</th><th>Payer</th><th>Status</th><th class="amt">Invoiced</th><th class="amt">Balance</th><th></th></tr></thead><tbody>
-        ${list.map(inv => `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + DNC_LABEL + '"' : ''}>
+        ${list.map(inv => `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + dncLabel() + '"' : ''}>
           <td><div style="font-weight:600;color:var(--ink);">${acctLink(inv.id, inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${hEsc(inv.meta || '')}</div></td>
           <td style="font-family:var(--font-mono);font-size:11.5px;white-space:nowrap;">${hEsc(inv.invoiceNumber || '\u2014')}</td>
           <td style="white-space:nowrap;">${inv.invoiceDate ? fmtDate(inv.invoiceDate) : '\u2014'}</td>
           <td>${hEsc(deptLabel(inv) || DEPARTMENT_LABELS[inv.department] || inv.department || '\u2014')}</td>
           <td>${hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '\u2014')}</td>
           <td><span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer] || inv.payer || '\u2014'}</span></td>
-          <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '\u2014'}</span>${inv.escalated ? ' <span class="badge escalated">ESCALATED</span>' : ''}</td>
+          <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '\u2014'}</span>${claimsOps() ? escalationCellHTML(inv) : escStatusHTML(inv)}</td>
           <td class="amt">${money2(inv.amount)}</td>
           <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}</td>
           <td style="white-space:nowrap;"><span class="hist-link" onclick="openAccountHistory(${inv.id})">History</span> &middot; <span class="hist-link" onclick="openDetail(${inv.id})">Manage</span></td>
@@ -5580,7 +5832,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
         <tbody>
           ${pg.rows.map(g => `
             <tr class="acct-row" data-key="${hEsc(g.key)}" onclick="openAccountPanel(this.dataset.key)">
-              <td><div class="acct-name">${hEsc(g.name)}</div><div class="acct-sub">${hEsc(g.contact || 'No contact on file')}${g.contactEmail ? ' · ' + hEsc(g.contactEmail) : ''}${g.escalated ? ' · <span style="color:var(--rust);font-weight:600;">' + g.escalated + ' escalated</span>' : ''}${g.dnc ? ' · <span style="color:var(--rust);font-weight:600;">Do not contact</span>' : ''}</div></td>
+              <td><div class="acct-name">${hEsc(g.name)}</div><div class="acct-sub">${hEsc(g.contact || 'No contact on file')}${g.contactEmail ? ' · ' + hEsc(g.contactEmail) : ''}${g.escalated ? ' · <span style="color:var(--rust);font-weight:600;">' + g.escalated + ' escalated</span>' : ''}${g.dnc ? ' · <span style="color:var(--rust);font-weight:600;">Do not contact</span>' : ''}</div>${escalationGroupHTML(g.invoices)}</td>
               <td><b>${f.includePaid ? g.count : g.openCount}</b>${f.includePaid && g.openCount !== g.count ? '<div class="acct-sub">' + g.openCount + ' open</div>' : ''}</td>
               <td>${hEsc(acctBizLabel(g))}</td>
               <td>${hEsc(Object.keys(g.cities).filter(Boolean).sort().join(', '))}</td>
@@ -5664,7 +5916,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
           '<td>' + hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '') + '</td>' +
           '<td class="amt">$' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
           '<td class="amt">$' + invBalance(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
-          '<td>' + hEsc(STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '') + (inv.escalated ? ' <span class="badge escalated">ESCALATED</span>' : '') + (isDoNotContact(inv) ? ' <span class="badge escalated">DNC</span>' : '') + '</td>' +
+          '<td>' + hEsc(STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '') + (claimsOps() ? escalationCellHTML(inv) : escStatusHTML(inv) + (isDoNotContact(inv) ? ' <span class="badge escalated">DNC</span>' : '')) + '</td>' +
           '<td>' + lastFollowUpHTML(inv) + '</td>' +
         '</tr>';
       }).join('') + '</tbody>';
@@ -6224,7 +6476,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('detail-title').textContent = `Manage \u2014 ${inv.name}`;
     const claimBit = inv.claimNumber ? ` \u00b7 Claim ${inv.claimNumber}` : '';
     document.getElementById('detail-sub').textContent = `${TENANT_DEPTS_CUSTOM ? deptLabel(inv) : OFFICE_LABELS[inv.officeLocation]} \u00b7 ${inv.jobNumber}${claimBit}${TENANT_DEPTS_CUSTOM ? '' : ' \u00b7 ' + DEPARTMENT_LABELS[inv.department] + ' \u2014 ' + CATEGORY_LABELS[inv.category]} \u00b7 ${PAYER_LABELS[inv.payer]} \u00b7 ${inv.days} days since contact \u00b7 $${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}`;
-    document.getElementById('detail-status-badge').innerHTML = `<span class="badge sfstatus" style="font-size:12px;padding:5px 10px;"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>`;
+    document.getElementById('detail-status-badge').innerHTML = `<span class="badge sfstatus" style="font-size:12px;padding:5px 10px;"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>` + (claimsOps() && escalationBadgesHTML(inv) ? '<div class="esc-row" style="margin-top:8px;">' + escalationBadgesHTML(inv, true) + '</div>' : '');
     document.querySelectorAll('#currently-with-toggle .cw-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.val === inv.currentlyWith);
     });
@@ -6241,7 +6493,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('detail-dnc-toggle').classList.toggle('on', dnc);
     document.getElementById('detail-dnc-desc').textContent = dnc
       ? ('Flagged' + (inv.doNotContactBy ? (' by ' + inv.doNotContactBy) : '') + (inv.doNotContactAt ? (' on ' + hDate(inv.doNotContactAt)) : '') + '. Every automated cadence and follow-up is stopped and nothing can be sent to this customer from clAIms. Turn this off if the agency returns the account.')
-      : 'Turn this on once the account has been handed to an outside agency. The account turns red on the Invoice Queue and Accounts Receivable, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.';
+      : 'Turn this on once the account has been handed to ' + (claimsOps() ? 'Legal' : 'an outside agency') + '. The account turns red on the Invoice Queue and Accounts Receivable, every automated cadence and follow-up stops, and nothing can be drafted or sent to this customer from clAIms until it is turned off again.';
     document.getElementById('detail-followup-btn').style.display = dnc ? 'none' : 'inline-block';
     document.getElementById('detail-demand-btn').style.display = (!dnc && inv.days >= 30) ? 'inline-block' : 'none';
     document.getElementById('detail-noil-btn').style.display = (!dnc && inv.days >= 40) ? 'inline-block' : 'none';
@@ -6709,8 +6961,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     contactInfo: { kind: 'text', label: 'Point of contact', placeholder: 'Name, email, phone\u2026' },
     paymentType: { kind: 'choice', label: 'Payment type', options: [['', '\u2014 Select \u2014'], ['payment_link', 'Payment Link'], ['check', 'Check'], ['ach', 'ACH'], ['credit_card', 'Credit Card'], ['wire', 'Wire/Direct Deposit']] },
     note: { kind: 'text', label: 'Notes', placeholder: 'Notes\u2026' },
-    doNotContact: { kind: 'choice', label: 'Sent to collections', options: [['', 'No'], ['1', 'Yes \u2014 DO NOT CONTACT']] },
+    doNotContact: { kind: 'choice', get label(){ return claimsOps() ? 'Sent to Legal' : 'Sent to collections'; }, options: [['', 'No'], ['1', 'Yes \u2014 DO NOT CONTACT']] },
     escalated: { kind: 'choice', label: 'Escalated', options: [['', 'No'], ['1', 'Yes \u2014 out of the cadence']] },
+    claimStatus: { kind: 'choice', label: 'Claim status', options: [['', '\u2014 Not set \u2014']].concat(Object.keys(CLAIM_STATUS_LABELS).map(function(k){ return [k, CLAIM_STATUS_LABELS[k]]; })) },
     responseSummary: { kind: 'text', label: 'Last response', placeholder: 'What the customer said\u2026' }
   };
   function histEditValue(inv, field){
@@ -6776,6 +7029,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       case 'paymentType': setPaymentType(inv.id, raw); break;
       case 'doNotContact': { const on = raw === '1'; if(on !== !!inv.doNotContact) await setDoNotContact(inv.id, on); break; }
       case 'escalated': { const on = raw === '1'; if(on && !inv.escalated) escalateInvoice(inv.id); else if(!on && inv.escalated) unescalateInvoice(inv.id); break; }
+      case 'claimStatus': setClaimStatus(inv.id, raw); break;
       default: return;
     }
     saveState();
@@ -6836,8 +7090,9 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         tile('Payment type', hEsc(PAYMENT_TYPE_LABELS[a.paymentType] || PAYMENT_METHOD_LABELS[a.paymentType] || a.paymentType || '—'), a.paymentType ? '' : 'muted', 'paymentType') +
         tile('Notes', a.note ? hEsc(a.note).replace(/\n/g, '<br>') : 'None', a.note ? '' : 'muted', 'note') +
         tile('Note time', noteStamp(inv) ? noteStampHTML(inv) : 'No note on file', noteStamp(inv) ? '' : 'muted') +
-        tile('Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted', 'doNotContact')
+        tile(claimsOps() ? 'Sent to Legal (DNC)' : 'Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted', 'doNotContact')
       ) : '') +
+      (claimsOps() ? tile('Claim status', inv.claimStatus ? hEsc(CLAIM_STATUS_LABELS[inv.claimStatus] || inv.claimStatus) : 'Not set', inv.claimStatus ? '' : 'muted', 'claimStatus') : '') +
       tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted', 'escalated') +
       tile('Last response', (a.responded && a.responded !== 'none' && a.responseSummary) ? hEsc(a.responseSummary) : 'None yet', (a.responded && a.responded !== 'none' && a.responseSummary) ? '' : 'muted', 'responseSummary');
 
@@ -7565,7 +7820,68 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     showToast(`${key} automation ${val ? 'enabled' : 'disabled'}`);
   }
 
+  // Team cadences: read for everyone, editable for your own row and (for
+  // admins) every row. Saves go through POST /api/cadence-settings with the
+  // row's userId; the server enforces who may change what.
+  let __teamCadence = null;
+  async function renderTeamCadences(){
+    const wrap = document.getElementById('team-cadence-table'); if (!wrap) return;
+    if (!claimsOps()) { wrap.innerHTML = ''; return; }
+    if (!state.currentUser) { wrap.innerHTML = '<div class="hint">Sign in to see your team\u2019s cadences.</div>'; return; }
+    try {
+      const res = await fetch('/api/cadence-settings/team', { credentials: 'same-origin' });
+      const d = await res.json();
+      if (!d || !d.ok) throw new Error((d && d.error) || 'Unable to load');
+      __teamCadence = d.team || [];
+      const rows = __teamCadence.map(function(t){
+        const days = (t.contactDays || []).join(' \u00b7 ') || '\u2014';
+        const scope = (t.officeLabel || 'All cities') + ' \u00b7 ' + (t.departmentLabels || []).join(', ');
+        return '<tr data-user="' + hEsc(t.userId) + '">' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;"><b>' + hEsc(t.name) + '</b>' + (t.isSelf ? ' <span class="access-pill">You</span>' : '') + '<div style="font-size:11.5px;color:var(--slate);text-transform:capitalize;">' + hEsc(t.role) + '</div></td>' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;font-size:12px;">' + hEsc(scope) + '</td>' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;font-family:var(--font-mono);font-size:12px;">' + hEsc(days) + '</td>' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;font-family:var(--font-mono);font-size:12px;">' + (t.demandLetterDay ? 'Day ' + t.demandLetterDay : '\u2014') + '</td>' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;font-family:var(--font-mono);font-size:12px;">' + (t.noilDay ? 'Day ' + t.noilDay : '\u2014') + '</td>' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;font-size:12px;">' + (t.maxPerWeek || '\u2014') + '/wk' + (t.quietStart ? '<div style="color:var(--slate);font-size:11px;">quiet ' + hEsc(t.quietStart) + '\u2013' + hEsc(t.quietEnd || '') + '</div>' : '') + '</td>' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;">' + (t.enabled ? '<span class="access-pill" style="background:#ECFDF3;border-color:#ABEFC6;color:#067647;">On' + (t.requireReview ? ' \u00b7 review' : '') + '</span>' : '<span class="access-pill">Off</span>') + '</td>' +
+          '<td style="padding:7px 8px;border-bottom:1px solid #E5E7EB;text-align:right;white-space:nowrap;">' + (t.canEdit ? '<button class="btn-small" onclick="editTeamCadence(' + hEsc(t.userId) + ')">Edit</button>' : '<span style="font-size:11px;color:var(--slate-soft);">view only</span>') + '</td>' +
+        '</tr>';
+      }).join('');
+      wrap.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>' +
+        ['Teammate', 'Covers', 'Follow-up days', 'Demand letter', 'NOIL', 'Limits', 'Automation', ''].map(function(h){ return '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #16233A;font-size:11.5px;">' + h + '</th>'; }).join('') +
+        '</tr></thead><tbody>' + rows + '</tbody></table>';
+    } catch (e) { wrap.innerHTML = '<div class="hint">Unable to load team cadences.</div>'; }
+  }
+  function editTeamCadence(userId){
+    const t = (__teamCadence || []).find(function(x){ return String(x.userId) === String(userId); }); if (!t) return;
+    const row = document.querySelector('#team-cadence-table tr[data-user="' + userId + '"]'); if (!row) return;
+    const inp = function(id, val, w, ph){ return '<input id="' + id + '" value="' + hEsc(val == null ? '' : val) + '" placeholder="' + (ph || '') + '" style="width:' + w + 'px;font:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;">'; };
+    row.innerHTML = '<td colspan="8" style="padding:10px 8px;border-bottom:1px solid #E5E7EB;background:#FAFAF7;">' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px 18px;align-items:flex-end;">' +
+        '<div><b>' + hEsc(t.name) + '</b><div style="font-size:11.5px;color:var(--slate);">' + hEsc((t.officeLabel || 'All cities') + ' \u00b7 ' + (t.departmentLabels || []).join(', ')) + '</div></div>' +
+        '<label style="font-size:11.5px;color:var(--slate);">Follow-up days<br>' + inp('tc-days', (t.contactDays || []).join(', '), 170, '1, 3, 5, 7, 10, 15, 25') + '</label>' +
+        '<label style="font-size:11.5px;color:var(--slate);">Demand letter day<br>' + inp('tc-demand', t.demandLetterDay, 70, '30') + '</label>' +
+        '<label style="font-size:11.5px;color:var(--slate);">NOIL day<br>' + inp('tc-noil', t.noilDay, 70, '40') + '</label>' +
+        '<label style="font-size:11.5px;color:var(--slate);">Max per week<br>' + inp('tc-max', t.maxPerWeek, 60, '2') + '</label>' +
+        '<label style="font-size:11.5px;color:var(--slate);">Quiet hours<br>' + inp('tc-qs', t.quietStart, 70, '20:00') + ' \u2013 ' + inp('tc-qe', t.quietEnd, 70, '08:00') + '</label>' +
+        (state.currentUser && state.currentUser.role === 'admin' ? '<label style="font-size:11.5px;color:var(--slate);display:flex;align-items:center;gap:6px;"><input type="checkbox" id="tc-enabled" ' + (t.enabled ? 'checked' : '') + '> Automation on</label>' : '') +
+        '<span style="margin-left:auto;display:flex;gap:6px;"><button class="btn-primary btn-small" onclick="saveTeamCadence(' + hEsc(userId) + ')">Save</button><button class="btn-small" onclick="renderTeamCadences()">Cancel</button></span>' +
+      '</div></td>';
+  }
+  async function saveTeamCadence(userId){
+    const v = function(id){ const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+    const days = v('tc-days').split(/[\s,;]+/).map(function(x){ return parseInt(x, 10); }).filter(function(n){ return !isNaN(n) && n > 0; });
+    const body = { userId: userId, contactDays: days, demandLetterDay: v('tc-demand') || null, noilDay: v('tc-noil') || null, maxPerWeek: v('tc-max') || undefined, quietStart: v('tc-qs') || undefined, quietEnd: v('tc-qe') || undefined };
+    const en = document.getElementById('tc-enabled'); if (en) body.enabled = !!en.checked;
+    try {
+      const res = await fetch('/api/cadence-settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(function(){ return null; });
+      if (!res.ok || !d || !d.ok) { showToast((d && d.error) || 'Could not save that cadence.'); return; }
+      showToast('Cadence saved.'); renderTeamCadences();
+    } catch (e) { showToast('Could not save that cadence.'); }
+  }
   function renderAutomationsFeed(){
+    renderTeamCadences();
     const el = document.getElementById('automation-feed');
     const combined = [
       ...state.automationLog.filter(a=>invoiceDeptMatches(a.invoiceId)).map(a => ({ ts:a.sentAt, txt: `<b>${a.type}</b> sent for ${acctLink(a.invoiceId, a.invoiceName)}` })),
@@ -7604,7 +7920,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     if(!state.automationSettings.autoCadence) return;
     for(const inv of trackedInvoices()){
       if(inv.escalated) continue;
-      if(isDoNotContact(inv)) continue;   // sent to collections: the cadence never touches it
+      if(isDoNotContact(inv)) continue;   // sent to Legal: the cadence never touches it
       const checkpoint = nextCadenceCheckpoint(inv);
       if(checkpoint && inv.days >= checkpoint.day){
         await autoSendForCheckpoint(inv, checkpoint);
@@ -7922,7 +8238,7 @@ Hard rules - these override everything above:
     currentInvoice = findInv(id);
     if(!currentInvoice) return;
     if(isDoNotContact(currentInvoice)){
-      showToast(currentInvoice.name + ' is marked DO NOT CONTACT \u2014 sent to a collections agency. Nothing can be drafted or sent.');
+      showToast(currentInvoice.name + ' is marked Sent to Legal, DO NOT CONTACT. Nothing can be drafted or sent.');
       currentInvoice = null;
       return;
     }
@@ -8036,7 +8352,8 @@ Hard rules - these override everything above:
     'overlay-invite': function(){ if(typeof closeInviteTeamMember === 'function') closeInviteTeamMember(); },
     'overlay-escalate': closeEscalateBox,
     'overlay-account': closeAccountPanel, 'overlay-statement': closeStatementDraft,
-    'overlay-stmt-view': closeStatementViewer
+    'overlay-stmt-view': closeStatementViewer,
+    'overlay-access': function(){ if(typeof closeEditAccess === 'function') closeEditAccess(); }
   };
   document.addEventListener('keydown', function(e){
     if(e.key !== 'Escape' || e.defaultPrevented) return;
@@ -8498,16 +8815,26 @@ if (!sel) return;
 const d = qbDepartmentMap();
 let html = '<option value="">Automatic (use QuickBooks class / department)</option>';
 Object.keys(d).forEach(function(k){ if (k && d[k]) html += '<option value="' + hEsc(k) + '"' + (k === value ? ' selected' : '') + '>' + hEsc(String(d[k])) + '</option>'; });
+if (claimsOps()) html += '<option value="__new__">\u002b Add a business\u2026</option>';
 sel.innerHTML = html;
 sel.value = value || '';
 }
 async function qbSetDepartment(sel){
-const id = sel.dataset.id, value = sel.value;
+const id = sel.dataset.id; let value = sel.value;
+let newLabel = null;
+if (value === '__new__') {
+// A business the company does not have yet (e.g. "Revolve Construction"):
+// it is created and this QuickBooks company mapped to it in one step.
+newLabel = prompt('Name of the new business (as it should appear on the dashboard):', '');
+if (!newLabel || !newLabel.trim()) { loadRealIntegrations(); return; }
+newLabel = newLabel.trim(); value = '';
+}
 sel.disabled = true;
 try {
-const res = await fetch('/api/quickbooks/department', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, department: value }) });
+const res = await fetch('/api/quickbooks/department', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newLabel ? { id: id, newDepartmentLabel: newLabel } : { id: id, department: value }) });
 const d = await res.json().catch(function(){ return null; });
 if (!res.ok || !d || !d.ok) { showToast((d && d.error) || 'Could not save that mapping.'); loadRealIntegrations(); return; }
+if (newLabel) { value = d.department; if (d.departments) { Object.keys(d.departments).forEach(function(k){ DEPARTMENT_LABELS[k] = d.departments[k]; }); if (window.__me) { window.__me.departments = d.departments; window.__me.allDepartments = d.departments; } } }
 showToast(value ? ('Invoices from this company now file under ' + (d.departmentLabel || value) + '.') : 'This company now follows its QuickBooks class / department.');
 if (typeof loadRealAccounts === 'function') { try { await loadRealAccounts(); } catch (e) {} }
 } catch (e) { showToast('Could not save that mapping.'); }
