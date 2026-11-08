@@ -110,20 +110,44 @@ function userDepartments(user) {
   const keys = d.map(function (k) { return String(k || '').trim(); }).filter(Boolean);
   return keys.length ? keys : null;
 }
-// PostgREST filter fragment ('&office=eq.x&department=in.(...)') for the
+// The cities a teammate covers: users.offices (a list of office keys; null =
+// every city). Older rows only have the single users.office, which counts as
+// a one-city list. users.office is still kept as the first city so places
+// that only need "their office" keep working.
+function userOffices(user) {
+  if (!user) return null;
+  let o = user.offices;
+  if (typeof o === 'string') { try { o = JSON.parse(o); } catch (e) { o = null; } }
+  if (Array.isArray(o)) {
+    const keys = o.map(function (k) { return String(k || '').trim(); }).filter(Boolean);
+    if (keys.length) return keys;
+    return null;
+  }
+  return user.office ? [String(user.office)] : null;
+}
+function pgInList(keys) { return 'in.(' + keys.map(function (k) { return '"' + String(k).replace(/["\\]/g, '') + '"'; }).join(',') + ')'; }
+// Do two teammates share a city (or does either cover every city)?
+function officesOverlap(a, b) {
+  const x = userOffices(a), y = userOffices(b);
+  if (!x || !y) return true;
+  return x.some(function (k) { return y.indexOf(k) !== -1; });
+}
+// PostgREST filter fragment ('&office=in.(...)&department=in.(...)') for the
 // accounts a user may see; '' for admins and unrestricted members.
 function accountScopeQuery(user) {
   if (!user || user.role === 'admin') return '';
   let q = '';
-  if (user.office) q += '&office=' + pgEq(user.office);
+  const offices = userOffices(user);
+  if (offices) q += '&office=' + (offices.length === 1 ? 'eq.' + encodeURIComponent(offices[0]) : pgInList(offices));
   const depts = userDepartments(user);
-  if (depts) q += '&department=in.(' + depts.map(function (k) { return '"' + k.replace(/["\\]/g, '') + '"'; }).join(',') + ')';
+  if (depts) q += '&department=' + pgInList(depts);
   return q;
 }
 // Same rule applied to one account row already in hand.
 function accountInScope(user, acct) {
   if (!user || user.role === 'admin') return true;
-  if (user.office && String(acct.office || '') !== String(user.office)) return false;
+  const offices = userOffices(user);
+  if (offices && offices.indexOf(String(acct.office || '')) === -1) return false;
   const depts = userDepartments(user);
   if (depts && depts.indexOf(String(acct.department || '')) === -1) return false;
   return true;
@@ -831,8 +855,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   // picked is always visible, and City / Business / Payer take several.
   function legal(){ return !!(R.me && R.me.features && R.me.features.claimsOps); }
   function dncWord(){ return legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'; }
-  function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['follow-up', 'Follow-up due'], ['flagged', 'Escalated / NOIL / Demand / Legal']]); return o; }
-  function statusWord(k){ return { open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied', 'follow-up': 'Follow-up due', flagged: 'Escalated / NOIL / Demand / Legal' }[k] || k; }
+  function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['follow-up', 'Follow-up due'], ['flagged', 'Escalated / NOIL / Demand / Legal']]).concat(Object.keys(CLAIM_STATUS).map(function(k){ return ['cs-' + k, 'Claim status: ' + CLAIM_STATUS[k]]; })); return o; }
+  function statusWord(k){ if(k.indexOf('cs-') === 0) return 'Claim status: ' + (CLAIM_STATUS[k.slice(3)] || k.slice(3)); return { open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied', 'follow-up': 'Follow-up due', flagged: 'Escalated / NOIL / Demand / Legal' }[k] || k; }
   var PAYER_OPTS = [['insurance', 'Insurance'], ['pm', 'Commercial or Property Management'], ['private', 'Private Pay']];
   function chipRow(id, opts, picked, multi, allLabel){
     var el = $(id); if(!el) return;
@@ -849,7 +873,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     // from (the data they receive is already limited the same way); the
     // business list from /api/me is already cut to their access.
     var acc = me.access || {};
-    var cities = Object.keys(me.offices || {}).filter(function(k){ return !acc.office || acc.office === k; }).map(function(k){ return [k, me.offices[k]]; });
+    var myCities = acc.offices || (acc.office ? [acc.office] : null);
+    var cities = Object.keys(me.offices || {}).filter(function(k){ return !myCities || myCities.indexOf(k) !== -1; }).map(function(k){ return [k, me.offices[k]]; });
     var bizs = Object.keys(me.departments || {}).map(function(k){ return [k, me.departments[k]]; });
     SEL.city = SEL.city.filter(function(k){ return !!(me.offices || {})[k]; });
     SEL.biz = SEL.biz.filter(function(k){ return !!(me.departments || {})[k]; });
@@ -895,6 +920,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     if(f.status === 'replied' && a.responded !== 'replied') return false;
     if(f.status === 'follow-up' && !followUp(a)) return false;
     if(f.status === 'flagged' && !flagsOf(a).length) return false;
+    if(f.status.indexOf('cs-') === 0 && String(a.claimStatus || '') !== f.status.slice(3)) return false;
     return true;
   }
   function byName(a, b){ return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }); }
@@ -1517,8 +1543,9 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<h4 id="editModalTitle">Edit team member</h4> ' +
   '<div class="acct-field"><label>Name</label><input type="text" id="editModalName" disabled></div> ' +
   '<div class="acct-field"><label>Email</label><input type="email" id="editModalEmail" placeholder="name@company.com"></div> ' +
-  '<div class="acct-field"><label>Office</label><select id="editModalOffice"></select></div> ' +
   '<div class="acct-field" id="editModalDeptRow" style="display:none;"><label>Business access</label><div id="editModalDepts" class="dept-access"></div><div class="acct-card-sub" style="margin-top:4px;">Leave "All businesses" on for full access, or tick only the businesses this person should see.</div></div> ' +
+  '<div class="acct-field" id="editModalCityRow" style="display:none;"><label>City access</label><div id="editModalCities" class="dept-access"></div><div class="acct-card-sub" style="margin-top:4px;">Leave "All cities" on, or tick each city this person works.</div></div> ' +
+  '<div class="acct-field" id="editModalOfficeRow"><label>Office</label><select id="editModalOffice"></select></div> ' +
   '<div class="acct-field"><label>Account type</label> ' +
   '<select id="editModalRole"> ' +
   '<option value="employee">Employee</option> ' +
@@ -1622,7 +1649,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      tr.innerHTML= ' +
   '        "<td><div class=\\"team-name-cell\\"><div class=\\"team-avatar\\">"+esc(initials(u.name))+"</div>"+esc(u.name)+(isSelf?" <span style=\\"color:#8A8578;font-size:11px;\\">(you)</span>":"")+"</div></td>"+ ' +
   '        "<td>"+esc(u.email)+"</td>"+ ' +
-  '        "<td>"+esc(u.office?officeLabel(u.office):(u.role==="admin"||claimsOps()?"All cities":EMDASH))+(claimsOps()&&u.role!=="admin"?"<div style=\\"font-size:11.5px;color:#8A8578;\\">"+esc((u.departments&&u.departments.length)?u.departments.map(function(k){ return deptMap()[k]||k; }).join(", "):"All businesses")+"</div>":"")+"</td>"+ ' +
+  '        "<td>"+esc((u.offices&&u.offices.length)?u.offices.map(officeLabel).join(", "):(u.office?officeLabel(u.office):(u.role==="admin"||claimsOps()?"All cities":EMDASH)))+(claimsOps()&&u.role!=="admin"?"<div style=\\"font-size:11.5px;color:#8A8578;\\">"+esc((u.departments&&u.departments.length)?u.departments.map(function(k){ return deptMap()[k]||k; }).join(", "):"All businesses")+"</div>":"")+"</td>"+ ' +
   '        "<td><span class=\\"role-pill "+esc(u.role)+"\\">"+esc(ROLE_LABEL[u.role]||titleCase(u.role))+"</span></td>"+ ' +
   '        "<td>"+esc(stLabel)+"</td>"+ ' +
   '        credsCell+editCell; ' +
@@ -1888,8 +1915,12 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  function deptListHTML(selected){ var all=deptMap(); var keys=Object.keys(all); var isAll=!selected||!selected.length; ' +
   '    return "<label class=\\"all\\"><input type=\\"checkbox\\" data-all=\\"1\\" "+(isAll?"checked":"")+"> All businesses</label>"+keys.map(function(k){ return "<label><input type=\\"checkbox\\" value=\\""+esc(k)+"\\" "+(!isAll&&selected.indexOf(k)!==-1?"checked":"")+"> "+esc(all[k])+"</label>"; }).join(""); } ' +
   '  function deptListRead(){ var box=document.getElementById("editModalDepts"); if(!box) return null; var all=box.querySelector("input[data-all]"); if(all&&all.checked) return null; var keys=[].slice.call(box.querySelectorAll("input[value]:checked")).map(function(i){return i.value;}); return keys.length?keys:null; } ' +
-  '  function wireDeptList(){ var box=document.getElementById("editModalDepts"); if(!box) return; box.addEventListener("change",function(e){ var all=box.querySelector("input[data-all]"); if(e.target===all){ if(all.checked) box.querySelectorAll("input[value]").forEach(function(i){i.checked=false;}); else if(!box.querySelector("input[value]:checked")) all.checked=true; } else { if(all) all.checked=!box.querySelector("input[value]:checked"); } }); } ' +
-  '  function syncDeptRow(){ var row=document.getElementById("editModalDeptRow"); var role=document.getElementById("editModalRole").value; if(row) row.style.display=(claimsOps()&&role!=="admin"&&Object.keys(deptMap()).length)?"block":"none"; } ' +
+  '  function wireDeptList(){ wireCheckList(document.getElementById("editModalDepts")); wireCheckList(document.getElementById("editModalCities")); } ' +
+  '  function cityListHTML(selected){ var om=officeMap(); var keys=Object.keys(om).sort(function(a,b){ return String(om[a]).localeCompare(String(om[b])); }); var isAll=!selected||!selected.length; ' +
+  '    return "<label class=\\"all\\"><input type=\\"checkbox\\" data-all=\\"1\\" "+(isAll?"checked":"")+"> All cities</label>"+keys.map(function(k){ return "<label><input type=\\"checkbox\\" value=\\""+esc(k)+"\\" "+(!isAll&&selected.indexOf(k)!==-1?"checked":"")+"> "+esc(om[k])+"</label>"; }).join(""); } ' +
+  '  function cityListRead(){ var box=document.getElementById("editModalCities"); if(!box) return null; var all=box.querySelector("input[data-all]"); if(all&&all.checked) return null; var keys=[].slice.call(box.querySelectorAll("input[value]:checked")).map(function(i){return i.value;}); return keys.length?keys:null; } ' +
+  '  function wireCheckList(box){ if(!box) return; box.addEventListener("change",function(e){ var all=box.querySelector("input[data-all]"); if(e.target===all){ if(all.checked) box.querySelectorAll("input[value]").forEach(function(i){i.checked=false;}); else if(!box.querySelector("input[value]:checked")) all.checked=true; } else { if(all) all.checked=!box.querySelector("input[value]:checked"); } }); } ' +
+  '  function syncDeptRow(){ var role=document.getElementById("editModalRole").value; var on=claimsOps()&&role!=="admin"; var row=document.getElementById("editModalDeptRow"); if(row) row.style.display=(on&&Object.keys(deptMap()).length)?"block":"none"; var crow=document.getElementById("editModalCityRow"); if(crow) crow.style.display=(claimsOps()&&role!=="admin")?"block":"none"; var orow=document.getElementById("editModalOfficeRow"); if(orow) orow.style.display=claimsOps()?"none":"block"; } ' +
   '  function openEditModal(id){ ' +
   '    state.editingId=id; ' +
   '    var backdrop=document.getElementById("editModalBackdrop"); ' +
@@ -1908,7 +1939,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    offSel.innerHTML=(claimsOps()?"<option value=\\"\\">All cities</option>":"")+Object.keys(om).map(function(k){ return "<option value=\\""+esc(k)+"\\">"+esc(om[k])+"</option>"; }).join(""); ' +
   '    offSel.value=user.office&&om[user.office]?user.office:(claimsOps()?"":Object.keys(om)[0]); ' +
   '    document.getElementById("editModalRole").value=(user.role==="manager"||user.role==="admin")?user.role:"employee"; ' +
-  '    var deptBox=document.getElementById("editModalDepts"); if(deptBox){ deptBox.innerHTML=deptListHTML(isNew?null:(user.departments||null)); } syncDeptRow(); ' +
+  '    var deptBox=document.getElementById("editModalDepts"); if(deptBox){ deptBox.innerHTML=deptListHTML(isNew?null:(user.departments||null)); } ' +
+  '    var cityBox=document.getElementById("editModalCities"); if(cityBox){ cityBox.innerHTML=cityListHTML(isNew?null:(user.offices||(user.office?[user.office]:null))); } syncDeptRow(); ' +
   '    document.getElementById("editModalNote").textContent=isNew?"They will get an email with a link to set their password.":""; ' +
   '    document.getElementById("editModalRemove").style.display=isNew?"none":"inline-block"; ' +
   '    document.getElementById("editModalSave").textContent=isNew?"Send invite":"Save changes"; ' +
@@ -1930,7 +1962,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '        if(!name){ modalMsg("Enter their full name."); return; } ' +
   '        if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)){ modalMsg("Enter a valid email address."); return; } ' +
   '        saveBtn.disabled=true; ' +
-  '        postJson("/api/team/invite",{email:email,fullName:name,role:newRole,office:office,departments:claimsOps()?deptListRead():null}).then(function(d){ ' +
+  '        var cities=claimsOps()?cityListRead():null; ' +
+  '        postJson("/api/team/invite",{email:email,fullName:name,role:newRole,office:claimsOps()?(cities?cities[0]:""):office,offices:claimsOps()?cities:undefined,departments:claimsOps()?deptListRead():null}).then(function(d){ ' +
   '          saveBtn.disabled=false; ' +
   '          if(!d||!d.ok){ modalMsg((d&&d.error)||"Could not send the invite."); return; } ' +
   '          closeEditModal(); teamMsg("Invite sent to "+email+".",true); ' +
@@ -1938,7 +1971,8 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '        }).catch(function(){ saveBtn.disabled=false; modalMsg("Could not send the invite."); }); ' +
   '      }else{ ' +
   '        saveBtn.disabled=true; ' +
-  '        postJson("/api/team/update",{id:state.editingId,role:newRole,office:office,departments:claimsOps()?deptListRead():undefined}).then(function(d){ ' +
+  '        var cities2=claimsOps()?cityListRead():null; ' +
+  '        postJson("/api/team/update",{id:state.editingId,role:newRole,office:claimsOps()?(cities2?cities2[0]:""):office,offices:claimsOps()?cities2:undefined,departments:claimsOps()?deptListRead():undefined}).then(function(d){ ' +
   '          saveBtn.disabled=false; ' +
   '          if(!d||!d.ok){ modalMsg((d&&d.error)||"Could not save those changes."); return; } ' +
   '          closeEditModal(); teamMsg("Changes saved.",true); ' +
@@ -1960,7 +1994,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  function refreshTeam(){ ' +
   '    return fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; } }).catch(function(){}).then(loadTeam).then(function(){ renderTeamTab(); }); ' +
   '  } ' +
-  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active", departments:Array.isArray(u.departments)?u.departments:null }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db); if(mb.canRead){n.textContent="A copy of everything you send is saved in your own Sent folder, and customer replies to your follow-ups are read automatically (every 5 minutes) and logged on the invoice.";} else {var rb=document.createElement("button");rb.className="btn-dark btn-sm";rb.textContent="Reconnect to capture replies";rb.onclick=function(){mbConnect(mb.provider);};a.appendChild(rb);n.textContent="A copy of everything you send is saved in your own Sent folder. Reconnect once to let clAIms read customer replies to your follow-ups, so Response Summary and Last Contact update on their own.";} return;} var ownOnly=!!(state.me&&state.me.requireOwnSender); if(mb){s.textContent=mb.email+" needs to be reconnected."+(ownOnly?" Until then nothing sends from you, and your automated follow-ups are on hold.":"");s.style.color="#8A1C13";}else{s.textContent=ownOnly?"Not connected. Your company sends every email from its own people, so follow-ups (manual and automated) wait until you connect your email.":"Not connected. Emails send from the clAIms address with your name on them.";s.style.color=ownOnly?"#8A1C13":"";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){var ownOnly=!!(state.me&&state.me.requireOwnSender);if(!confirm(ownOnly?"Disconnect your email? Your company only sends from its own people, so your follow-ups will pause until you connect an email again.":"Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; mbLoad(); if(window.location.hash==="#email"){ var ec=document.getElementById("email"); if(ec){ setTimeout(function(){ ec.scrollIntoView({behavior:"smooth",block:"center"}); },300); } } } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
+  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active", departments:Array.isArray(u.departments)?u.departments:null, offices:Array.isArray(u.offices)?u.offices:null }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db); if(mb.canRead){n.textContent="A copy of everything you send is saved in your own Sent folder, and customer replies to your follow-ups are read automatically (every 5 minutes) and logged on the invoice.";} else {var rb=document.createElement("button");rb.className="btn-dark btn-sm";rb.textContent="Reconnect to capture replies";rb.onclick=function(){mbConnect(mb.provider);};a.appendChild(rb);n.textContent="A copy of everything you send is saved in your own Sent folder. Reconnect once to let clAIms read customer replies to your follow-ups, so Response Summary and Last Contact update on their own.";} return;} var ownOnly=!!(state.me&&state.me.requireOwnSender); if(mb){s.textContent=mb.email+" needs to be reconnected."+(ownOnly?" Until then nothing sends from you, and your automated follow-ups are on hold.":"");s.style.color="#8A1C13";}else{s.textContent=ownOnly?"Not connected. Your company sends every email from its own people, so follow-ups (manual and automated) wait until you connect your email.":"Not connected. Emails send from the clAIms address with your name on them.";s.style.color=ownOnly?"#8A1C13":"";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){var ownOnly=!!(state.me&&state.me.requireOwnSender);if(!confirm(ownOnly?"Disconnect your email? Your company only sends from its own people, so your follow-ups will pause until you connect an email again.":"Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; mbLoad(); if(window.location.hash==="#email"){ var ec=document.getElementById("email"); if(ec){ setTimeout(function(){ ec.scrollIntoView({behavior:"smooth",block:"center"}); },300); } } } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
   '}); ' +
   '})(); ' +
   '</script> ' +
@@ -3015,7 +3049,7 @@ const token = cookies[SESSION_COOKIE];
 if (!token) return null;
 const row = await pgSelectOne(env, 'sessions',
 'token=' + pgEq(token) +
-'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,departments,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments,integration_mode,settings))'
+'&select=expires_at,users(id,email,full_name,created_at,role,tenant_id,office,offices,departments,status,email_verified,tenants!users_tenant_id_fkey(slug,company_name,status,integration_status,selected_plan,recommended_plan,stripe_customer_id,offices,departments,integration_mode,settings))'
 );
 if (!row || !row.users) return null;
 if (new Date(row.expires_at) < new Date()) return null;
@@ -5748,7 +5782,7 @@ const statusFilter = 'status=in.(' + CADENCE_OPEN_STATUSES.join(',') + ')&do_not
 // admins cover the whole tenant, everyone else their office and/or businesses.
 let officeFilter = '';
 if (settings.user_id) {
-const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + '&select=role,office,departments');
+const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + '&select=role,office,offices,departments');
 if (owner) officeFilter = accountScopeQuery(owner);
 }
 // Every open account the owner can see - a company with thousands of open
@@ -5943,12 +5977,12 @@ async function handleCadenceSettingsTeam(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (!claimsOpsOn(user)) return json({ ok: false, error: 'Team cadences are not enabled for this company.' }, 403);
-let users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&status=in.(active,pending)&select=id,email,full_name,role,office,departments&order=id.asc') || [];
+let users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&status=in.(active,pending)&select=id,email,full_name,role,office,offices,departments&order=id.asc') || [];
 // Same visibility as the Team tab: admins see the whole company; a manager
 // or employee sees the teammates who work their city (and the company-wide
 // people), never another city's team.
 if (user.role !== 'admin') {
-users = users.filter(function (u) { return String(u.id) === String(user.id) || !u.office || !user.office || String(u.office) === String(user.office); });
+users = users.filter(function (u) { return String(u.id) === String(user.id) || u.role === 'admin' || officesOverlap(user, u); });
 }
 const rows = await pgSelect(env, 'cadence_settings', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*') || [];
 const byUser = {}; rows.forEach(function (r) { byUser[String(r.user_id)] = r; });
@@ -5959,7 +5993,7 @@ const r = byUser[String(u.id)] || Object.assign({}, CADENCE_DEFAULTS);
 const depts = userDepartments(u);
 return {
 userId: u.id, name: u.full_name || u.email, email: u.email, role: u.role,
-office: u.role === 'admin' ? null : (u.office || null), officeLabel: u.role === 'admin' ? 'All cities' : (u.office ? (offices[u.office] || u.office) : 'All cities'),
+office: u.role === 'admin' ? null : (u.office || null), offices: u.role === 'admin' ? null : userOffices(u), officeLabel: (u.role === 'admin' || !userOffices(u)) ? 'All cities' : userOffices(u).map(function (k) { return offices[k] || k; }).join(', '),
 departments: u.role === 'admin' ? null : depts, departmentLabels: (u.role === 'admin' || !depts) ? ['All businesses'] : depts.map(function (k) { return departments[k] || k; }),
 enabled: !!r.enabled, requireReview: r.require_review !== false, maxPerWeek: r.max_per_week, contactDays: r.contact_days || [], demandLetterDay: r.demand_letter_day || null, noilDay: r.noil_day || null,
 quietStart: r.quiet_start, quietEnd: r.quiet_end, timeZone: r.time_zone, configured: !!byUser[String(u.id)],
@@ -7843,14 +7877,15 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 let rows;
 if (user.role === 'admin') {
-rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,departments,status&order=id.asc');
+rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,offices,departments,status&order=id.asc');
 } else {
 // Managers and employees see only teammates at their own office; admins
 // (handled above) see everyone in the company. A user always sees their
 // own row, even if no office is set on their profile.
-rows = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&or=(office.eq.' + encodeURIComponent(user.office || '__none__') + ',id.eq.' + encodeURIComponent(user.id) + ')&select=id,email,full_name,role,office,departments,status&order=id.asc');
+const all = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,offices,departments,status&order=id.asc') || [];
+rows = all.filter(function (u) { return String(u.id) === String(user.id) || officesOverlap(user, u); });
 }
-return json({ ok: true, team: (rows || []).map(function (r) { return Object.assign({}, r, { departments: userDepartments(r) }); }) });
+return json({ ok: true, team: (rows || []).map(function (r) { return Object.assign({}, r, { departments: userDepartments(r), offices: r.role === 'admin' ? null : userOffices(r) }); }) });
 }
 
 // Business access for a teammate: null (all) or a list of valid department keys.
@@ -7864,9 +7899,21 @@ if (!keys.length) return { value: null };
 if (keys.length >= Object.keys(departments).length) return { value: null };
 return { value: keys };
 }
+// City access for a teammate: null (all) or a list of valid office keys.
+function parseOfficeAccess(raw, offices) {
+if (raw === undefined || raw === null || raw === '' || raw === 'all') return { value: null };
+const list = Array.isArray(raw) ? raw : String(raw).split(',');
+const keys = []; const bad = [];
+list.forEach(function (k) { k = String(k || '').trim(); if (!k) return; if (offices[k]) { if (keys.indexOf(k) === -1) keys.push(k); } else bad.push(k); });
+if (bad.length) return { error: 'Unknown city: ' + bad.join(', ') };
+if (!keys.length) return { value: null };
+if (keys.length >= Object.keys(offices).length) return { value: null };
+return { value: keys };
+}
 function describeAccess(office, departments, offices, deptLabels) {
 const parts = [];
-if (office) parts.push('at ' + (offices[office] || office));
+const cityList = Array.isArray(office) ? office : (office ? [office] : null);
+if (cityList && cityList.length) parts.push('at ' + cityList.map(function (k) { return offices[k] || k; }).join(', '));
 if (departments && departments.length) parts.push('for ' + departments.map(function (k) { return deptLabels[k] || k; }).join(', '));
 return parts.length ? ' ' + parts.join(' ') : ' (all offices and businesses)';
 }
@@ -7891,7 +7938,12 @@ if (role !== 'admin' && role !== 'manager' && role !== 'employee') return json({
 const scopedAccess = claimsOpsOn(user);
 if (office && !inviteOffices[office]) return json({ ok: false, error: 'Unknown office.' }, 400);
 if (!scopedAccess && role !== 'admin' && !inviteOffices[office]) return json({ ok: false, error: 'A valid office is required for manager and employee accounts.' }, 400);
-const officeValue = role === 'admin' ? (inviteOffices[office] ? office : (user.office || Object.keys(inviteOffices)[0] || null)) : (office || null);
+// Pack companies may hand a teammate several cities (body.offices); the
+// first one is also kept in users.office.
+const cityCheck = scopedAccess ? parseOfficeAccess(body.offices !== undefined ? body.offices : office, inviteOffices) : { value: office ? [office] : null };
+if (cityCheck.error) return json({ ok: false, error: cityCheck.error }, 400);
+const officesValue = role === 'admin' ? null : cityCheck.value;
+const officeValue = role === 'admin' ? (inviteOffices[office] ? office : (user.office || Object.keys(inviteOffices)[0] || null)) : (officesValue ? officesValue[0] : null);
 const deptCheck = scopedAccess ? parseDepartmentAccess(body.departments, resolveDepartments(user.tenant_departments)) : { value: null };
 if (deptCheck.error) return json({ ok: false, error: deptCheck.error }, 400);
 const departmentsValue = role === 'admin' ? null : deptCheck.value;
@@ -7909,11 +7961,11 @@ const resetToken = sendNow ? randomToken() : null;
 const resetExpires = sendNow ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() : null;
 const insertedUser = await pgInsert(env, 'users', {
 tenant_id: user.tenant_id, email: email, password_hash: throwawayHash, salt: throwawaySalt, role: role,
-email_verified: true, status: sendNow ? 'active' : 'pending', full_name: fullName || null, office: officeValue, departments: departmentsValue,
+email_verified: true, status: sendNow ? 'active' : 'pending', full_name: fullName || null, office: officeValue, offices: officesValue, departments: departmentsValue,
 reset_token: resetToken, reset_expires: resetExpires, invited_by: user.id
 });
 const newUserId = insertedUser ? insertedUser.id : null;
-const where = role === 'admin' ? '' : describeAccess(officeValue, departmentsValue, inviteOffices, resolveDepartments(user.tenant_departments));
+const where = role === 'admin' ? '' : describeAccess(officesValue, departmentsValue, inviteOffices, resolveDepartments(user.tenant_departments));
 if (sendNow) {
 await sendEmail(env, Object.assign({ to: email, tenantId: user.tenant_id, userId: newUserId, from: OPERATIONS_FROM_EMAIL },
 teamInviteEmail(user, { email: email, full_name: fullName, role: role, office: officeValue }, inviteOffices, resetToken)));
@@ -7974,7 +8026,7 @@ let body;
 try { body = await request.json(); } catch (e) { body = {}; }
 const id = parseInt(body.id, 10);
 if (!id) return json({ ok: false, error: 'Missing id' }, 400);
-const target = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,departments,status');
+const target = await pgSelectOne(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id) + '&select=id,email,full_name,role,office,offices,departments,status');
 if (!target) return json({ ok: false, error: 'User not found' }, 404);
 if (String(target.id) === String(user.id)) return json({ ok: false, error: 'Change your own details from the profile card on My Account.' }, 400);
 const patch = {};
@@ -7985,12 +8037,19 @@ if (target.role === 'admin' && role !== 'admin' && (await countActiveAdmins(env,
 patch.role = role;
 }
 const newRole = patch.role || target.role;
-if (body.office !== undefined) {
+if (body.offices !== undefined && claimsOpsOn(user)) {
+// Several cities at once (pack companies). null = every city.
+const cityCheck = parseOfficeAccess(body.offices, resolveOffices(user.tenant_offices));
+if (cityCheck.error) return json({ ok: false, error: cityCheck.error }, 400);
+patch.offices = cityCheck.value;
+patch.office = cityCheck.value ? cityCheck.value[0] : null;
+} else if (body.office !== undefined) {
 const offices = resolveOffices(user.tenant_offices);
 const office = String(body.office || '');
 if (office && !offices[office]) return json({ ok: false, error: 'Unknown office.' }, 400);
 if (!claimsOpsOn(user) && newRole !== 'admin' && !offices[office]) return json({ ok: false, error: 'A valid office is required.' }, 400);
 patch.office = office || null; // null = every office (city)
+patch.offices = office ? [office] : null;
 }
 if (!claimsOpsOn(user) && newRole !== 'admin' && !(patch.office || target.office)) return json({ ok: false, error: 'Managers and employees need an office.' }, 400);
 if (body.departments !== undefined && claimsOpsOn(user)) {
@@ -7998,14 +8057,14 @@ const deptCheck = parseDepartmentAccess(body.departments, resolveDepartments(use
 if (deptCheck.error) return json({ ok: false, error: deptCheck.error }, 400);
 patch.departments = deptCheck.value; // null = every business
 }
-if (newRole === 'admin') patch.departments = null;
+if (newRole === 'admin') { patch.departments = null; patch.offices = null; }
 if (!Object.keys(patch).length) return json({ ok: false, error: 'Nothing to change.' }, 400);
 await pgUpdate(env, 'users', 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id), patch);
 const offices2 = resolveOffices(user.tenant_offices);
 const deptLabels2 = resolveDepartments(user.tenant_departments);
 await logUserActivity(env, user, null, 'team', 'Updated ' + (target.full_name || target.email) + ' (' + target.email + ')' +
 (patch.role ? ' to ' + patch.role : '') +
-((patch.office !== undefined || patch.departments !== undefined) && newRole !== 'admin' ? ' - access' + describeAccess(patch.office !== undefined ? patch.office : target.office, patch.departments !== undefined ? patch.departments : userDepartments(target), offices2, deptLabels2) : ''));
+((patch.office !== undefined || patch.departments !== undefined) && newRole !== 'admin' ? ' - access' + describeAccess(patch.offices !== undefined ? patch.offices : userOffices(target), patch.departments !== undefined ? patch.departments : userDepartments(target), offices2, deptLabels2) : ''));
 return json({ ok: true });
 }
 
@@ -9828,7 +9887,7 @@ const tenantList = await pgSelect(env, 'tenants', 'select=id,company_name,office
 const weekAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
 for (const tenant of tenantList) {
 try {
-const userList = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenant.id) + '&status=' + pgEq('active') + '&email_verified=eq.true&select=id,email,role,office,departments');
+const userList = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenant.id) + '&status=' + pgEq('active') + '&email_verified=eq.true&select=id,email,role,office,offices,departments');
 if (!userList.length) continue;
 
 const accounts = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(tenant.id) + '&select=*&order=id.asc');
@@ -10460,7 +10519,7 @@ async function handleMe(request, env) {
     // allDepartments always carries the full list (team views compare across it).
     departments: (function () { const all = resolveDepartments(user.tenant_departments); const mine = userDepartments(user); if (user.role === 'admin' || !mine) return all; const out = {}; mine.forEach(function (k) { if (all[k]) out[k] = all[k]; }); return Object.keys(out).length ? out : all; })(),
     allDepartments: resolveDepartments(user.tenant_departments),
-    access: { office: user.role === 'admin' ? null : (user.office || null), departments: user.role === 'admin' ? null : userDepartments(user) },
+    access: { office: user.role === 'admin' ? null : (user.office || null), offices: user.role === 'admin' ? null : userOffices(user), departments: user.role === 'admin' ? null : userDepartments(user) },
     features: tenantFeatures(user),
     officesConfigured: !!user.tenant_offices,
     integrationMode: selfServeIntegrationMode(user),
