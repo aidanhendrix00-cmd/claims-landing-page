@@ -2646,13 +2646,52 @@ const rows = await pgFetch(env, 'GET', table, query);
 return rows || [];
 }
 // Supabase answers at most 1,000 rows per request. The company-wide lists
-// (accounts, payments) page through in 1,000-row steps so a workspace with two
+// (accounts, payments) page through in 1,000-row steps so a workspace with
 // years of invoice history is never silently cut off.
+//
+// The first page is asked for the exact row count; every remaining page is
+// then fetched at once (in bounded batches) instead of one after another. For
+// a 47,000-invoice company that is ~2 s instead of ~24 s, and there is no
+// fixed page cap that could drop rows past it.
+const PG_PARALLEL = 16;
 async function pgSelectAll(env, table, query, pageSize) {
 const size = pageSize || 1000;
-let out = []; let offset = 0;
-for (let i = 0; i < 50; i++) {
+const url0 = env.SUPABASE_URL + '/rest/v1/' + table + '?' + query + '&limit=' + size + '&offset=0';
+const headers = { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY, 'Prefer': 'count=exact' };
+const res0 = await fetch(url0, { headers: headers });
+if (!res0.ok) throw new Error('Supabase GET ' + table + ' failed: ' + res0.status + ' ' + (await res0.text()));
+const first = (await res0.json()) || [];
+// Content-Range: 0-999/47259
+const range = String(res0.headers.get('content-range') || '');
+const total = parseInt(range.split('/')[1], 10);
+if (first.length < size) return first;
+let out = first;
+if (!isFinite(total) || total <= first.length) {
+// No usable count: fall back to walking the pages one at a time.
+let offset = size;
+for (let guard = 0; guard < 500; guard++) {
 const rows = await pgFetch(env, 'GET', table, query + '&limit=' + size + '&offset=' + offset) || [];
+out = out.concat(rows);
+if (rows.length < size) break;
+offset += size;
+}
+return out;
+}
+const offsets = [];
+for (let o = size; o < total; o += size) offsets.push(o);
+const pages = new Array(offsets.length);
+for (let i = 0; i < offsets.length; i += PG_PARALLEL) {
+const batch = offsets.slice(i, i + PG_PARALLEL);
+const got = await Promise.all(batch.map(function (o) { return pgFetch(env, 'GET', table, query + '&limit=' + size + '&offset=' + o); }));
+got.forEach(function (rows, j) { pages[i + j] = rows || []; });
+}
+pages.forEach(function (rows) { out = out.concat(rows); });
+// Rows added while the pages were in flight land past the counted total:
+// pick them up so nothing is missed.
+let offset = size + offsets.length * size;
+for (let guard = 0; guard < 20; guard++) {
+const rows = await pgFetch(env, 'GET', table, query + '&limit=' + size + '&offset=' + offset) || [];
+if (!rows.length) break;
 out = out.concat(rows);
 if (rows.length < size) break;
 offset += size;
@@ -7303,14 +7342,12 @@ try { await pgUpdate(env, 'accounts', 'id=' + pgEq(accountId), { updated_at: new
 async function handleAccountsPing(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
-const latest = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=updated_at&order=updated_at.desc.nullslast&limit=1');
-const top = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id&order=id.desc&limit=1');
-const stamp = (latest && latest[0] && latest[0].updated_at) || '';
-const maxId = (top && top[0] && top[0].id) || 0;
+const ver = await accountsVersion(env, user.tenant_id);
+const maxId = ver.maxId;
 // Plan and billing state ride along so an open dashboard notices a plan
 // change (or a hold) within seconds, without a reload.
 const planKey = planKeyFor(user);
-return json({ ok: true, v: stamp + ':' + maxId, maxId: maxId, plan: planKey, planName: PLAN_LIMITS[planKey].name, tenantStatus: user.tenant_status || null });
+return json({ ok: true, v: ver.v, maxId: maxId, plan: planKey, planName: PLAN_LIMITS[planKey].name, tenantStatus: user.tenant_status || null });
 }
 
 /* ---------------------------------------------------------------------------
@@ -7573,11 +7610,49 @@ timeline: timeline
 });
 }
 
-async function handleAccounts(request, env) {
+// The change stamp the dashboard's 5-second ping uses: latest updated_at plus
+// the highest id. Anything that touches an account moves it.
+async function accountsVersion(env, tenantId) {
+const [latest, top] = await Promise.all([
+pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&select=updated_at&order=updated_at.desc.nullslast&limit=1'),
+pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&select=id&order=id.desc&limit=1')
+]);
+const stamp = (latest && latest[0] && latest[0].updated_at) || '';
+const maxId = (top && top[0] && top[0].id) || 0;
+return { v: stamp + ':' + maxId, maxId: maxId };
+}
+async function sha1Hex(text) {
+const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(text));
+return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+// GET /api/accounts: every invoice the user may see. Building it means
+// reading the whole table, so the finished JSON is kept in Cloudflare's edge
+// cache under the company, the user's scope and the change stamp above. A
+// second teammate (or the same dashboard after a change elsewhere) gets the
+// cached copy in well under a second; a dashboard that already holds the
+// current version gets a 304 and downloads nothing. Any edit changes the
+// stamp, so a stale copy is never served.
+async function handleAccounts(request, env, ctx) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
-let list;
-list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + accountScopeQuery(user) + '&select=*&order=invoiced_at.desc,id.desc');
+const scope = accountScopeQuery(user);
+let version = null; let cacheKey = null; let cache = null;
+try {
+version = await accountsVersion(env, user.tenant_id);
+const etag = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
+if (request.headers.get('if-none-match') === etag) {
+return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'no-cache' } });
+}
+cache = caches.default;
+cacheKey = new Request(SITE_URL + '/__cache/accounts/' + etag.replace(/\W/g, ''), { method: 'GET' });
+const hit = await cache.match(cacheKey);
+if (hit) {
+const h = new Headers(hit.headers);
+h.set('Cache-Control', 'no-cache'); h.set('ETag', etag); h.set('X-Accounts-Cache', 'hit');
+return new Response(hit.body, { status: 200, headers: h });
+}
+} catch (e) { cacheKey = null; }
+const list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + scope + '&select=*&order=invoiced_at.desc,id.desc');
 const accounts = list.map(function (a) {
 let days = null;
 if (a.invoiced_at) {
@@ -7633,7 +7708,16 @@ lastFollowUpKind: a.last_follow_up_kind || null,
 paidDate: a.paid_at
 };
 });
-return json({ ok: true, accounts });
+const body = JSON.stringify({ ok: true, accounts: accounts });
+if (cacheKey && cache) {
+// Stored for ten minutes at most; the stamp in the key already retires it
+// the moment anything changes.
+const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' } });
+try { const p = cache.put(cacheKey, stored); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
+}
+const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': 'miss' };
+if (version) headers['ETag'] = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
+return new Response(body, { status: 200, headers: headers });
 }
 
 // Manual invoice entry from the dashboard. Most accounts arrive through the
@@ -10657,7 +10741,7 @@ if (url.pathname === '/api/accounts' && request.method === 'POST') {
 return handleAccountCreate(request, env);
 }
 if (url.pathname === '/api/accounts' && request.method === 'GET') {
-return handleAccounts(request, env);
+return handleAccounts(request, env, ctx);
 }
 if (url.pathname === '/api/team/activity' && request.method === 'GET') {
 return handleTeamActivity(request, env);
