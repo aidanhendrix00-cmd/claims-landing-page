@@ -4011,7 +4011,13 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   function escalationGroupHTML(invoices){
     if (!claimsOps()) return '';
     const seen = {}; const out = [];
-    (invoices || []).forEach(function(inv){ escalationFlags(inv).forEach(function(x){ if (!seen[x.cls]) { seen[x.cls] = 1; out.push('<span class="badge ' + x.cls + '">' + x.text + '</span>'); } }); });
+    let due = 0, overdue = 0;
+    (invoices || []).forEach(function(inv){
+      const r = followUpReminder(inv); if (r) { if (r.level === 'overdue') overdue++; else due++; }
+      escalationFlags(inv).forEach(function(x){ if (!seen[x.cls]) { seen[x.cls] = 1; out.push('<span class="badge ' + x.cls + '">' + x.text + '</span>'); } });
+    });
+    if (overdue) out.unshift('<span class="badge fu-overdue" title="' + overdue + ' invoice' + (overdue === 1 ? '' : 's') + ' with no response for 5+ business days">FOLLOW-UP OVERDUE' + (overdue > 1 ? ' \u00d7' + overdue : '') + '</span>');
+    if (due) out.unshift('<span class="badge fu-due" title="' + due + ' invoice' + (due === 1 ? '' : 's') + ' with no response for 3+ business days">FOLLOW-UP DUE' + (due > 1 ? ' \u00d7' + due : '') + '</span>');
     return out.length ? '<div class="esc-row esc-cell">' + out.join('') + '</div>' : '';
   }
   function dncBannerHTML(inv){
@@ -6514,7 +6520,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('detail-title').textContent = `Manage \u2014 ${inv.name}`;
     const claimBit = inv.claimNumber ? ` \u00b7 Claim ${inv.claimNumber}` : '';
     document.getElementById('detail-sub').textContent = `${TENANT_DEPTS_CUSTOM ? deptLabel(inv) : OFFICE_LABELS[inv.officeLocation]} \u00b7 ${inv.jobNumber}${claimBit}${TENANT_DEPTS_CUSTOM ? '' : ' \u00b7 ' + DEPARTMENT_LABELS[inv.department] + ' \u2014 ' + CATEGORY_LABELS[inv.category]} \u00b7 ${PAYER_LABELS[inv.payer]} \u00b7 ${inv.days} days since contact \u00b7 $${inv.amount.toLocaleString(undefined,{minimumFractionDigits:2})}`;
-    document.getElementById('detail-status-badge').innerHTML = `<span class="badge sfstatus" style="font-size:12px;padding:5px 10px;"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>` + (claimsOps() && escalationBadgesHTML(inv) ? '<div class="esc-row" style="margin-top:8px;">' + escalationBadgesHTML(inv, true) + '</div>' : '');
+    document.getElementById('detail-status-badge').innerHTML = `<span class="badge sfstatus" style="font-size:12px;padding:5px 10px;"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>` + (function(){ if (!claimsOps()) return ''; const h = claimStatusBadgeHTML(inv, true) + followUpBadgeHTML(inv) + escalationBadgesHTML(inv, true); return h ? '<div class="esc-row" style="margin-top:8px;">' + h + '</div>' : ''; })();
     document.querySelectorAll('#currently-with-toggle .cw-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.val === inv.currentlyWith);
     });
