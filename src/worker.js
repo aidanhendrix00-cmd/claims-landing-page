@@ -2698,6 +2698,14 @@ offset += size;
 }
 return out;
 }
+// How many rows match, without reading them (HEAD + Prefer: count=exact).
+async function pgCount(env, table, query) {
+const url = env.SUPABASE_URL + '/rest/v1/' + table + '?' + query + '&select=id&limit=1';
+const res = await fetch(url, { method: 'HEAD', headers: { 'apikey': env.SUPABASE_SERVICE_KEY, 'Authorization': 'Bearer ' + env.SUPABASE_SERVICE_KEY, 'Prefer': 'count=exact' } });
+if (!res.ok) throw new Error('Supabase COUNT ' + table + ' failed: ' + res.status);
+const n = parseInt(String(res.headers.get('content-range') || '').split('/')[1], 10);
+return isFinite(n) ? n : 0;
+}
 async function pgSelectOne(env, table, query) {
 const rows = await pgSelect(env, table, query);
 return (rows && rows[0]) || null;
@@ -4261,15 +4269,15 @@ const run = await qboRunStep(env, qboConn, {});
 const fresh = (await qboLoadConns(env, 'id=' + pgEq(integration.id)))[0] || qboConn;
 if (fresh.cfg.needsReconnect) return json({ ok: false, error: fresh.cfg.lastError || 'QuickBooks needs to be reconnected.' }, 409);
 if (run.held) return json({ ok: false, error: 'Access on hold due to no payment.' }, 402);
-const qbAccounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id') || [];
+const qbCount = await pgCount(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id));
 const stillImporting = !!(fresh.cfg.import && fresh.cfg.import.phase !== 'done');
-return json({ ok: true, provider: integration.provider, lastSyncedAt: fresh.last_synced_at, accountsInSync: qbAccounts.length,
+return json({ ok: true, provider: integration.provider, lastSyncedAt: fresh.last_synced_at, accountsInSync: qbCount,
 importing: stillImporting, busy: !!run.busy, message: stillImporting ? 'Still importing from QuickBooks \u2014 more invoices will keep appearing.' : null });
 }
 const lastSyncedAt = new Date().toISOString();
 await pgUpdate(env, 'integrations', 'id=' + pgEq(integration.id), { last_synced_at: lastSyncedAt });
-const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&select=id') || [];
-return json({ ok: true, provider: integration.provider, lastSyncedAt: lastSyncedAt, accountsInSync: accounts.length });
+const accountCount = await pgCount(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id));
+return json({ ok: true, provider: integration.provider, lastSyncedAt: lastSyncedAt, accountsInSync: accountCount });
 }
 
 
@@ -5711,7 +5719,9 @@ if (settings.user_id) {
 const owner = await pgSelectOne(env, 'users', 'id=' + pgEq(settings.user_id) + '&select=role,office,departments');
 if (owner) officeFilter = accountScopeQuery(owner);
 }
-const accounts = await pgSelect(env, 'accounts',
+// Every open account the owner can see - a company with thousands of open
+// invoices must not have the cadence stop at the first page.
+const accounts = await pgSelectAll(env, 'accounts',
 'tenant_id=' + pgEq(settings.tenant_id) + '&' + statusFilter + officeFilter + '&select=*&order=id.asc'
 ) || [];
 const checkpoints = cadenceCheckpointsFor(settings);
@@ -7488,7 +7498,7 @@ if (limit > 2000) limit = 2000;
 // sees their own office.
 let accountQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id,customer_name,invoice_number,amount,office,department&order=invoiced_at.desc';
 accountQuery += accountScopeQuery(user);
-const accounts = await pgSelect(env, 'accounts', accountQuery) || [];
+const accounts = await pgSelectAll(env, 'accounts', accountQuery) || [];
 if (!accounts.length) return json({ ok: true, comms: [] });
 const byId = {};
 accounts.forEach(function (a) { byId[a.id] = a; });
@@ -9211,7 +9221,7 @@ const DEMO_EXTERNAL_PREFIXES = [DEMO_EXTERNAL_PREFIX, 'SAMPLE-', 'sample-'];
 async function demoAccountIds(env, tenantId) {
 let ids = [];
 for (const pre of DEMO_EXTERNAL_PREFIXES) {
-const rows = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(pre + '*') + '&select=id') || [];
+const rows = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + '&external_id=like.' + encodeURIComponent(pre + '*') + '&select=id&order=id.asc') || [];
 ids = ids.concat(rows.map(function (a) { return a.id; }));
 }
 return Array.from(new Set(ids));
@@ -9774,7 +9784,7 @@ try {
 const userList = await pgSelect(env, 'users', 'tenant_id=' + pgEq(tenant.id) + '&status=' + pgEq('active') + '&email_verified=eq.true&select=id,email,role,office,departments');
 if (!userList.length) continue;
 
-const accounts = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(tenant.id) + '&select=*');
+const accounts = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(tenant.id) + '&select=*&order=id.asc');
 
 for (const user of userList) {
 try {
