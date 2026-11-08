@@ -70,6 +70,12 @@
     border-bottom:1px solid var(--line);
   }
   .notif-panel-sub{font-family:var(--font-mono);font-size:10px;color:var(--slate-soft);font-weight:400;}
+  .notif-head-right{display:flex;align-items:center;gap:10px;}
+  .notif-mark-read{font:inherit;font-size:11px;font-weight:600;color:var(--rust);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap;}
+  .notif-mark-read:hover{text-decoration:underline;}
+  .notif-mark-read[disabled]{color:var(--slate-soft);cursor:default;text-decoration:none;}
+  .notif-row.unread{background:#FFF8F3;}
+  .notif-row.unread .t::after{content:"NEW";margin-left:6px;font-size:9px;font-weight:700;color:var(--rust);letter-spacing:0.04em;}
   .notif-section-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--slate-soft);padding:12px 16px 6px;}
   .notif-row{display:flex;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);cursor:pointer;}
   .notif-row:hover{background:#FAFBFA;}
@@ -776,7 +782,7 @@
     <div class="notif-panel" id="money-panel">
       <div class="notif-panel-head">
         <span>Financial Activity</span>
-        <span class="notif-panel-sub" id="money-panel-sub"></span>
+        <span class="notif-head-right"><span class="notif-panel-sub" id="money-panel-sub"></span><button type="button" class="notif-mark-read" id="money-mark-read" onclick="markMoneyRead(event)">Mark all as read</button></span>
       </div>
       <div id="money-list"></div>
     </div>
@@ -3436,8 +3442,8 @@ async function loadRealAccountsNow(){
       });
       // The money panel reads from real payment records, so it is populated on
       // every load instead of only remembering payments made in this tab.
-      state.financialLog = paymentsLog.slice().reverse().slice(0, 50).map(function(pp){
-        return { type: 'payment', invoiceId: pp.invoiceId, invoiceName: pp.invoiceName, amount: pp.amount, officeLocation: pp.officeLocation, ts: fmtDate(pp.paidDate) };
+      state.financialLog = paymentsLog.slice().reverse().slice(0, 150).map(function(pp){
+        return { type: 'payment', invoiceId: pp.invoiceId, invoiceName: pp.invoiceName, amount: pp.amount, officeLocation: pp.officeLocation, ts: fmtDate(pp.paidDate), at: pp.paidDate || null, key: 'payment:' + pp.invoiceId + ':' + (pp.id || pp.paidDate || '') + ':' + pp.amount };
       });
       // Response Received for a real company: every account whose reply state
       // is "replied" carries the customer's answer, so list those - newest
@@ -5420,7 +5426,8 @@ function todoRowHTML(item, num, priority){
     st.financialLog.unshift({
       type: 'payment', invoiceId: inv.id, invoiceName: inv.name, amount,
       officeLocation: inv.officeLocation,
-      ts: details.tsDisplay || new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})
+      ts: details.tsDisplay || new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),
+      at: new Date().toISOString(), key: 'payment:' + inv.id + ':' + (rec.id || rec.paidDate || '') + ':' + amount
     });
     return rec;
   }
@@ -5669,30 +5676,61 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
      FINANCIAL NOTIFICATIONS ("$" icon) — Payment Received / New Invoice
      ============================================================ */
   function logFinancialEvent(type, inv, amount){
+    const now = new Date();
     state.financialLog.unshift({
       type, invoiceId: inv.id, invoiceName: inv.name, amount,
       officeLocation: inv.officeLocation,
-      ts: new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})
+      ts: now.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}),
+      at: now.toISOString(), key: type + ':' + inv.id + ':' + now.getTime()
     });
   }
+  // "Mark all as read": the badge counts only events newer than the last time
+  // this person cleared it. The marker (newest event's key + its time) is kept
+  // per person and company in this browser, so the count comes back to zero
+  // and climbs again only as new payments and invoices arrive.
+  function moneySeenKey(){
+    const me = window.__me || {}; const cu = state.currentUser || {};
+    return 'clms.money.seen.' + (me.tenant || me.companyName || 'co') + '.' + (me.email || cu.email || 'me');
+  }
+  function moneySeen(){ try { return JSON.parse(localStorage.getItem(moneySeenKey()) || 'null'); } catch(e){ return null; } }
+  function moneyEventKey(ev){ return ev.key || (ev.type + ':' + ev.invoiceId + ':' + (ev.at || ev.ts || '') + ':' + ev.amount); }
+  function moneyUnreadCount(){
+    const log = state.financialLog || [];
+    const seen = moneySeen();
+    if (!seen) return log.length;
+    const idx = seen.key ? log.findIndex(function(ev){ return moneyEventKey(ev) === seen.key; }) : -1;
+    if (idx >= 0) return idx;
+    if (seen.at) return log.filter(function(ev){ return ev.at && String(ev.at) > String(seen.at); }).length;
+    return log.length;
+  }
+  function markMoneyRead(e){
+    if (e) e.stopPropagation();
+    const newest = (state.financialLog || [])[0];
+    const marker = { key: newest ? moneyEventKey(newest) : null, at: (newest && newest.at) || new Date().toISOString(), when: new Date().toISOString() };
+    try { localStorage.setItem(moneySeenKey(), JSON.stringify(marker)); } catch(e2){}
+    renderMoneyPanel();
+  }
+  function badgeCount(n){ return n > 99 ? '99+' : String(n); }
   function renderMoneyPanel(){
     const badge = document.getElementById('money-badge');
     const count = state.financialLog.length;
-    if(count > 0){ badge.style.display = 'flex'; badge.textContent = count > 9 ? '9+' : count; }
+    const unread = moneyUnreadCount();
+    if(unread > 0){ badge.style.display = 'flex'; badge.textContent = badgeCount(unread); }
     else { badge.style.display = 'none'; }
-    document.getElementById('money-panel-sub').textContent = count > 0 ? `${count} event${count===1?'':'s'}` : 'No activity yet';
+    document.getElementById('money-panel-sub').textContent = count > 0 ? `${unread} new · ${count} event${count===1?'':'s'}` : 'No activity yet';
+    const mr = document.getElementById('money-mark-read'); if (mr) mr.disabled = unread === 0;
 
     const listEl = document.getElementById('money-list');
     if(state.financialLog.length === 0){
       listEl.innerHTML = `<div class="notif-empty">Payments received and new invoices will show up here as they happen.</div>`;
       return;
     }
-    listEl.innerHTML = state.financialLog.slice(0, 30).map(ev => {
+    listEl.innerHTML = state.financialLog.slice(0, 30).map((ev, i) => {
       const label = ev.type === 'payment' ? 'PAYMENT RECEIVED' : 'NEW INVOICE';
       const dotCls = ev.type === 'payment' ? 'info' : 'alert';
       const verb = ev.type === 'payment' ? 'Payment received from' : 'New invoice added for';
       return `
-        <div class="notif-row" onclick="openDetail(${ev.invoiceId}); toggleMoneyPanel();">
+        <div class="notif-row${i < unread ? ' unread' : ''}" onclick="openDetail(${ev.invoiceId}); toggleMoneyPanel();">
           <div class="notif-dot ${dotCls}"></div>
           <div class="notif-body">
             <div class="t">${label}</div>
@@ -5712,7 +5750,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
 
     const badge = document.getElementById('notif-badge');
     const alertCount = staleInvoices.length + failedInvoices.length;
-    if(alertCount > 0){ badge.style.display = 'flex'; badge.textContent = alertCount > 9 ? '9+' : alertCount; }
+    if(alertCount > 0){ badge.style.display = 'flex'; badge.textContent = badgeCount(alertCount); }
     else { badge.style.display = 'none'; }
     document.getElementById('notif-panel-sub').textContent = alertCount > 0 ? `${alertCount} need attention` : 'All caught up';
 
