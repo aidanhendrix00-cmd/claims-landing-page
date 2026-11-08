@@ -791,6 +791,17 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   function balance(a){ return Math.max(0, Number(a.amount || 0) - Number(a.paidAmount || 0)); }
   function ageDays(a){ var d = day(a.invoicedDate); if(!d) return Number(a.days || 0); return Math.max(0, Math.round((Date.now() - new Date(d + 'T12:00:00').getTime()) / 86400000)); }
   function followUpDay(ts){ return day(ts); }
+  // Escalation flags and follow-up reminders, same rules as the dashboard
+  // (claims-operations pack companies only).
+  function flagsOf(a){ var f = []; if(a.escalated) f.push('Escalated'); if(a.demandLetterSentAt) f.push('Demand letter sent'); if(a.noilSentAt || a.noilSent) f.push('NOIL sent'); if(a.lienFiled) f.push('Lien filed'); if(a.doNotContact) f.push(legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'); return f; }
+  function bizDaysSince(v){ var d = day(v); if(!d) return null; var start = new Date(d + 'T12:00:00'); if(isNaN(start.getTime())) return null; var t = new Date(); t.setHours(12,0,0,0); var n = 0, x = new Date(start); while(x < t){ x.setDate(x.getDate() + 1); var wd = x.getDay(); if(wd !== 0 && wd !== 6) n++; if(n > 400) break; } return n; }
+  function followUp(a){ if(!legal() || isPaid(a) || a.doNotContact || a.responded === 'replied' || balance(a) <= 0) return null; var last = [a.lastFollowUpAt, a.lastContact].map(day).filter(Boolean).sort().pop(); if(!last) return null; var n = bizDaysSince(last); if(n == null || n < 3) return null; return { level: n >= 5 ? 'overdue' : 'due', days: n }; }
+  function followUpText(a){ var r = followUp(a); return r ? ((r.level === 'overdue' ? 'OVERDUE' : 'DUE') + ' (' + r.days + ' business days)') : ''; }
+  var CLAIM_STATUS = { under_review: 'Under Review', approved: 'Approved', denied: 'Denied', pending_documentation: 'Pending Documentation', resolved: 'Resolved' };
+  function claimStatusText(a){ return CLAIM_STATUS[a.claimStatus] || ''; }
+  // Extra columns for pack companies, appended to the invoice-level reports.
+  function packCols(){ return legal() ? ['Flags', 'Follow-up', 'Claim status'] : []; }
+  function packRow(a){ return legal() ? [flagsOf(a).join(' · '), followUpText(a), claimStatusText(a)] : []; }
 
   var REPORTS = {
     queue: { label: 'Invoice Queue', dateField: 'Invoice date', needs: ['accounts'] },
@@ -820,7 +831,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   // picked is always visible, and City / Business / Payer take several.
   function legal(){ return !!(R.me && R.me.features && R.me.features.claimsOps); }
   function dncWord(){ return legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'; }
-  function statusOpts(){ return [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; }
+  function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['follow-up', 'Follow-up due'], ['flagged', 'Escalated / NOIL / Demand / Legal']]); return o; }
+  function statusWord(k){ return { open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied', 'follow-up': 'Follow-up due', flagged: 'Escalated / NOIL / Demand / Legal' }[k] || k; }
   var PAYER_OPTS = [['insurance', 'Insurance'], ['pm', 'Commercial or Property Management'], ['private', 'Private Pay']];
   function chipRow(id, opts, picked, multi, allLabel){
     var el = $(id); if(!el) return;
@@ -833,7 +845,11 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     var me = R.me || {};
     var cityWordV = cityWord(), bizWordV = bizWord();
     $('rptCityLabel').textContent = cityWordV; $('rptBizLabel').textContent = bizWordV;
-    var cities = Object.keys(me.offices || {}).map(function(k){ return [k, me.offices[k]]; });
+    // A manager or employee limited to one city only gets that city to pick
+    // from (the data they receive is already limited the same way); the
+    // business list from /api/me is already cut to their access.
+    var acc = me.access || {};
+    var cities = Object.keys(me.offices || {}).filter(function(k){ return !acc.office || acc.office === k; }).map(function(k){ return [k, me.offices[k]]; });
     var bizs = Object.keys(me.departments || {}).map(function(k){ return [k, me.departments[k]]; });
     SEL.city = SEL.city.filter(function(k){ return !!(me.offices || {})[k]; });
     SEL.biz = SEL.biz.filter(function(k){ return !!(me.departments || {})[k]; });
@@ -877,6 +893,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     if(f.status === 'collections' && !a.doNotContact) return false;
     if(f.status === 'escalated' && !a.escalated) return false;
     if(f.status === 'replied' && a.responded !== 'replied') return false;
+    if(f.status === 'follow-up' && !followUp(a)) return false;
+    if(f.status === 'flagged' && !flagsOf(a).length) return false;
     return true;
   }
   function byName(a, b){ return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }); }
@@ -892,8 +910,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       var list = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f === 'queue' ? f : f); });
       if(f.type === 'queue' && f.status === 'all') list = list.filter(function(a){ return !isPaid(a); });
       list.sort(byName);
-      cols = baseCols().concat(['Follow-ups', 'Last contact', 'Responded?', 'Currently with']);
-      rows = list.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), cwLabel(a)]); });
+      cols = baseCols().concat(['Follow-ups', 'Last contact', 'Responded?', 'Currently with']).concat(packCols());
+      rows = list.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), cwLabel(a)]).concat(packRow(a)); });
       foot = totals(list);
     } else if(f.type === 'accounts'){
       // One row per customer: every invoice that shares the customer name.
@@ -902,29 +920,30 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       var grp = {};
       al.forEach(function(a){
         var k = String(a.name || '').trim().toLowerCase().replace(/\\s+/g, ' ');
-        var g = grp[k] || (grp[k] = { name: a.name, n: 0, biz: {}, cities: {}, open: 0, invoiced: 0, ageSum: 0, last: '' , contact: a.contact || '', email: a.contactEmail || '' });
+        var g = grp[k] || (grp[k] = { name: a.name, n: 0, biz: {}, cities: {}, open: 0, invoiced: 0, ageSum: 0, last: '' , contact: a.contact || '', email: a.contactEmail || '', flags: {}, fu: 0 });
         g.n++; g.biz[deptLabel(a.department)] = 1; g.cities[officeLabel(a.officeLocation)] = 1;
+        flagsOf(a).forEach(function(x){ g.flags[x] = 1; }); if(followUp(a)) g.fu++;
         g.open += balance(a); g.invoiced += Number(a.amount || 0); g.ageSum += ageDays(a);
         if(a.lastContact && String(day(a.lastContact)) > String(g.last)) g.last = day(a.lastContact);
         if(!g.email && a.contactEmail) g.email = a.contactEmail;
       });
       var glist = Object.keys(grp).map(function(k){ return grp[k]; }).sort(function(x, y){ return y.open - x.open || String(x.name).localeCompare(String(y.name)); });
-      cols = ['Account', 'Invoices', bizWord(), cityWord(), 'Open balance', 'Total invoiced', 'Avg age (days)', 'Last contact', 'Contact', 'Contact email'];
-      rows = glist.map(function(g){ return [g.name, g.n, Object.keys(g.biz).sort().join(', '), Object.keys(g.cities).sort().join(', '), money(g.open), money(g.invoiced), g.n ? Math.round(g.ageSum / g.n) : 0, g.last ? fmtDay(g.last) : '', g.contact, g.email]; });
+      cols = ['Account', 'Invoices', bizWord(), cityWord(), 'Open balance', 'Total invoiced', 'Avg age (days)', 'Last contact', 'Contact', 'Contact email'].concat(legal() ? ['Flags', 'Follow-ups due'] : []);
+      rows = glist.map(function(g){ return [g.name, g.n, Object.keys(g.biz).sort().join(', '), Object.keys(g.cities).sort().join(', '), money(g.open), money(g.invoiced), g.n ? Math.round(g.ageSum / g.n) : 0, g.last ? fmtDay(g.last) : '', g.contact, g.email].concat(legal() ? [Object.keys(g.flags).join(' · '), g.fu || ''] : []); });
       var gOpen = glist.reduce(function(s2, g){ return s2 + g.open; }, 0);
       foot = glist.length + ' account' + (glist.length === 1 ? '' : 's') + ' · ' + al.length + ' invoice' + (al.length === 1 ? '' : 's') + ' · ' + money(gOpen) + ' open';
     } else if(f.type === 'ar'){
       var ar = accts.filter(function(a){ return inRange(a.invoicedDate, f) && statusMatches(a, f); });
       if(f.status === 'all') ar = ar.filter(function(a){ return !isPaid(a); });
       ar.sort(byName);
-      cols = baseCols().concat(['Contact', 'Contact email', 'Point of contact', 'Last contact', 'Responded?', 'Response summary', 'Notes', 'Last follow-up', 'Follow-up by', 'Projected payment', 'Payment type', dncWord(), 'Escalated']);
-      rows = ar.map(function(a){ return baseRow(a).concat([a.contact || '', a.contactEmail || '', a.contactInfo || '', fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), a.responseSummary || '', a.note || '', fmtDay(followUpDay(a.lastFollowUpAt)), a.lastFollowUpBy || '', fmtDay(a.projectedPaymentDate), PT[a.paymentType] || a.paymentType || '', a.doNotContact ? 'Yes' : 'No', a.escalated ? 'Yes' : 'No']); });
+      cols = baseCols().concat(['Contact', 'Contact email', 'Point of contact', 'Last contact', 'Responded?', 'Response summary', 'Notes', 'Last follow-up', 'Follow-up by', 'Projected payment', 'Payment type', dncWord(), 'Escalated']).concat(packCols());
+      rows = ar.map(function(a){ return baseRow(a).concat([a.contact || '', a.contactEmail || '', a.contactInfo || '', fmtDay(a.lastContact), a.responded === 'replied' ? 'Yes' : (a.responded === 'opened' ? 'Opened' : (a.responded === 'sent' ? 'No response yet' : 'None')), a.responseSummary || '', a.note || '', fmtDay(followUpDay(a.lastFollowUpAt)), a.lastFollowUpBy || '', fmtDay(a.projectedPaymentDate), PT[a.paymentType] || a.paymentType || '', a.doNotContact ? 'Yes' : 'No', a.escalated ? 'Yes' : 'No']).concat(packRow(a)); });
       foot = totals(ar);
     } else if(f.type === 'collected'){
       var pays = (R.payments || []).map(function(p){ return { p: p, a: byId[String(p.account_id)] }; }).filter(function(x){ return x.a && accountMatches(x.a, f) && inRange(x.p.deposited_on || x.p.created_at, f); });
       pays.sort(function(x, y){ return String(y.p.deposited_on || y.p.created_at || '').localeCompare(String(x.p.deposited_on || x.p.created_at || '')) || byName(x.a, y.a); });
-      cols = ['Payment date', 'Account', 'Invoice #', cityWord(), bizWord(), 'Payer', 'Amount', 'Method', 'Reference', 'Payer name', 'Bank', 'Memo', 'Source'];
-      rows = pays.map(function(x){ return [fmtDay(x.p.deposited_on || x.p.created_at), x.a.name, x.a.invoiceNumber || '', officeLabel(x.a.officeLocation), deptLabel(x.a.department), PAYER[x.a.payer] || '', money(x.p.amount), PT[x.p.method] || x.p.method || '', x.p.reference || '', x.p.payer_name || '', x.p.bank_name || '', x.p.memo || '', x.p.source || (x.p.recorded_by ? 'manual' : 'integration')]; });
+      cols = ['Payment date', 'Account', 'Invoice #', cityWord(), bizWord(), 'Payer', 'Amount', 'Method', 'Reference', 'Payer name', 'Bank', 'Memo', 'Source'].concat(legal() ? ['Flags'] : []);
+      rows = pays.map(function(x){ return [fmtDay(x.p.deposited_on || x.p.created_at), x.a.name, x.a.invoiceNumber || '', officeLabel(x.a.officeLocation), deptLabel(x.a.department), PAYER[x.a.payer] || '', money(x.p.amount), PT[x.p.method] || x.p.method || '', x.p.reference || '', x.p.payer_name || '', x.p.bank_name || '', x.p.memo || '', x.p.source || (x.p.recorded_by ? 'manual' : 'integration')].concat(legal() ? [flagsOf(x.a).join(' · ')] : []); });
       var tot = pays.reduce(function(s, x){ return s + Number(x.p.amount || 0); }, 0);
       foot = pays.length + ' payment' + (pays.length === 1 ? '' : 's') + ' · ' + money(tot) + ' collected';
     } else if(f.type === 'aging'){
@@ -948,9 +967,11 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       rows = rep.map(function(a){ return [a.name, a.invoiceNumber || '', officeLabel(a.officeLocation), deptLabel(a.department), PAYER[a.payer] || '', statusLabel(a), money(balance(a)), fmtDay(a.lastContact), ({ followup: 'Follow-up', demand: 'Demand letter', demand_letter: 'Demand letter', noil: 'NOIL' })[a.lastFollowUpKind] || (a.lastFollowUpKind || ''), a.responseSummary || '']; });
       foot = rep.length + ' response' + (rep.length === 1 ? '' : 's');
     } else if(f.type === 'escalations'){
-      var escd = accts.filter(function(a){ return a.escalated && inRange(a.invoicedDate, f) && statusMatches(a, f); }).sort(function(a, b){ return balance(b) - balance(a) || byName(a, b); });
-      cols = baseCols().concat(['Follow-ups', 'Last contact', 'Manager notified', 'Contact', 'Notes']);
-      rows = escd.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.notifiedName || 'Not yet', [a.contact, a.contactEmail].filter(Boolean).join(' · '), a.note || '']); });
+      // Pack companies: every flagged invoice (escalated, demand letter, NOIL,
+      // lien, Sent to Legal); otherwise escalated invoices as before.
+      var escd = accts.filter(function(a){ return (legal() ? flagsOf(a).length : a.escalated) && inRange(a.invoicedDate, f) && statusMatches(a, f); }).sort(function(a, b){ return balance(b) - balance(a) || byName(a, b); });
+      cols = baseCols().concat(['Follow-ups', 'Last contact', 'Manager notified', 'Contact', 'Notes']).concat(packCols());
+      rows = escd.map(function(a){ return baseRow(a).concat([a.followups || 0, fmtDay(a.lastContact), a.notifiedName || 'Not yet', [a.contact, a.contactEmail].filter(Boolean).join(' · '), a.note || '']).concat(packRow(a)); });
       foot = totals(escd);
     } else if(f.type === 'comms'){
       var cm = (R.comms || []).map(function(c){ return { c: c, a: byId[String(c.accountId)] }; }).filter(function(x){ return (!x.a || accountMatches(x.a, f)) && inRange(x.c.at, f); });
@@ -973,7 +994,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     bits.push(f.city === 'all' ? ('All ' + (cityWord() === 'City' ? 'cities' : 'offices')) : f.city.map(officeLabel).join(', '));
     bits.push(f.biz === 'all' ? ('All ' + (bizWord() === 'Business' ? 'businesses' : 'departments')) : f.biz.map(deptLabel).join(', '));
     if(f.payer !== 'all') bits.push(f.payer.map(function(p){ return PAYER[p] || p; }).join(', '));
-    if(f.status !== 'all') bits.push({ open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied' }[f.status] || f.status);
+    if(f.status !== 'all') bits.push(statusWord(f.status));
     if(f.from || f.to) bits.push((REPORTS[f.type].dateField || 'Date') + ' ' + (f.from ? fmtDay(f.from) : 'start') + ' – ' + (f.to ? fmtDay(f.to) : 'today'));
     return bits.join(' · ');
   }
@@ -1248,6 +1269,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '.loading-state{padding:60px 20px;text-align:center;color:#8A8578;font-size:14px;} ' +
   '.edit-modal-backdrop{position:fixed;inset:0;background:rgba(23,23,23,0.55);display:none;align-items:center;justify-content:center;z-index:999;padding:20px;} ' +
   '.edit-modal-backdrop.open{display:flex;} ' +
+  '.dept-access{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 10px;border:1px solid #E5E7EB;border-radius:8px;background:#FAFAF7;font-size:13px;} .dept-access label{display:flex;align-items:center;gap:6px;cursor:pointer;} .dept-access label.all{font-weight:600;flex-basis:100%;} ' +
   '.edit-modal{background:#fff;border-radius:14px;padding:26px;max-width:420px;width:100%;} ' +
   '.edit-modal h4{margin:0 0 16px;} ' +
   '.edit-modal .acct-field{margin-bottom:14px;} ' +
@@ -1496,6 +1518,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-field"><label>Name</label><input type="text" id="editModalName" disabled></div> ' +
   '<div class="acct-field"><label>Email</label><input type="email" id="editModalEmail" placeholder="name@company.com"></div> ' +
   '<div class="acct-field"><label>Office</label><select id="editModalOffice"></select></div> ' +
+  '<div class="acct-field" id="editModalDeptRow" style="display:none;"><label>Business access</label><div id="editModalDepts" class="dept-access"></div><div class="acct-card-sub" style="margin-top:4px;">Leave "All businesses" on for full access, or tick only the businesses this person should see.</div></div> ' +
   '<div class="acct-field"><label>Account type</label> ' +
   '<select id="editModalRole"> ' +
   '<option value="employee">Employee</option> ' +
@@ -1599,7 +1622,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '      tr.innerHTML= ' +
   '        "<td><div class=\\"team-name-cell\\"><div class=\\"team-avatar\\">"+esc(initials(u.name))+"</div>"+esc(u.name)+(isSelf?" <span style=\\"color:#8A8578;font-size:11px;\\">(you)</span>":"")+"</div></td>"+ ' +
   '        "<td>"+esc(u.email)+"</td>"+ ' +
-  '        "<td>"+esc(u.office?officeLabel(u.office):(u.role==="admin"?"All offices":EMDASH))+"</td>"+ ' +
+  '        "<td>"+esc(u.office?officeLabel(u.office):(u.role==="admin"||claimsOps()?"All cities":EMDASH))+(claimsOps()&&u.role!=="admin"?"<div style=\\"font-size:11.5px;color:#8A8578;\\">"+esc((u.departments&&u.departments.length)?u.departments.map(function(k){ return deptMap()[k]||k; }).join(", "):"All businesses")+"</div>":"")+"</td>"+ ' +
   '        "<td><span class=\\"role-pill "+esc(u.role)+"\\">"+esc(ROLE_LABEL[u.role]||titleCase(u.role))+"</span></td>"+ ' +
   '        "<td>"+esc(stLabel)+"</td>"+ ' +
   '        credsCell+editCell; ' +
@@ -1860,6 +1883,13 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  } ' +
   ' ' +
   '  function modalMsg(t){ var el=document.getElementById("editModalMsg"); if(!el) return; el.style.display=t?"block":"none"; el.textContent=t||""; } ' +
+  '  function claimsOps(){ return !!(state.me&&state.me.features&&state.me.features.claimsOps); } ' +
+  '  function deptMap(){ return (state.me&&(state.me.allDepartments||state.me.departments))||{}; } ' +
+  '  function deptListHTML(selected){ var all=deptMap(); var keys=Object.keys(all); var isAll=!selected||!selected.length; ' +
+  '    return "<label class=\\"all\\"><input type=\\"checkbox\\" data-all=\\"1\\" "+(isAll?"checked":"")+"> All businesses</label>"+keys.map(function(k){ return "<label><input type=\\"checkbox\\" value=\\""+esc(k)+"\\" "+(!isAll&&selected.indexOf(k)!==-1?"checked":"")+"> "+esc(all[k])+"</label>"; }).join(""); } ' +
+  '  function deptListRead(){ var box=document.getElementById("editModalDepts"); if(!box) return null; var all=box.querySelector("input[data-all]"); if(all&&all.checked) return null; var keys=[].slice.call(box.querySelectorAll("input[value]:checked")).map(function(i){return i.value;}); return keys.length?keys:null; } ' +
+  '  function wireDeptList(){ var box=document.getElementById("editModalDepts"); if(!box) return; box.addEventListener("change",function(e){ var all=box.querySelector("input[data-all]"); if(e.target===all){ if(all.checked) box.querySelectorAll("input[value]").forEach(function(i){i.checked=false;}); else if(!box.querySelector("input[value]:checked")) all.checked=true; } else { if(all) all.checked=!box.querySelector("input[value]:checked"); } }); } ' +
+  '  function syncDeptRow(){ var row=document.getElementById("editModalDeptRow"); var role=document.getElementById("editModalRole").value; if(row) row.style.display=(claimsOps()&&role!=="admin"&&Object.keys(deptMap()).length)?"block":"none"; } ' +
   '  function openEditModal(id){ ' +
   '    state.editingId=id; ' +
   '    var backdrop=document.getElementById("editModalBackdrop"); ' +
@@ -1875,9 +1905,10 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '    document.getElementById("editModalEmail").disabled=!isNew; ' +
   '    document.getElementById("editModalEmail").placeholder=isNew?"name@company.com":""; ' +
   '    var offSel=document.getElementById("editModalOffice"); var om=officeMap(); ' +
-  '    offSel.innerHTML=Object.keys(om).map(function(k){ return "<option value=\\""+esc(k)+"\\">"+esc(om[k])+"</option>"; }).join(""); ' +
-  '    offSel.value=user.office&&om[user.office]?user.office:Object.keys(om)[0]; ' +
+  '    offSel.innerHTML=(claimsOps()?"<option value=\\"\\">All cities</option>":"")+Object.keys(om).map(function(k){ return "<option value=\\""+esc(k)+"\\">"+esc(om[k])+"</option>"; }).join(""); ' +
+  '    offSel.value=user.office&&om[user.office]?user.office:(claimsOps()?"":Object.keys(om)[0]); ' +
   '    document.getElementById("editModalRole").value=(user.role==="manager"||user.role==="admin")?user.role:"employee"; ' +
+  '    var deptBox=document.getElementById("editModalDepts"); if(deptBox){ deptBox.innerHTML=deptListHTML(isNew?null:(user.departments||null)); } syncDeptRow(); ' +
   '    document.getElementById("editModalNote").textContent=isNew?"They will get an email with a link to set their password.":""; ' +
   '    document.getElementById("editModalRemove").style.display=isNew?"none":"inline-block"; ' +
   '    document.getElementById("editModalSave").textContent=isNew?"Send invite":"Save changes"; ' +
@@ -1886,6 +1917,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  function closeEditModal(){ document.getElementById("editModalBackdrop").classList.remove("open"); } ' +
   '  function postJson(url,body){ return fetch(url,{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();}); } ' +
   '  function wireEditModal(){ ' +
+  '    wireDeptList(); document.getElementById("editModalRole").addEventListener("change",syncDeptRow); ' +
   '    document.getElementById("editModalCancel").addEventListener("click",closeEditModal); ' +
   '    document.getElementById("editModalBackdrop").addEventListener("click",function(e){ if(e.target===e.currentTarget) closeEditModal(); }); ' +
   '    document.getElementById("editModalSave").addEventListener("click",function(){ ' +
@@ -1898,7 +1930,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '        if(!name){ modalMsg("Enter their full name."); return; } ' +
   '        if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)){ modalMsg("Enter a valid email address."); return; } ' +
   '        saveBtn.disabled=true; ' +
-  '        postJson("/api/team/invite",{email:email,fullName:name,role:newRole,office:office}).then(function(d){ ' +
+  '        postJson("/api/team/invite",{email:email,fullName:name,role:newRole,office:office,departments:claimsOps()?deptListRead():null}).then(function(d){ ' +
   '          saveBtn.disabled=false; ' +
   '          if(!d||!d.ok){ modalMsg((d&&d.error)||"Could not send the invite."); return; } ' +
   '          closeEditModal(); teamMsg("Invite sent to "+email+".",true); ' +
@@ -1906,7 +1938,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '        }).catch(function(){ saveBtn.disabled=false; modalMsg("Could not send the invite."); }); ' +
   '      }else{ ' +
   '        saveBtn.disabled=true; ' +
-  '        postJson("/api/team/update",{id:state.editingId,role:newRole,office:office}).then(function(d){ ' +
+  '        postJson("/api/team/update",{id:state.editingId,role:newRole,office:office,departments:claimsOps()?deptListRead():undefined}).then(function(d){ ' +
   '          saveBtn.disabled=false; ' +
   '          if(!d||!d.ok){ modalMsg((d&&d.error)||"Could not save those changes."); return; } ' +
   '          closeEditModal(); teamMsg("Changes saved.",true); ' +
@@ -1928,7 +1960,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '  function refreshTeam(){ ' +
   '    return fetch("/api/me",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ state.me=d; } }).catch(function(){}).then(loadTeam).then(function(){ renderTeamTab(); }); ' +
   '  } ' +
-  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active" }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db); if(mb.canRead){n.textContent="A copy of everything you send is saved in your own Sent folder, and customer replies to your follow-ups are read automatically (every 5 minutes) and logged on the invoice.";} else {var rb=document.createElement("button");rb.className="btn-dark btn-sm";rb.textContent="Reconnect to capture replies";rb.onclick=function(){mbConnect(mb.provider);};a.appendChild(rb);n.textContent="A copy of everything you send is saved in your own Sent folder. Reconnect once to let clAIms read customer replies to your follow-ups, so Response Summary and Last Contact update on their own.";} return;} var ownOnly=!!(state.me&&state.me.requireOwnSender); if(mb){s.textContent=mb.email+" needs to be reconnected."+(ownOnly?" Until then nothing sends from you, and your automated follow-ups are on hold.":"");s.style.color="#8A1C13";}else{s.textContent=ownOnly?"Not connected. Your company sends every email from its own people, so follow-ups (manual and automated) wait until you connect your email.":"Not connected. Emails send from the clAIms address with your name on them.";s.style.color=ownOnly?"#8A1C13":"";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){var ownOnly=!!(state.me&&state.me.requireOwnSender);if(!confirm(ownOnly?"Disconnect your email? Your company only sends from its own people, so your follow-ups will pause until you connect an email again.":"Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; mbLoad(); if(window.location.hash==="#email"){ var ec=document.getElementById("email"); if(ec){ setTimeout(function(){ ec.scrollIntoView({behavior:"smooth",block:"center"}); },300); } } } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
+  'function renderAccountTab(){ var me=state.me||{}; function setTxt(id,val){ var el=document.getElementById(id); if(el){ el.textContent=val; } } setTxt("acctFullName", me.fullName||(me.email?titleCase(me.email.split("@")[0]):EMDASH)); setTxt("acctEmail", me.email||EMDASH); setTxt("acctCompany", me.companyName||EMDASH); setTxt("acctRoleValue", ROLE_LABEL[state.role]||EMDASH); var joined=document.getElementById("acctJoined"); if(joined){ var jd=me.createdAt?new Date(me.createdAt):null; joined.textContent=(jd&&!isNaN(jd.getTime()))?jd.toLocaleDateString(undefined,{year:"numeric",month:"long",day:"numeric"}):EMDASH; } } function renderBillingTab(){ var r=role(); var allowed=(r==="admin"||r==="manager"); var restricted=document.getElementById("billingRestricted"); if(restricted){ restricted.style.display=allowed?"none":"block"; } var content=document.getElementById("billingContent"); if(content){ content.style.display=allowed?"block":"none"; } if(!allowed){ return; } var me=state.me||{}; var planKey=me.selectedPlan||me.recommendedPlan||state.plan; var plan=PLAN_FEATURES[planKey]||PLAN_FEATURES.growth; var nameEl=document.getElementById("billingPlanName"); if(nameEl){ nameEl.textContent=plan?plan.name:EMDASH; } var list=document.getElementById("planFeatureList"); if(list&&plan){ list.innerHTML=plan.features.map(function(f){ return "<li>"+f+"</li>"; }).join(""); } var addr=document.getElementById("billingAddress"); if(addr){ addr.textContent=me.companyName||EMDASH; } applyBillingRoleUI(r); } function toggleChangePasswordForm(){ var f=document.getElementById("changePasswordForm"); if(!f){ return; } f.style.display=(!f.style.display||f.style.display==="none")?"block":"none"; } function openUpdatePaymentMethod(){ var b=document.getElementById("updatePaymentBtn"); var m=document.getElementById("billingPortalMsg"); if(b){ b.disabled=true; b.textContent="Opening Stripe…"; } if(m){ m.style.display="none"; } fetch("/api/billing-portal",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:"{}"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&d.url){ window.location.href=d.url; return; } if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent=(d&&d.error)||"Could not open the billing portal."; m.style.display="block"; } }).catch(function(){ if(b){ b.disabled=false; b.textContent="Update payment method"; } if(m){ m.textContent="Could not open the billing portal."; m.style.display="block"; } }); } function wireChangePassword(){ var btn=document.getElementById("cpSaveBtn"); if(!btn||btn.dataset.wired){ return; } btn.addEventListener("click",function(){ var msg=document.getElementById("cpMsg"); function show(t,ok){ if(msg){ msg.style.display="block"; msg.style.color=ok?"#2E7D32":"#B3261E"; msg.textContent=t; } } var cur=document.getElementById("cpCurrent").value; var nw=document.getElementById("cpNew").value; var cf=document.getElementById("cpConfirm").value; if(!cur||!nw){ show("Please fill in every field.",false); return; } if(nw!==cf){ show("New passwords do not match.",false); return; } btn.disabled=true; fetch("/api/change-password",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({currentPassword:cur,newPassword:nw})}).then(function(r){return r.json();}).then(function(d){ btn.disabled=false; if(d&&d.ok){ show("Password updated.",true); document.getElementById("cpCurrent").value=""; document.getElementById("cpNew").value=""; document.getElementById("cpConfirm").value=""; } else { show((d&&d.error)||"Could not update password.",false); } }).catch(function(){ btn.disabled=false; show("Could not update password.",false); }); }); btn.dataset.wired="1"; } function loadTeam(){ return fetch("/api/team",{credentials:"same-origin"}).then(function(r){return r.json();}).then(function(d){ if(d&&d.ok&&Array.isArray(d.team)){ state.team=d.team.map(function(u){ return { id:u.id, name:u.full_name||titleCase(String(u.email||"teammate").split("@")[0]), email:u.email||"", office:u.office||"", role:u.role||"employee", status:u.status||"active", departments:Array.isArray(u.departments)?u.departments:null }; }); } else if(d&&d.error){ teamMsg(d.error,false); } }).catch(function(){ teamMsg("Unable to load your team right now.",false); }); } window.toggleChangePasswordForm=toggleChangePasswordForm; window.openUpdatePaymentMethod=openUpdatePaymentMethod; window.openManageIntegrations=openManageIntegrations; window.closeManageIntegrations=closeManageIntegrations; window.toggleIntegration=toggleIntegration; wireTabs(); wireEditModal(); wireChangePassword(); var lo=document.getElementById("acctLogoutBtn"); if(lo){ lo.addEventListener("click",function(){ lo.disabled=true; fetch("/api/logout",{method:"POST",credentials:"same-origin"}).then(function(){ window.location.href="/"; }).catch(function(){ window.location.href="/"; }); }); } function mbRender(d){var s=document.getElementById("mailboxStatus");var a=document.getElementById("mailboxActions");var n=document.getElementById("mailboxNote");if(!s||!a)return;var avail=(d&&d.available)||{};var mb=d&&d.mailbox;a.innerHTML="";n.textContent=""; if(mb&&mb.status==="connected"){s.textContent="Connected as "+mb.email+". Your emails send from this address.";s.style.color="";var db=document.createElement("button");db.className="btn-outline btn-sm";db.textContent="Disconnect";db.onclick=mbDisconnect;a.appendChild(db); if(mb.canRead){n.textContent="A copy of everything you send is saved in your own Sent folder, and customer replies to your follow-ups are read automatically (every 5 minutes) and logged on the invoice.";} else {var rb=document.createElement("button");rb.className="btn-dark btn-sm";rb.textContent="Reconnect to capture replies";rb.onclick=function(){mbConnect(mb.provider);};a.appendChild(rb);n.textContent="A copy of everything you send is saved in your own Sent folder. Reconnect once to let clAIms read customer replies to your follow-ups, so Response Summary and Last Contact update on their own.";} return;} var ownOnly=!!(state.me&&state.me.requireOwnSender); if(mb){s.textContent=mb.email+" needs to be reconnected."+(ownOnly?" Until then nothing sends from you, and your automated follow-ups are on hold.":"");s.style.color="#8A1C13";}else{s.textContent=ownOnly?"Not connected. Your company sends every email from its own people, so follow-ups (manual and automated) wait until you connect your email.":"Not connected. Emails send from the clAIms address with your name on them.";s.style.color=ownOnly?"#8A1C13":"";} if(avail.google){var g=document.createElement("button");g.className="btn-dark btn-sm";g.textContent="Connect Google";g.onclick=function(){mbConnect("google");};a.appendChild(g);} if(avail.microsoft){var m=document.createElement("button");m.className="btn-dark btn-sm";m.textContent="Connect Outlook";m.onclick=function(){mbConnect("microsoft");};a.appendChild(m);} if(!avail.google&&!avail.microsoft){n.textContent="Email connection is not switched on for this site yet.";}} function mbConnect(p){window.location.href="/api/mailbox/connect?provider="+encodeURIComponent(p);} function mbDisconnect(){var ownOnly=!!(state.me&&state.me.requireOwnSender);if(!confirm(ownOnly?"Disconnect your email? Your company only sends from its own people, so your follow-ups will pause until you connect an email again.":"Disconnect your email? Follow-ups will go back to sending from the clAIms address."))return;fetch("/api/mailbox/disconnect",{method:"POST",credentials:"same-origin"}).then(function(r){return r.json();}).then(function(){mbLoad();});} function mbLoad(){fetch("/api/mailbox",{credentials:"same-origin"}).then(function(r){return r.json();}).then(mbRender).catch(function(){});} mbLoad(); var mbP=new URLSearchParams(window.location.search).get("mailbox"); if(mbP){setTimeout(function(){var nn=document.getElementById("mailboxNote");if(!nn)return;if(mbP==="connected"){nn.textContent="Your email is connected.";nn.style.color="#1F5346";}else if(mbP==="declined"){nn.textContent="Connection cancelled. Nothing was changed.";}else if(mbP==="token_failed"){nn.textContent="Could not finish connecting to your email provider. Support has been notified.";}else if(mbP==="no_encryption_key"){nn.textContent="Email connection is not fully set up on this site yet. Please contact support.";nn.style.color="#8A1C13";}else{nn.textContent="That did not complete. Please try again.";nn.style.color="#8A1C13";}},800);} fetch("/api/me",{credentials:"same-origin"}).then(function(r){ if(r.status===401){ window.location.replace("/?login=1"); return null; } return r.json(); }).then(function(d){ if(d===null) return null; if(d&&d.ok){ state.me=d; state.role=d.role||"employee"; mbLoad(); if(window.location.hash==="#email"){ var ec=document.getElementById("email"); if(ec){ setTimeout(function(){ ec.scrollIntoView({behavior:"smooth",block:"center"}); },300); } } } return Promise.all([loadTeam(), loadFreq()]); }).catch(function(){ return null; }).then(function(){ try{ renderAccountTab(); renderBillingTab(); renderTeamTab(); renderFrequencyTab(); renderSettingsTab(); }catch(e){ if(window.console&&console.error){ console.error(e); } } var l=document.getElementById("acctLoading"); if(l){ l.style.display="none"; } var p=document.getElementById("acctPanels"); if(p){ p.style.display="block"; } }); ' +
   '}); ' +
   '})(); ' +
   '</script> ' +
@@ -5911,7 +5943,13 @@ async function handleCadenceSettingsTeam(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 if (!claimsOpsOn(user)) return json({ ok: false, error: 'Team cadences are not enabled for this company.' }, 403);
-const users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&status=in.(active,pending)&select=id,email,full_name,role,office,departments&order=id.asc') || [];
+let users = await pgSelect(env, 'users', 'tenant_id=' + pgEq(user.tenant_id) + '&status=in.(active,pending)&select=id,email,full_name,role,office,departments&order=id.asc') || [];
+// Same visibility as the Team tab: admins see the whole company; a manager
+// or employee sees the teammates who work their city (and the company-wide
+// people), never another city's team.
+if (user.role !== 'admin') {
+users = users.filter(function (u) { return String(u.id) === String(user.id) || !u.office || !user.office || String(u.office) === String(user.office); });
+}
 const rows = await pgSelect(env, 'cadence_settings', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*') || [];
 const byUser = {}; rows.forEach(function (r) { byUser[String(r.user_id)] = r; });
 const offices = resolveOffices(user.tenant_offices);
