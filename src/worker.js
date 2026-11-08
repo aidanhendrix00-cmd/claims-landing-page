@@ -1269,7 +1269,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '.loading-state{padding:60px 20px;text-align:center;color:#8A8578;font-size:14px;} ' +
   '.edit-modal-backdrop{position:fixed;inset:0;background:rgba(23,23,23,0.55);display:none;align-items:center;justify-content:center;z-index:999;padding:20px;} ' +
   '.edit-modal-backdrop.open{display:flex;} ' +
-  '.dept-access{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 10px;border:1px solid #E5E7EB;border-radius:8px;background:#FAFAF7;font-size:13px;} .dept-access label{display:flex;align-items:center;gap:6px;cursor:pointer;} .dept-access label.all{font-weight:600;flex-basis:100%;} ' +
+  '.dept-access{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;padding:10px 12px;border:1px solid #E5E7EB;border-radius:8px;background:#FAFAF7;} .acct-field .dept-access label{display:flex;align-items:center;gap:9px;margin:0;padding:5px 0;font-size:13.5px;font-weight:500;line-height:1.3;color:#16233A;text-transform:none;letter-spacing:0;cursor:pointer;} .acct-field .dept-access label.all{grid-column:1 / -1;font-weight:700;padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid #E5E7EB;} .dept-access input[type=checkbox]{width:16px;height:16px;margin:0;flex:0 0 16px;accent-color:#16233A;} @media (max-width:520px){.dept-access{grid-template-columns:1fr;}} ' +
   '.edit-modal{background:#fff;border-radius:14px;padding:26px;max-width:420px;width:100%;} ' +
   '.edit-modal h4{margin:0 0 16px;} ' +
   '.edit-modal .acct-field{margin-bottom:14px;} ' +
