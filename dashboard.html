@@ -7294,7 +7294,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   function reportsMe(){
     if (window.__me && window.__me.ok) return window.__me;
     // Demo / no sign-in: describe the sample company from what the page knows.
-    return { ok: true, role: 'admin', companyName: companyDisplayName() || 'clAIms Demo', offices: OFFICE_LABELS, departments: DEPARTMENT_LABELS,
+    return { ok: true, role: 'admin', companyName: window.__CLMS_DEMO ? 'clAIms Demo' : (companyDisplayName() || 'clAIms'), offices: OFFICE_LABELS, departments: DEPARTMENT_LABELS,
       integrationMode: TENANT_DEPTS_CUSTOM ? 'quickbooks' : 'crm', features: {}, access: {} };
   }
   function reportsAccounts(){
