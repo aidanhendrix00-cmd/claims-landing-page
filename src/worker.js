@@ -4191,6 +4191,26 @@ await pgUpdate(env, 'accounts', 'id=' + pgEq(accountId), patch);
 return paid;
 }
 
+// True when any field in `patch` (other than updated_at) would change `row`.
+// Dates compare by instant, numbers by value, everything else as strings;
+// null, undefined and '' are the same "empty".
+function rowDiffers(row, patch) {
+for (const k in patch) {
+if (k === 'updated_at') continue;
+const a = row[k], b = patch[k];
+const ea = (a === null || a === undefined || a === ''), eb = (b === null || b === undefined || b === '');
+if (ea && eb) continue;
+if (ea !== eb) return true;
+if (typeof a === 'number' || typeof b === 'number') { if (Math.abs(Number(a) - Number(b)) > 0.005) return true; continue; }
+if (typeof a === 'boolean' || typeof b === 'boolean') { if (!!a !== !!b) return true; continue; }
+const sa = String(a), sb = String(b);
+if (sa === sb) continue;
+const da = Date.parse(sa), db = Date.parse(sb);
+if (isFinite(da) && isFinite(db) && /\d{4}-\d{2}-\d{2}/.test(sa) && /\d{4}-\d{2}-\d{2}/.test(sb)) { if (da !== db) return true; continue; }
+return true;
+}
+return false;
+}
 // Writes accounting/CRM records into accounts (and their payments, notes, files
 // and activity). Shared by the push API and the native QuickBooks sync.
 async function ingestAccountingItems(env, integration, items) {
@@ -4219,7 +4239,7 @@ officesDirty = true;
 const escalated = !!raw.escalated;
 const waSent = !!raw.waSent;
 try {
-const existing = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&external_id=' + pgEq(String(raw.externalId)) + '&select=id,status,paid_at,paid_amount,amount,noil_sent_at,demand_letter_sent_at,wa_signed_at,contact_info');
+const existing = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&external_id=' + pgEq(String(raw.externalId)) + '&select=*');
 const nowIso = new Date().toISOString();
 const rawPaidAt = raw.paidAt ? String(raw.paidAt) : null;
 // What the accounting system says has been applied so far. Only trusted when
@@ -4296,7 +4316,11 @@ noil_sent_at: rawNoilSentAt !== null ? rawNoilSentAt : existing.noil_sent_at,
 demand_letter_sent_at: rawDemandLetterSentAt !== null ? rawDemandLetterSentAt : existing.demand_letter_sent_at,
 wa_signed_at: rawWaSignedAt !== null ? rawWaSignedAt : existing.wa_signed_at
 });
-await pgUpdate(env, 'accounts', 'id=' + pgEq(existing.id), updateFields);
+// Only write when something actually differs. A sync pass that re-reads an
+// unchanged invoice used to rewrite the row (and its updated_at) anyway,
+// which moved the dashboard's change stamp every few seconds, threw away
+// the cached account list and made every open dashboard reload 47k rows.
+if (rowDiffers(existing, updateFields)) await pgUpdate(env, 'accounts', 'id=' + pgEq(existing.id), updateFields);
 acctId = existing.id;
 } else {
 const inserted = await pgInsert(env, 'accounts', Object.assign({
@@ -7959,6 +7983,12 @@ const etag = 'W/"' + (await sha1Hex('gz2|' + user.tenant_id + '|' + scope + '|' 
 const cache = caches.default;
 const cacheKey = new Request(SITE_URL + '/__cache/accounts/' + etag.replace(/\W/g, ''), { method: 'GET' });
 if (await cache.match(cacheKey)) return;
+// While an import is adding rows every few seconds the stamp keeps moving;
+// one background rebuild per company every 45 s is plenty (the dashboard
+// itself refreshes at most every 20 s and will take a hit or a miss then).
+const lockKey = new Request(SITE_URL + '/__cache/accounts-warm-lock/' + user.tenant_id, { method: 'GET' });
+if (await cache.match(lockKey)) return;
+await cache.put(lockKey, new Response('1', { status: 200, headers: { 'Cache-Control': 'public, max-age=45' } }));
 const job = (async function () {
 const gz = await gzipText(await buildAccountsBody(env, user.tenant_id, scope));
 await cache.put(cacheKey, gzipCacheEntry(gz));
