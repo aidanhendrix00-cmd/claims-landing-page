@@ -7832,7 +7832,9 @@ return new Response(cs.readable).arrayBuffer();
 function gzipJsonResponse(body, etag, cacheState) {
 const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': cacheState, 'Vary': 'Accept-Encoding' };
 if (etag) headers['ETag'] = etag;
-return new Response(body, { status: 200, headers: headers });
+// encodeBody 'manual': the bytes are already gzip - without this the runtime
+// compresses them a second time and the browser ends up with raw gzip.
+return new Response(body, { status: 200, headers: headers, encodeBody: 'manual' });
 }
 function gzipCacheEntry(bytes) {
 return new Response(bytes, { status: 200, headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'public, max-age=3600' } });
