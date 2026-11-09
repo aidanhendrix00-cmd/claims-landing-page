@@ -2772,6 +2772,55 @@ offset += size;
 }
 return out;
 }
+// Read every matching row of a large table by walking id ranges in parallel.
+// pgSelectAll pages with OFFSET under the caller's ORDER BY, so each page of
+// a 47k-row tenant made Postgres sort the whole set again (13 s cold for
+// /api/accounts). Here the id space is split into PG_PARALLEL ranges and each
+// range is walked by primary key (id >= lo, id < hi, ORDER BY id, LIMIT) - an
+// index scan with no sort and no offset. Rows come back ordered by id; the
+// caller sorts them the way it wants. `query` must not contain order/limit.
+async function pgSelectAllById(env, table, query, pageSize) {
+const size = pageSize || 1000;
+const [lo, hi] = await Promise.all([
+pgSelect(env, table, query + '&select=id&order=id.asc&limit=1'),
+pgSelect(env, table, query + '&select=id&order=id.desc&limit=1')
+]);
+const minId = lo && lo[0] ? Number(lo[0].id) : null;
+const maxId = hi && hi[0] ? Number(hi[0].id) : null;
+if (minId === null || maxId === null) return [];
+const lanes = Math.max(1, Math.min(PG_PARALLEL, Math.ceil((maxId - minId + 1) / size)));
+const span = Math.ceil((maxId - minId + 1) / lanes);
+const walk = async function (from, to) {
+const rows = [];
+let cursor = from;
+for (let guard = 0; guard < 2000 && cursor <= to; guard++) {
+const page = await pgFetch(env, 'GET', table, query + '&id=gte.' + cursor + '&id=lte.' + to + '&order=id.asc&limit=' + size) || [];
+for (let i = 0; i < page.length; i++) rows.push(page[i]);
+if (page.length < size) break;
+cursor = Number(page[page.length - 1].id) + 1;
+}
+return rows;
+};
+const jobs = [];
+for (let i = 0; i < lanes; i++) {
+const from = minId + i * span;
+const to = Math.min(maxId, from + span - 1);
+if (from > maxId) break;
+jobs.push(walk(from, to));
+}
+const parts = await Promise.all(jobs);
+let out = [];
+parts.forEach(function (p) { out = out.concat(p); });
+return out;
+}
+// Postgres ORDER BY x DESC puts NULLs first; keep that so the API order is
+// exactly what the OFFSET-paged query returned.
+function descNullsFirst(a, b) {
+if (a == null && b == null) return 0;
+if (a == null) return -1;
+if (b == null) return 1;
+return a < b ? 1 : (a > b ? -1 : 0);
+}
 // How many rows match, without reading them (HEAD + Prefer: count=exact).
 async function pgCount(env, table, query) {
 const url = env.SUPABASE_URL + '/rest/v1/' + table + '?' + query + '&select=id&limit=1';
@@ -5671,12 +5720,12 @@ const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 const url = new URL(request.url);
 const accountId = url.searchParams.get('accountId');
-let q = 'tenant_id=' + pgEq(user.tenant_id) + '&select=' + PAYMENT_LIST_COLS + '&order=deposited_on.desc';
+const q = 'tenant_id=' + pgEq(user.tenant_id) + '&select=' + PAYMENT_LIST_COLS;
+const newestFirst = function (x, y) { return descNullsFirst(x.deposited_on, y.deposited_on) || (Number(y.id) - Number(x.id)); };
 if (accountId) {
 const account = await accountForUser(env, user, accountId);
 if (!account) return json({ ok: false, error: 'Account not found' }, 404);
-q = 'account_id=' + pgEq(account.id) + '&' + q;
-const one = await pgSelectAll(env, 'invoice_payments', q + ',id.desc');
+const one = await pgSelectAll(env, 'invoice_payments', 'account_id=' + pgEq(account.id) + '&' + q + '&order=deposited_on.desc,id.desc');
 return json({ ok: true, payments: one || [] });
 }
 // The whole company's list is the slow part of every dashboard load (35k
@@ -5700,10 +5749,11 @@ h.set('Cache-Control', 'no-cache'); h.set('ETag', etag); h.set('X-Accounts-Cache
 return new Response(hit.body, { status: 200, headers: h });
 }
 } catch (e) { cacheKey = null; etag = null; }
-let rows = await pgSelectAll(env, 'invoice_payments', q + ',id.desc');
+let rows = await pgSelectAllById(env, 'invoice_payments', q);
+rows.sort(newestFirst);
 // Managers and employees only see payments on accounts in their own office.
 if (user.role !== 'admin') {
-const mine = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + scope + '&select=id&order=id.asc');
+const mine = await pgSelectAllById(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + scope + '&select=id');
 const allowed = {}; (mine || []).forEach(function (a) { allowed[String(a.id)] = true; });
 rows = (rows || []).filter(function (r) { return allowed[String(r.account_id)]; });
 }
@@ -7482,11 +7532,12 @@ return await pgSelectOne(env, 'user_mailboxes', 'user_id=' + pgEq(user.id) + '&s
 async function touchAccount(env, accountId) {
 try { await pgUpdate(env, 'accounts', 'id=' + pgEq(accountId), { updated_at: new Date().toISOString() }); } catch (e) {}
 }
-async function handleAccountsPing(request, env) {
+async function handleAccountsPing(request, env, ctx) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 const ver = await accountsVersion(env, user.tenant_id);
 const maxId = ver.maxId;
+await warmAccountsCache(env, ctx, user, ver);
 // Plan and billing state ride along so an open dashboard notices a plan
 // change (or a hold) within seconds, without a reload.
 const planKey = planKeyFor(user);
@@ -7804,7 +7855,21 @@ h.set('Cache-Control', 'no-cache'); h.set('ETag', etag); h.set('X-Accounts-Cache
 return new Response(hit.body, { status: 200, headers: h });
 }
 } catch (e) { cacheKey = null; }
-const list = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + scope + '&select=*&order=invoiced_at.desc,id.desc');
+const body = await buildAccountsBody(env, user.tenant_id, scope);
+if (cacheKey && cache) {
+// Stored for an hour at most; the stamp in the key already retires it
+// the moment anything changes, so a longer life only saves cold reads.
+const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
+try { const p = cache.put(cacheKey, stored); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
+}
+const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': 'miss' };
+if (version) headers['ETag'] = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
+return new Response(body, { status: 200, headers: headers });
+}
+// The /api/accounts answer for one tenant and access scope, as JSON text.
+async function buildAccountsBody(env, tenantId, scope) {
+const list = await pgSelectAllById(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + scope + '&select=*');
+list.sort(function (x, y) { return descNullsFirst(x.invoiced_at, y.invoiced_at) || (Number(y.id) - Number(x.id)); });
 const accounts = list.map(function (a) {
 let days = null;
 if (a.invoiced_at) {
@@ -7860,16 +7925,24 @@ lastFollowUpKind: a.last_follow_up_kind || null,
 paidDate: a.paid_at
 };
 });
-const body = JSON.stringify({ ok: true, accounts: accounts });
-if (cacheKey && cache) {
-// Stored for an hour at most; the stamp in the key already retires it
-// the moment anything changes, so a longer life only saves cold reads.
-const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
-try { const p = cache.put(cacheKey, stored); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
+return JSON.stringify({ ok: true, accounts: accounts });
 }
-const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': 'miss' };
-if (version) headers['ETag'] = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
-return new Response(body, { status: 200, headers: headers });
+// Called from the 5-second change probe: when the list has changed and the
+// edge has no copy for the new stamp yet, build it now (in the background)
+// so the dashboard's follow-up read is a hit instead of a cold 47k-row read.
+async function warmAccountsCache(env, ctx, user, version) {
+try {
+const scope = accountScopeQuery(user);
+const etag = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
+const cache = caches.default;
+const cacheKey = new Request(SITE_URL + '/__cache/accounts/' + etag.replace(/\W/g, ''), { method: 'GET' });
+if (await cache.match(cacheKey)) return;
+const job = (async function () {
+const body = await buildAccountsBody(env, user.tenant_id, scope);
+await cache.put(cacheKey, new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } }));
+})();
+if (ctx && ctx.waitUntil) ctx.waitUntil(job.catch(function () {})); else await job;
+} catch (e) {}
 }
 
 // Manual invoice entry from the dashboard. Most accounts arrive through the
@@ -10917,7 +10990,7 @@ if (url.pathname === '/api/invoices/messages' && request.method === 'GET') {
 return handleInvoiceMessages(request, env);
 }
 if (url.pathname === '/api/accounts/ping' && request.method === 'GET') {
-return handleAccountsPing(request, env);
+return handleAccountsPing(request, env, ctx);
 }
 if (url.pathname === '/api/accounts' && request.method === 'POST') {
 return handleAccountCreate(request, env);
