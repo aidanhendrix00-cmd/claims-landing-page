@@ -10673,7 +10673,9 @@ async function handleDashboard(request, env) {
   const dashInject = MY_ACCOUNT_LINK_SCRIPT + dashboardRoleScript(user.role);
   // The real-dashboard flag must exist before the page's own script boots, so
   // it goes in <head>; the rest is appended (dashboard.html has no </body>).
-  const REAL_FLAG = '<script>window.__CLMS_REAL=true;</script>';
+  // The <head> also starts the API requests the dashboard needs, so they are
+  // in flight while the browser is still downloading and parsing the page.
+  const REAL_FLAG = '<script>window.__CLMS_REAL=true;(function(){try{var f=function(u,c){return fetch(u,{credentials:"include",cache:c}).catch(function(){return null;});};window.__clmsPrefetch={me:f("/api/me","default"),accounts:f("/api/accounts","default"),payments:f("/api/invoices/payments","default"),notes:f("/api/accounts/notes?all=1","no-store"),comms:f("/api/invoices/comms","no-store")};}catch(e){}})();</script>';
   html = html.indexOf('<head>') !== -1 ? html.replace('<head>', '<head>' + REAL_FLAG) : REAL_FLAG + html;
   html = withTenantTheme(html, user);
   html = html.indexOf('</body>') !== -1 ? html.replace('</body>', dashInject + '</body>') : html + dashInject;
