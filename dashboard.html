@@ -1958,6 +1958,9 @@
      ============================================================ */
   const STORAGE_KEY = 'dryline-app-state-v11';
   let memoryFallback = null;
+  // The real dashboard's <head> starts the API requests before this script has
+  // even been parsed (see REAL_FLAG in the Worker); each one is used once.
+  function takePrefetch(key){ const box = window.__clmsPrefetch; const p = box && box[key]; if (p) box[key] = null; return p || null; }
   const PAYER_LABELS = { insurance: "Insurance", pm: "Commercial or Property Management", private: "Private Pay" };
   const STATUS_LABELS = { pending_start: "Pending Start", in_progress: "In Progress", work_completed: "Work Completed", in_ar: "In A/R", paid: "Paid" };
   // Where the claim stands with the payer (set by the team, independent of the
@@ -2706,15 +2709,16 @@ qbInit();
       if(invSel){ const im = inviteOfficeMap(); invSel.innerHTML = Object.keys(im).map(function(k){ return '<option value="' + hEsc(k) + '">' + hEsc(im[k]) + '</option>'; }).join(''); }
     }
     var searchFieldEl=document.getElementById('search');if(searchFieldEl){searchFieldEl.value='';}
+    if (state.currentUser) { renderAll(); return; } // real companies: the list was painted by loadRealAccounts; one more pass for the shared pieces is enough
     renderAll();
-    await runCadenceForAll(); // catch up any checkpoints on load
+    await runCadenceForAll(); // catch up any checkpoints on load (demo only)
     saveState();
     renderAll();
   }
 
   async function loadCurrentUser() {
   try {
-    const res = await fetch('/api/me', { credentials: 'include' });
+    const res = await (takePrefetch('me') || fetch('/api/me', { credentials: 'include' }));
     if (!res.ok) {
       // A signed-out session on the real dashboard goes back to the login screen
       // (402s are billing holds and are handled by the hold overlay).
@@ -3260,10 +3264,11 @@ async function loadRealAccountsNow(){
       // after another (accounts, then payments, then notes, then comms) was
       // most of a 20-30 second first load; now the whole set takes as long as
       // the slowest single answer.
-      const payReq = fetch('/api/invoices/payments', { credentials: 'include' }).catch(function(){ return null; });
-      const notesReq = fetch('/api/accounts/notes?all=1', { credentials: 'same-origin', cache: 'no-store' }).catch(function(){ return null; });
-      const commsReq = fetch('/api/invoices/comms', { credentials: 'same-origin', cache: 'no-store' }).catch(function(){ return null; });
-      const res = await fetch('/api/accounts', { credentials: 'include' });
+      const payReq = takePrefetch('payments') || fetch('/api/invoices/payments', { credentials: 'include' }).catch(function(){ return null; });
+      const notesReq = takePrefetch('notes') || fetch('/api/accounts/notes?all=1', { credentials: 'same-origin', cache: 'no-store' }).catch(function(){ return null; });
+      const commsReq = takePrefetch('comms') || fetch('/api/invoices/comms', { credentials: 'same-origin', cache: 'no-store' }).catch(function(){ return null; });
+      const res = await (takePrefetch('accounts') || fetch('/api/accounts', { credentials: 'include' }));
+      if (!res) throw new Error('accounts request failed');
       if (!res.ok) {
         if (window.__CLMS_REAL && res.status !== 402) showLoadFailure("We couldn't load your accounts just now" + (res.status === 401 ? ' \u2014 your session may have ended.' : ' (server error ' + res.status + ').'));
         return;
