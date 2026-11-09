@@ -313,6 +313,9 @@
   .mtd-list-head .cnt{font-weight:400;font-size:12px;opacity:.75;margin-left:8px;}
   .mtd-list-head .tot{font-family:var(--font-mono);font-size:13px;}
   .mtd-list-head .hist-link{color:#fff;opacity:.8;font-size:12px;margin-left:10px;}
+  .mtd-list-head .mtd-show{font-weight:400;font-size:12px;opacity:.9;margin-left:12px;}
+  .mtd-list-head .mtd-show select{border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:3px 6px;font-size:12px;background:rgba(255,255,255,.1);color:#fff;margin-left:4px;}
+  .mtd-list-head .mtd-show select option{color:var(--ink);}
   .chart-bar-wrap{height:240px;display:flex;align-items:flex-end;}
   .chart-bar{width:68px;display:flex;flex-direction:column-reverse;border-radius:6px 6px 2px 2px;overflow:hidden;box-shadow:0 0 0 1px var(--line);transition:box-shadow .12s ease;}
   .chart-col:hover .chart-bar{box-shadow:0 0 0 2px var(--ink);}
@@ -767,6 +770,8 @@
 
   .chip.chip-fu.active{background:#B54708;border-color:#B54708;color:#fff;}
   .chip.chip-esc.active{background:#B42318;border-color:#B42318;color:#fff;}
+  .chip.chip-partial.active{background:#8A4B18;border-color:#8A4B18;color:#fff;}
+  .accts-partial-lbl{font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px;}
 </style>
 
 
@@ -906,6 +911,7 @@
             <div class="chip" data-payer="insurance">Insurance</div>
             <div class="chip" data-payer="pm">Commercial or Property Management</div>
             <div class="chip" data-payer="private">Private Pay</div>
+            <div class="chip chip-partial" data-feat="claimsOps" style="display:none;" data-payer="partial" title="A payment has been applied and a balance is still owed">Partial payment</div>
             <div class="chip chip-fu" data-feat="claimsOps" style="display:none;" data-payer="follow-up" title="No response in 3+ business days">Follow-up due</div>
             <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="flagged" title="Escalated, demand letter, NOIL, lien or Sent to Legal">Flagged</div>
           </div>
@@ -931,6 +937,7 @@
             <option value="name-asc">Account name (A&ndash;Z)</option>
           </select>
           <label style="font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px;"><input type="checkbox" id="accts-paid" onchange="setAcctsFilter('includePaid', this.checked)"> Include paid invoices</label>
+          <label class="accts-partial-lbl" data-feat="claimsOps" style="display:none;" title="Only accounts with an invoice that has a payment applied and a balance still owed"><input type="checkbox" id="accts-partial" onchange="setAcctsFilter('partialOnly', this.checked)"> Partial payments only</label>
           <button class="btn-small" id="accts-sync-btn" onclick="pullFromAccounting()" title="Pull the latest invoices and customers from every connected QuickBooks / Intuit Enterprise Suite company">&#8635; Pull from QuickBooks / IES</button>
         </div>
       </div>
@@ -976,6 +983,7 @@
           <option value="not-collections" data-feat-text="Show: Not sent to Legal">Show: Not in collections</option>
           <option value="replied">Show: Replied</option>
           <option value="no-reply">Show: No reply yet</option>
+          <option value="partial" data-feat="claimsOps" hidden disabled>Show: Partial payment (balance still owed)</option>
           <option value="follow-up" data-feat="claimsOps" hidden disabled>Show: Follow-up due (3+ business days, no response)</option>
           <option value="escalated" data-feat="claimsOps" hidden disabled>Show: Escalated / NOIL / Demand / Legal</option>
           <option value="cs-under_review" data-feat="claimsOps" hidden disabled>Claim status: Under Review</option>
@@ -1051,7 +1059,9 @@
         <div class="report-card"><h3>Legend</h3><div class="chart-legend" id="collected-legend"></div></div>
         <div class="report-card"><h3 id="collected-drill-title">Click a bar for a breakdown</h3><div id="collected-drilldown"></div></div>
       </div>
-      <div class="section-head" style="margin-top:22px;"><h2>Payments Applied</h2></div>
+      <div class="section-head" style="margin-top:22px;"><h2>Payments Applied</h2>
+        <div class="toolbar" data-feat="claimsOps" style="display:none;"><select class="sort" id="collectedmtd-show" onchange="setPaymentsShow(this.value)" title="Which payments to show"><option value="all">Show: All payments</option><option value="partial">Show: Partial payments (balance still owed)</option></select></div>
+      </div>
       <div id="collected-payments-wrap"></div>
     </section>
 
@@ -1063,6 +1073,7 @@
         <label>Period <select id="collected-period" onchange="setCollectedPeriod(this.value)"><option value="all">All time</option></select></label>
         <label>From <input type="date" id="collected-from" onchange="setCollectedRange()" title="Pick one date in both boxes to see a single day"></label>
         <label>To <input type="date" id="collected-to" onchange="setCollectedRange()"></label>
+        <label data-feat="claimsOps" style="display:none;">Show <select id="collected-show" onchange="setPaymentsShow(this.value)"><option value="all">All payments</option><option value="partial">Partial payments (balance still owed)</option></select></label>
         <button type="button" class="btn-small" id="collected-clear" onclick="clearCollectedFilter()" style="display:none;">Clear</button>
         <span class="collected-filter-note" id="collected-filter-note"></span>
       </div>
@@ -1121,7 +1132,7 @@
       <div class="section-head"><h2>Escalated accounts</h2>
         <div class="toolbar" id="esc-tools">
           <input class="search" id="esc-search" type="search" name="escalations-search" placeholder="Search escalated accounts\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="setEscFilter('search', this.value)">
-          <select class="sort" id="esc-payer" onchange="setEscFilter('payer', this.value)"><option value="all">Payer: All</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="private">Private Pay</option></select>
+          <select class="sort" id="esc-payer" onchange="setEscFilter('payer', this.value)"><option value="all">Payer: All</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="partial" data-feat="claimsOps" hidden disabled>Partial payment</option><option value="private">Private Pay</option></select>
           <select class="sort" id="esc-notified" onchange="setEscFilter('notified', this.value)"><option value="all">Notified: Any</option><option value="yes">Manager notified</option><option value="no">Not yet notified</option></select>
           <select class="sort" id="esc-sort" onchange="setEscFilter('sort', this.value)">
             <option value="balance-desc">Sort: Balance (high\u2013low)</option>
@@ -3690,7 +3701,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       '<span class="pager-info">Showing ' + (pg.from + 1).toLocaleString() + '\u2013' + pg.to.toLocaleString() + ' of ' + pg.total.toLocaleString() + ' ' + noun + ' \u00b7 page ' + (pg.page + 1) + ' of ' + pg.pages + '</span>' +
       '<button type="button" class="btn-small"' + (pg.page >= pg.pages - 1 ? ' disabled' : '') + ' onclick="setPage(\'' + pg.key + '\', 1)">Next &rarr;</button></div>';
   }
-  const PAGE_VIEW = { queue: 'queue', sheet: 'sheet', accounts: 'accounts', sent: 'sent', responses: 'responses', escalations: 'escalations', collected: 'collected', collectedmtd: 'collectedmtd' };
+  const PAGE_VIEW = { queue: 'queue', sheet: 'sheet', accounts: 'accounts', sent: 'sent', responses: 'responses', escalations: 'escalations', collected: 'collected', collectedmtd: 'collectedmtd', report: 'report', mtdlist: 'invoicedmtd' };
   function setPage(key, delta){
     const st = __pageState[key]; if (!st) return;
     st.page = Math.max(0, st.page + delta);
@@ -4311,8 +4322,8 @@ function todoRowHTML(item, num, priority){
 
     let items = activeInvoices().filter(inv => !inv.escalated).filter(inv => {
       const matchesSearch = !searchVal || [inv.name, inv.meta, inv.invoiceNumber, inv.jobNumber, inv.claimNumber, inv.contact].some(v => String(v || '').toLowerCase().includes(searchVal));
-      const matchesPayer = payerFilter === 'all' || payerFilter === 'follow-up' || payerFilter === 'flagged' || inv.payer === payerFilter;
-      const matchesSpecial = payerFilter === 'follow-up' ? !!followUpReminder(inv) : (payerFilter === 'flagged' ? !!escalationFlags(inv).length : true);
+      const matchesPayer = payerFilter === 'all' || payerFilter === 'follow-up' || payerFilter === 'flagged' || payerFilter === 'partial' || inv.payer === payerFilter;
+      const matchesSpecial = payerFilter === 'follow-up' ? !!followUpReminder(inv) : (payerFilter === 'flagged' ? !!escalationFlags(inv).length : (payerFilter === 'partial' ? isPartiallyPaid(inv) : true));
       return matchesSearch && matchesPayer && matchesSpecial;
     });
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true });
@@ -4622,7 +4633,7 @@ function todoRowHTML(item, num, priority){
   // state so they survive a refresh; the inputs are only written when they
   // differ, so typing is never interrupted by a background render.
   const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'days-desc': 1, 'days-asc': 1, 'followup-desc': 1, 'followup-asc': 1, 'collections': 1, 'collections-last': 1 };
-  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, 'follow-up': 1, 'escalated': 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
+  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
   function sheetSearchValue(){
     const box = document.getElementById('sheet-search');
     if (!box) return String(state.sheetSearch || '');
@@ -4666,6 +4677,7 @@ function todoRowHTML(item, num, priority){
     if (show === 'not-collections' && isDoNotContact(inv)) return false;
     if (show === 'replied' && inv.responded !== 'replied') return false;
     if (show === 'no-reply' && inv.responded === 'replied') return false;
+    if (show === 'partial' && claimsOps() && !isPartiallyPaid(inv)) return false;
     if (show === 'follow-up' && !followUpReminder(inv)) return false;
     if (show === 'escalated' && !escalationFlags(inv).length) return false;
     if (show.indexOf('cs-') === 0 && (inv.claimStatus || '') !== show.slice(3)) return false;
@@ -4889,6 +4901,8 @@ function todoRowHTML(item, num, priority){
   function agingBucketClass(days){ return days <= 30 ? 'b1' : (days <= 60 ? 'b2' : 'b3'); }
   let agingSort = 'age';
   function setAgingSort(v){ agingSort = v || 'age'; renderReport(); }
+  let agingShow = 'all';
+  function setAgingShow(v){ agingShow = v === 'partial' ? 'partial' : 'all'; renderReport(); }
 
   function renderReport(){
     // Every account that still carries a balance, whatever its status - the
@@ -4938,19 +4952,26 @@ function todoRowHTML(item, num, priority){
     const summaryEl = document.getElementById('aging-summary');
     const listEl = document.getElementById('report-accounts');
     if(!summaryEl || !listEl) return;
+    if(!claimsOps()) agingShow = 'all';
+    const listRows = agingShow === 'partial' ? all.filter(isPartiallyPaid) : all;
     const partialCount = all.filter(isPartiallyPaid).length;
-    const avgAge = all.length ? Math.round(all.reduce((s,i) => s + agingDays(i), 0) / all.length) : 0;
-    summaryEl.innerHTML = `<span><b>${all.length}</b> account${all.length===1?'':'s'} with a balance</span>` +
-      `<span>Total owed <b>${money2(totalOwed)}</b></span>` +
+    const avgAge = listRows.length ? Math.round(listRows.reduce((s,i) => s + agingDays(i), 0) / listRows.length) : 0;
+    const listOwed = agingShow === 'partial' ? listRows.reduce((s,i) => s + balanceDue(i), 0) : totalOwed;
+    summaryEl.innerHTML = `<span><b>${listRows.length}</b> ${agingShow === 'partial' ? 'partially paid account' : 'account'}${listRows.length===1?'':'s'} with a balance</span>` +
+      `<span>Total owed <b>${money2(listOwed)}</b></span>` +
       `<span>Average age <b>${avgAge}</b> days</span>` +
-      (partialCount ? `<span><b>${partialCount}</b> partially paid</span>` : '') +
-      `<span style="margin-left:auto;">Sort accounts by <select onchange="setAgingSort(this.value)">` +
+      (partialCount && agingShow !== 'partial' ? `<span><b>${partialCount}</b> partially paid</span>` : '') +
+      (claimsOps() ? `<span style="margin-left:auto;">Show <select onchange="setAgingShow(this.value)">` +
+        `<option value="all" ${agingShow==='all'?'selected':''}>All open balances</option>` +
+        `<option value="partial" ${agingShow==='partial'?'selected':''}>Partial payment (balance still owed)</option>` +
+      `</select></span>` : '') +
+      `<span${claimsOps() ? '' : ' style="margin-left:auto;"'}>Sort accounts by <select onchange="setAgingSort(this.value)">` +
         `<option value="age" ${agingSort==='age'?'selected':''}>Oldest first</option>` +
         `<option value="balance" ${agingSort==='balance'?'selected':''}>Largest balance</option>` +
         `<option value="name" ${agingSort==='name'?'selected':''}>Customer name</option>` +
       `</select></span>`;
-    if(!all.length){
-      listEl.innerHTML = `<div class="empty" style="margin-top:14px;">No open balances match the current filters.</div>`;
+    if(!listRows.length){
+      listEl.innerHTML = `<div class="empty" style="margin-top:14px;">${agingShow === 'partial' ? 'No partially paid invoices match the current filters.' : 'No open balances match the current filters.'}</div>`;
       return;
     }
     const sorter = (a,b) => {
@@ -4960,21 +4981,46 @@ function todoRowHTML(item, num, priority){
     };
     const deptOrder = Object.keys(DEPARTMENT_LABELS);
     const officeOrder = OFFICE_LOCATIONS.slice();
-    all.forEach(i => { if(officeOrder.indexOf(i.officeLocation) === -1) officeOrder.push(i.officeLocation); });
-    listEl.innerHTML = officeOrder.map(office => {
-      const inOffice = all.filter(i => i.officeLocation === office);
-      if(!inOffice.length) return '';
-      const officeTotal = inOffice.reduce((s,i) => s + balanceDue(i), 0);
+    listRows.forEach(i => { if(officeOrder.indexOf(i.officeLocation) === -1) officeOrder.push(i.officeLocation); });
+    // One page of rows at a time, in office -> department -> sort order. With
+    // thousands of open invoices, painting every row at once made the whole
+    // dashboard scroll slowly (the hidden table stayed in the page even on
+    // other tabs). Office and department totals still cover every row.
+    const flat = [];
+    const officeStats = {}, deptStats = {};
+    officeOrder.forEach(office => {
+      const inOffice = listRows.filter(i => i.officeLocation === office);
+      if(!inOffice.length) return;
+      officeStats[office] = { n: inOffice.length, total: inOffice.reduce((s,i) => s + balanceDue(i), 0) };
       const depts = deptOrder.slice();
       inOffice.forEach(i => { if(depts.indexOf(i.department) === -1) depts.push(i.department); });
-      const deptBlocks = depts.map(dept => {
+      depts.forEach(dept => {
         const rows = inOffice.filter(i => i.department === dept).sort(sorter);
-        if(!rows.length) return '';
-        const deptTotal = rows.reduce((s,i) => s + balanceDue(i), 0);
+        if(!rows.length) return;
+        deptStats[office + '\u0000' + dept] = { n: rows.length, total: rows.reduce((s,i) => s + balanceDue(i), 0) };
+        rows.forEach(inv => flat.push(inv));
+      });
+    });
+    const pg = pageOf('report', flat, [agingShow, agingSort, state.deptFilter, state.officeFilter, (scopeOffices() || []).join(','), (scopeDepts() || []).join(',')].map(function(v){ return v == null ? '' : String(v); }).join('|'));
+    const pageOffices = [];
+    pg.rows.forEach(inv => {
+      let o = pageOffices[pageOffices.length - 1];
+      if(!o || o.office !== inv.officeLocation){ o = { office: inv.officeLocation, depts: [] }; pageOffices.push(o); }
+      let d = o.depts[o.depts.length - 1];
+      if(!d || d.dept !== inv.department){ d = { dept: inv.department, rows: [] }; o.depts.push(d); }
+      d.rows.push(inv);
+    });
+    listEl.innerHTML = pagerHTML(pg, 'invoices', 'top') + pageOffices.map(o => {
+      const office = o.office;
+      const os = officeStats[office] || { n: 0, total: 0 };
+      const deptBlocks = o.depts.map(d => {
+        const dept = d.dept;
+        const ds = deptStats[office + '\u0000' + dept] || { n: d.rows.length, total: 0 };
+        const pgRows = d.rows;
         return `<div class="aging-dept">
-          <div class="aging-dept-head"><span>${DEPARTMENT_LABELS[dept] || dept}<span class="cnt">${rows.length} account${rows.length===1?'':'s'}</span></span><span class="tot">${money2(deptTotal)}</span></div>
+          <div class="aging-dept-head"><span>${DEPARTMENT_LABELS[dept] || dept}<span class="cnt">${ds.n} account${ds.n===1?'':'s'}${pgRows.length < ds.n ? ' · ' + pgRows.length + ' on this page' : ''}</span></span><span class="tot">${money2(ds.total)}</span></div>
           <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Category</th><th>Payer</th><th>Status</th><th>Age</th><th>Since contact</th><th class="amt">Balance owed</th><th></th></tr></thead><tbody>
-          ${rows.map(inv => {
+          ${pgRows.map(inv => {
             const age = agingDays(inv);
             return `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + dncLabel() + '"' : ''}>
               <td><div style="font-weight:600;color:var(--ink);">${acctLink(inv.id, inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${inv.meta || ''}</div>${escalationCellHTML(inv)}</td>
@@ -4992,13 +5038,11 @@ function todoRowHTML(item, num, priority){
         </div>`;
       }).join('');
       return `<div class="aging-office">
-        <div class="aging-office-head"><h3>${OFFICE_LABELS[office] || office}<span class="cnt">${inOffice.length} account${inOffice.length===1?'':'s'} with a balance</span></h3><span class="tot">${money2(officeTotal)}</span></div>
+        <div class="aging-office-head"><h3>${OFFICE_LABELS[office] || office}<span class="cnt">${os.n} account${os.n===1?'':'s'} with a balance</span></h3><span class="tot">${money2(os.total)}</span></div>
         ${deptBlocks}
       </div>`;
-    }).join('');
-  }
-
-  /* ============================================================
+    }).join('') + pagerHTML(pg, 'invoices');
+  }  /* ============================================================
      INVOICED MTD / COLLECTED THIS MONTH — shared office/dept chart
      ============================================================ */
   function monthLabel(){ return new Date().toLocaleDateString(undefined,{month:'long', year:'numeric'}); }
@@ -5184,21 +5228,31 @@ function todoRowHTML(item, num, priority){
     const listEl = document.getElementById('mtd-office-list');
     if(!listEl) return;
     if(!mtdSelectedOffices.length && !mtdSelectedDepts.length){ listEl.innerHTML = ''; return; }
-    const rows = state.invoices.filter(inv => mtdMatches(inv) && dateInRange(inv.invoiceDate, start, end));
+    const allRows = state.invoices.filter(inv => mtdMatches(inv) && dateInRange(inv.invoiceDate, start, end));
+    if(!claimsOps()) mtdShow = 'all';
+    const rows = mtdShow === 'partial' ? allRows.filter(isPartiallyPaid) : allRows;
     const total = rows.reduce((s,i) => s + Number(i.amount || 0), 0);
     const offices = [mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', '), mtdSelectedDepts.map(d => DEPARTMENT_LABELS[d] || d).join(', ')].filter(Boolean).join(' \u00b7 ');
-    const head = `<div class="mtd-list-head"><h3>${hEsc(offices)}<span class="cnt">${rows.length} invoice${rows.length===1?'':'s'} dated this month</span><span class="hist-link" onclick="mtdClearAll()">Clear selection</span></h3><span class="tot">${money2(total)}</span></div>`;
-    if(!rows.length){ listEl.innerHTML = head + `<div class="aging-dept"><div class="empty" style="padding:16px;">No invoices dated this month for ${hEsc(offices)}.</div></div>`; return; }
+    const showSel = !claimsOps() ? '' : `<span class="mtd-show">Show <select onchange="setMtdShow(this.value)"><option value="all" ${mtdShow==='all'?'selected':''}>All invoices</option><option value="partial" ${mtdShow==='partial'?'selected':''}>Partial payment (balance still owed)</option></select></span>`;
+    const head = `<div class="mtd-list-head"><h3>${hEsc(offices)}<span class="cnt">${rows.length} ${mtdShow === 'partial' ? 'partially paid invoice' : 'invoice'}${rows.length===1?'':'s'} dated this month</span>${showSel}<span class="hist-link" onclick="mtdClearAll()">Clear selection</span></h3><span class="tot">${money2(total)}</span></div>`;
+    if(!rows.length){ listEl.innerHTML = head + `<div class="aging-dept"><div class="empty" style="padding:16px;">No ${mtdShow === 'partial' ? 'partially paid ' : ''}invoices dated this month for ${hEsc(offices)}.</div></div>`; return; }
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    // Newest month first, newest invoice first within a month; one page of
+    // rows at a time so a busy month does not slow the whole page down. The
+    // month totals still cover every invoice in that month.
+    const sorted = rows.slice().sort((a, b) => String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')) || Number(b.amount || 0) - Number(a.amount || 0));
+    const monthTotals = {}, monthCounts = {};
+    sorted.forEach(inv => { const k = String(inv.invoiceDate || '').slice(0, 7) || 'undated'; monthTotals[k] = (monthTotals[k] || 0) + Number(inv.amount || 0); monthCounts[k] = (monthCounts[k] || 0) + 1; });
+    const pg = pageOf('mtdlist', sorted, [mtdShow, mtdSelectedOffices.join(','), mtdSelectedDepts.join(','), String(start), String(end)].join('|'));
     const byMonth = {};
-    rows.forEach(inv => { const k = String(inv.invoiceDate || '').slice(0, 7) || 'undated'; (byMonth[k] = byMonth[k] || []).push(inv); });
+    pg.rows.forEach(inv => { const k = String(inv.invoiceDate || '').slice(0, 7) || 'undated'; (byMonth[k] = byMonth[k] || []).push(inv); });
     const monthKeys = Object.keys(byMonth).sort().reverse();
-    listEl.innerHTML = head + monthKeys.map(k => {
-      const list = byMonth[k].slice().sort((a, b) => String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')) || Number(b.amount || 0) - Number(a.amount || 0));
-      const mTotal = list.reduce((s,i) => s + Number(i.amount || 0), 0);
+    listEl.innerHTML = head + pagerHTML(pg, 'invoices', 'top') + monthKeys.map(k => {
+      const list = byMonth[k];
+      const mTotal = monthTotals[k] || 0;
       const label = /^\d{4}-\d{2}$/.test(k) ? (monthNames[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4)) : 'Undated';
       return `<div class="aging-dept">
-        <div class="aging-dept-head"><span>${label}<span class="cnt">${list.length} invoice${list.length===1?'':'s'}</span></span><span class="tot">${money2(mTotal)}</span></div>
+        <div class="aging-dept-head"><span>${label}<span class="cnt">${monthCounts[k] || list.length} invoice${(monthCounts[k] || list.length)===1?'':'s'}${list.length < (monthCounts[k] || 0) ? ' \u00b7 ' + list.length + ' on this page' : ''}</span></span><span class="tot">${money2(mTotal)}</span></div>
         <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Invoice date</th><th>${TENANT_DEPTS_CUSTOM ? 'Business' : 'Department'}</th><th>${TENANT_DEPTS_CUSTOM ? 'City' : 'Office'}</th><th>Payer</th><th>Status</th><th class="amt">Invoiced</th><th class="amt">Balance</th><th></th></tr></thead><tbody>
         ${list.map(inv => `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + dncLabel() + '"' : ''}>
           <td><div style="font-weight:600;color:var(--ink);">${acctLink(inv.id, inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${hEsc(inv.meta || '')}</div></td>
@@ -5214,8 +5268,10 @@ function todoRowHTML(item, num, priority){
         </tr>`).join('')}
         </tbody></table></div>
       </div>`;
-    }).join('');
+    }).join('') + pagerHTML(pg, 'invoices');
   }
+  var mtdShow = 'all';
+  function setMtdShow(v){ mtdShow = v === 'partial' ? 'partial' : 'all'; renderInvoicedMTD(); }
 
   function renderCollectedMTD(){
     const { start, end } = monthRange();
@@ -5223,7 +5279,8 @@ function todoRowHTML(item, num, priority){
     const monthPayments = state.paymentsLog.filter(p => dateInRange(p.paidDate, start, end));
     // KPIs and the table follow the full scope; the chart is narrowed by the
     // chosen businesses only, so other cities' bars stay there to click.
-    const payments = monthPayments.filter(paymentPassesFilters);
+    syncPaymentsShow();
+    const payments = monthPayments.filter(paymentPassesFilters).filter(paymentShowMatches);
     const records = payments.map(toRecord);
     const chartRecords = monthPayments.filter(deptMatches).map(toRecord);
     const total = records.reduce((s,r) => s + r.amount, 0);
@@ -5245,7 +5302,7 @@ function todoRowHTML(item, num, priority){
     if(payments.length === 0){
       wrap.innerHTML = `<div class="empty">No payments recorded yet this month${(scopeOffices().length || scopeDepts().length) ? ' for ' + hEsc(scopeLabel()) : ''}. ${window.__CLMS_REAL ? 'Payments posted in ' + hEsc(dataSourcesLabel()) + ' land here automatically, and you can record one from an invoice\'s Manage drawer.' : 'Use Integrations &rarr; "Simulate a NetSuite Payment" to test this.'}</div>`;
     } else {
-      const pg = pageOf('collectedmtd', payments.slice().reverse(), [state.deptFilter, state.officeFilter, String(start), String(end)].join('|'));
+      const pg = pageOf('collectedmtd', payments.slice().reverse(), [paymentsShow, state.deptFilter, state.officeFilter, String(start), String(end)].join('|'));
       wrap.innerHTML = pagerHTML(pg, 'payments', 'top') + `<table class="log"><thead><tr><th>Customer</th><th>Invoice #</th><th>Office</th><th>Department</th><th>Amount</th><th>Remaining</th><th>Method</th><th>Date Applied</th><th>Source</th></tr></thead><tbody>
         ${pg.rows.map(p => `<tr>
           <td>${acctLink(p.invoiceId, p.invoiceName)}${paymentIsPartial(p) ? ' <span class="badge partial">PARTIAL PAYMENT</span>' : ''}</td>
@@ -5267,6 +5324,13 @@ function todoRowHTML(item, num, priority){
   // was applied. If the invoice has since been paid in full, the remaining
   // column shows the live balance (zero) so the history stays honest.
   function paymentIsPartial(p){ return Number(p.remainingBalance || 0) > 0.005; }
+  // "Show: Partial payments" on Collected This Month and Collected - the same
+  // choice on both tabs, kept per browser.
+  let paymentsShow = 'all';
+  try { paymentsShow = localStorage.getItem('clms.payments.show') === 'partial' ? 'partial' : 'all'; } catch(e){}
+  function setPaymentsShow(v){ paymentsShow = v === 'partial' ? 'partial' : 'all'; try { localStorage.setItem('clms.payments.show', paymentsShow); } catch(e){} renderCollectedMTD(); renderCollectedAll(); }
+  function paymentShowMatches(p){ return !claimsOps() || paymentsShow !== 'partial' || paymentIsPartial(p); }
+  function syncPaymentsShow(){ ['collectedmtd-show', 'collected-show'].forEach(function(id){ const el = document.getElementById(id); if(el && el.value !== paymentsShow) el.value = paymentsShow; }); }
   function paymentRemainingHTML(p){
     const rem = Number(p.remainingBalance || 0);
     const inv = findInv(p.invoiceId);
@@ -5333,12 +5397,13 @@ function todoRowHTML(item, num, priority){
       if(toEl) toEl.value = collectedFilter.period === 'range' ? (collectedFilter.to || '') : (w.to || '');
       const clr = document.getElementById('collected-clear'); if(clr) clr.style.display = collectedFilter.period === 'all' ? 'none' : '';
     }
-    const payments = allPayments.filter(paymentInCollectedWindow);
+    syncPaymentsShow();
+    const payments = allPayments.filter(paymentInCollectedWindow).filter(paymentShowMatches);
     const total = payments.reduce((s,p) => s + p.amount, 0);
     const note = document.getElementById('collected-filter-note');
     if(note){
       const w = collectedWindow();
-      note.textContent = collectedFilter.period === 'all' ? '' : ('Showing ' + payments.length + ' payment' + (payments.length === 1 ? '' : 's') + (w.from ? ' from ' + fmtDate(w.from) : '') + (w.to ? ' to ' + fmtDate(w.to) : '') + ' \u00b7 $' + total.toLocaleString(undefined,{minimumFractionDigits:2}));
+      note.textContent = (collectedFilter.period === 'all' && paymentsShow === 'all') ? '' : ('Showing ' + payments.length + (paymentsShow === 'partial' ? ' partial' : '') + ' payment' + (payments.length === 1 ? '' : 's') + (w.from ? ' from ' + fmtDate(w.from) : '') + (w.to ? ' to ' + fmtDate(w.to) : '') + ' \u00b7 $' + total.toLocaleString(undefined,{minimumFractionDigits:2}));
     }
 
     const now = new Date();
@@ -5378,7 +5443,7 @@ function todoRowHTML(item, num, priority){
       // One page of payments at a time (newest first); year and month totals
       // still cover every payment in the period, not just the rows on screen.
       const flat = payments.slice().sort((a,b) => (new Date(b.paidDate) - new Date(a.paidDate)) || (String(b.id).localeCompare(String(a.id))));
-      const pg = pageOf('collected', flat, [collectedFilter.period, collectedFilter.from, collectedFilter.to, state.deptFilter, state.officeFilter].map(function(v){ return v == null ? '' : String(v); }).join('|'));
+      const pg = pageOf('collected', flat, [paymentsShow, collectedFilter.period, collectedFilter.from, collectedFilter.to, state.deptFilter, state.officeFilter].map(function(v){ return v == null ? '' : String(v); }).join('|'));
       const onPage = {};
       pg.rows.forEach(p => { const d = new Date(p.paidDate + 'T00:00:00'); const y = d.getFullYear(), m = d.getMonth(); (onPage[y] = onPage[y] || {})[m] = (onPage[y][m] || []).concat([p]); });
       const pageYears = Object.keys(onPage).map(Number).sort((a,b) => b - a);
@@ -5842,7 +5907,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   function fromAccountsName(by){ return String(by || '').replace(/\s*\(Accounts tab\)\s*$/, ''); }
   function acctKey(name){ return String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); }
   function acctsFilters(){ return state.acctsFilters || (state.acctsFilters = { search: '', sort: 'open-desc', includePaid: false }); }
-  function setAcctsFilter(k, v){ const f = acctsFilters(); f[k] = (k === 'includePaid') ? !!v : String(v == null ? '' : v); saveState(); renderAccountsTab(); }
+  function setAcctsFilter(k, v){ const f = acctsFilters(); f[k] = (k === 'includePaid' || k === 'partialOnly') ? !!v : String(v == null ? '' : v); saveState(); renderAccountsTab(); }
   function invBalance(inv){ return Math.max(0, +(Number(inv.amount || 0) - Number(inv.amountPaid || 0)).toFixed(2)); }
   // Groups every invoice (optionally including paid ones) by customer name.
   function accountGroups(allInvoices){
@@ -5871,6 +5936,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     const sb = document.getElementById('accts-search'); if(sb && document.activeElement !== sb && sb.value !== f.search) sb.value = f.search;
     const ss = document.getElementById('accts-sort'); if(ss && ss.value !== f.sort) ss.value = f.sort;
     const sp = document.getElementById('accts-paid'); if(sp) sp.checked = !!f.includePaid;
+    const spp = document.getElementById('accts-partial'); if(spp) spp.checked = !!f.partialOnly;
     const hasQb = (state.realIntegrations || []).some(function(i){ return i.status === 'connected' && /quickbooks|intuit/i.test(String(i.provider || '')); });
     const syncBtn = document.getElementById('accts-sync-btn');
     if(syncBtn) syncBtn.style.display = (state.currentUser && state.currentUser.role === 'admin') ? '' : 'none';
@@ -5880,6 +5946,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       : 'Demo workspace — accounts are grouped from the sample invoices.';
     let groups = accountGroups(false);
     if(!f.includePaid) groups = groups.filter(function(g){ return g.openCount > 0; });
+    if(f.partialOnly && claimsOps()) groups = groups.filter(function(g){ return g.invoices.some(isPartiallyPaid); });
     const q = f.search.trim().toLowerCase();
     if(q) groups = groups.filter(function(g){ return g.name.toLowerCase().indexOf(q) !== -1 || Object.keys(g.biz).join(' ').toLowerCase().indexOf(q) !== -1 || String(g.contact || '').toLowerCase().indexOf(q) !== -1; });
     const sorters = {
@@ -5889,10 +5956,10 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       'name-asc': function(a, b){ return a.name.localeCompare(b.name); }
     };
     groups.sort(sorters[f.sort] || sorters['open-desc']);
-    if(!groups.length){ wrap.innerHTML = '<div class="empty">No accounts' + (q ? ' match that search' : ' with open invoices') + '.</div>'; return; }
+    if(!groups.length){ wrap.innerHTML = '<div class="empty">No accounts' + (q ? ' match that search' : (f.partialOnly ? ' with a partial payment' : ' with open invoices')) + '.</div>'; return; }
     const totOpen = groups.reduce(function(s2, g){ return s2 + g.openTotal; }, 0);
     const totInv = groups.reduce(function(s2, g){ return s2 + (f.includePaid ? g.count : g.openCount); }, 0);
-    const pg = pageOf('accounts', groups, [q, f.sort, f.includePaid ? 1 : 0, state.deptFilter, state.officeFilter].join('|'));
+    const pg = pageOf('accounts', groups, [q, f.sort, f.includePaid ? 1 : 0, f.partialOnly ? 1 : 0, state.deptFilter, state.officeFilter].join('|'));
     wrap.innerHTML = pagerHTML(pg, 'accounts', 'top') + `
       <table class="log">
         <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>City</th><th>Total open</th><th>Avg age</th><th>Last contact</th><th></th></tr></thead>
@@ -6363,7 +6430,7 @@ Hard rules - these override everything above:
       if (q && [inv.name, inv.invoiceNumber, inv.meta, inv.contact, inv.contactInfo, inv.notifiedName, inv.claimNumber].map(x => String(x || '').toLowerCase()).join(' ').indexOf(q) === -1) return false;
       if (f.office !== 'all' && inv.officeLocation !== f.office) return false;
       if (f.dept !== 'all' && inv.department !== f.dept) return false;
-      if (f.payer !== 'all' && inv.payer !== f.payer) return false;
+      if (f.payer === 'partial' ? (claimsOps() && !isPartiallyPaid(inv)) : (f.payer !== 'all' && inv.payer !== f.payer)) return false;
       if (f.notified === 'yes' && !inv.notifiedName) return false;
       if (f.notified === 'no' && inv.notifiedName) return false;
       return true;
