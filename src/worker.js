@@ -5653,25 +5653,68 @@ await logUserActivity(env, user, account, 'payment',
 return json({ ok: true, paidAmount: newPaid, remaining: Math.max(0, Math.round((invoiceTotal - newPaid) * 100) / 100), fullyPaid: fullyPaid });
 }
 
-async function handleInvoicePaymentList(request, env) {
+// Only the columns the dashboard and the reports read (external_id and
+// tenant_id alone were a third of the old 12 MB answer for 35k payments).
+const PAYMENT_LIST_COLS = 'id,account_id,amount,deposited_on,created_at,method,source,reference,recorded_by,payer_name,bank_name,memo';
+// Cheap "has anything changed?" stamp for the payments list: the newest row's
+// id and the row count. Payments are appended (and occasionally deleted), so
+// the pair moves whenever the list would read differently.
+async function paymentsVersion(env, tenantId) {
+const [top, count] = await Promise.all([
+pgSelect(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&select=id&order=id.desc&limit=1'),
+pgCount(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId))
+]);
+return ((top && top[0] && top[0].id) || 0) + ':' + (count == null ? 'x' : count);
+}
+async function handleInvoicePaymentList(request, env, ctx) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
 const url = new URL(request.url);
 const accountId = url.searchParams.get('accountId');
-let q = 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=deposited_on.desc';
+let q = 'tenant_id=' + pgEq(user.tenant_id) + '&select=' + PAYMENT_LIST_COLS + '&order=deposited_on.desc';
 if (accountId) {
 const account = await accountForUser(env, user, accountId);
 if (!account) return json({ ok: false, error: 'Account not found' }, 404);
 q = 'account_id=' + pgEq(account.id) + '&' + q;
+const one = await pgSelectAll(env, 'invoice_payments', q + ',id.desc');
+return json({ ok: true, payments: one || [] });
 }
+// The whole company's list is the slow part of every dashboard load (35k
+// rows for a large tenant), so like /api/accounts it is kept at the edge
+// under a stamp that changes when the list does, and the browser's copy is
+// revalidated with an ETag.
+const scope = accountScopeQuery(user);
+let etag = null; let cacheKey = null; let cache = null;
+try {
+const version = await paymentsVersion(env, user.tenant_id);
+etag = 'W/"' + (await sha1Hex('pay|' + user.tenant_id + '|' + scope + '|' + version)).slice(0, 32) + '"';
+if (request.headers.get('if-none-match') === etag) {
+return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'no-cache' } });
+}
+cache = caches.default;
+cacheKey = new Request(SITE_URL + '/__cache/payments/' + etag.replace(/\W/g, ''), { method: 'GET' });
+const hit = await cache.match(cacheKey);
+if (hit) {
+const h = new Headers(hit.headers);
+h.set('Cache-Control', 'no-cache'); h.set('ETag', etag); h.set('X-Accounts-Cache', 'hit');
+return new Response(hit.body, { status: 200, headers: h });
+}
+} catch (e) { cacheKey = null; etag = null; }
 let rows = await pgSelectAll(env, 'invoice_payments', q + ',id.desc');
 // Managers and employees only see payments on accounts in their own office.
-if (!accountId && user.role !== 'admin') {
-const mine = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + accountScopeQuery(user) + '&select=id&order=id.asc');
+if (user.role !== 'admin') {
+const mine = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + scope + '&select=id&order=id.asc');
 const allowed = {}; (mine || []).forEach(function (a) { allowed[String(a.id)] = true; });
 rows = (rows || []).filter(function (r) { return allowed[String(r.account_id)]; });
 }
-return json({ ok: true, payments: rows || [] });
+const body = JSON.stringify({ ok: true, payments: rows || [] });
+if (cacheKey && cache) {
+const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
+try { const p = cache.put(cacheKey, stored); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
+}
+const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': 'miss' };
+if (etag) headers['ETag'] = etag;
+return new Response(body, { status: 200, headers: headers });
 }
 
 
@@ -6184,15 +6227,25 @@ const accountId = url.searchParams.get('accountId');
 // ?all=1: every account's recent notes in one answer (the dashboard used to
 // ask once per invoice on every refresh). Office-scoped like /api/accounts.
 if (!accountId && url.searchParams.get('all')) {
-let acctQuery = 'tenant_id=' + pgEq(user.tenant_id) + '&select=id&order=id.asc';
-if (user.role !== 'admin') acctQuery = 'tenant_id=' + pgEq(user.tenant_id) + accountScopeQuery(user) + '&select=id&order=id.asc';
-const accts = await pgSelectAll(env, 'accounts', acctQuery);
-const allowed = {}; accts.forEach(function (a) { allowed[String(a.id)] = true; });
+// Notes first: a company with none (or few) must not pay for a scan of
+// every account id - that read alone was 3 seconds on a 47k-invoice tenant.
 const rows = await pgSelectAll(env, 'account_notes', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=occurred_at.desc,id.desc');
+if (!rows || !rows.length) return json({ ok: true, notesByAccount: {} });
+let allowed = null;
+if (user.role !== 'admin') {
+// Only the accounts that actually carry notes are checked against the
+// user's city/business access, in chunks the URL can hold.
+const ids = Object.keys(rows.reduce(function (m, n) { m[String(n.account_id)] = 1; return m; }, {}));
+allowed = {};
+for (let i = 0; i < ids.length; i += 200) {
+const part = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + accountScopeQuery(user) + '&id=in.(' + ids.slice(i, i + 200).join(',') + ')&select=id&order=id.asc');
+(part || []).forEach(function (a) { allowed[String(a.id)] = true; });
+}
+}
 const byAccount = {}; const perAccount = 50;
 rows.forEach(function (n) {
 const k = String(n.account_id);
-if (!allowed[k]) return;
+if (allowed && !allowed[k]) return;
 const list = byAccount[k] || (byAccount[k] = []);
 if (list.length < perAccount) list.push(noteToJson(n));
 });
@@ -7809,9 +7862,9 @@ paidDate: a.paid_at
 });
 const body = JSON.stringify({ ok: true, accounts: accounts });
 if (cacheKey && cache) {
-// Stored for ten minutes at most; the stamp in the key already retires it
-// the moment anything changes.
-const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=600' } });
+// Stored for an hour at most; the stamp in the key already retires it
+// the moment anything changes, so a longer life only saves cold reads.
+const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
 try { const p = cache.put(cacheKey, stored); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
 }
 const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': 'miss' };
@@ -10709,7 +10762,7 @@ if (url.pathname === '/api/invoices/payment' && request.method === 'POST') {
 return handleInvoicePayment(request, env);
 }
 if (url.pathname === '/api/invoices/payments' && request.method === 'GET') {
-return handleInvoicePaymentList(request, env);
+return handleInvoicePaymentList(request, env, ctx);
 }
 if (url.pathname === '/api/accounts/notes' && request.method === 'GET') {
 return handleAccountNotesList(request, env);
