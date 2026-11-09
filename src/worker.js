@@ -5736,7 +5736,7 @@ const scope = accountScopeQuery(user);
 let etag = null; let cacheKey = null; let cache = null;
 try {
 const version = await paymentsVersion(env, user.tenant_id);
-etag = 'W/"' + (await sha1Hex('pay|' + user.tenant_id + '|' + scope + '|' + version)).slice(0, 32) + '"';
+etag = 'W/"' + (await sha1Hex('pay-gz2|' + user.tenant_id + '|' + scope + '|' + version)).slice(0, 32) + '"';
 if (request.headers.get('if-none-match') === etag) {
 return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'no-cache' } });
 }
@@ -7870,7 +7870,7 @@ const scope = accountScopeQuery(user);
 let version = null; let cacheKey = null; let cache = null;
 try {
 version = await accountsVersion(env, user.tenant_id);
-const etag = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
+const etag = 'W/"' + (await sha1Hex('gz2|' + user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
 if (request.headers.get('if-none-match') === etag) {
 return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'no-cache' } });
 }
@@ -7885,7 +7885,7 @@ if (cacheKey && cache) {
 // the moment anything changes, so a longer life only saves cold reads.
 try { const p = cache.put(cacheKey, gzipCacheEntry(gz.slice(0))); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
 }
-const etagOut = version ? 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"' : null;
+const etagOut = version ? 'W/"' + (await sha1Hex('gz2|' + user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"' : null;
 return gzipJsonResponse(gz, etagOut, 'miss');
 }
 // The /api/accounts answer for one tenant and access scope, as JSON text.
@@ -7955,7 +7955,7 @@ return JSON.stringify({ ok: true, accounts: accounts.map(compactRow) });
 async function warmAccountsCache(env, ctx, user, version) {
 try {
 const scope = accountScopeQuery(user);
-const etag = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
+const etag = 'W/"' + (await sha1Hex('gz2|' + user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
 const cache = caches.default;
 const cacheKey = new Request(SITE_URL + '/__cache/accounts/' + etag.replace(/\W/g, ''), { method: 'GET' });
 if (await cache.match(cacheKey)) return;
