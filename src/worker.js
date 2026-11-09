@@ -883,8 +883,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   // picked is always visible, and City / Business / Payer take several.
   function legal(){ return !!(R.me && R.me.features && R.me.features.claimsOps); }
   function dncWord(){ return legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'; }
-  function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['follow-up', 'Follow-up due'], ['flagged', 'Escalated / NOIL / Demand / Legal']]).concat(Object.keys(CLAIM_STATUS).map(function(k){ return ['cs-' + k, 'Claim status: ' + CLAIM_STATUS[k]]; })); return o; }
-  function statusWord(k){ if(k.indexOf('cs-') === 0) return 'Claim status: ' + (CLAIM_STATUS[k.slice(3)] || k.slice(3)); return { open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied', 'follow-up': 'Follow-up due', flagged: 'Escalated / NOIL / Demand / Legal' }[k] || k; }
+  function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['partial', 'Partial payment'], ['follow-up', 'Follow-up due'], ['flagged', 'Escalated / NOIL / Demand / Legal']]).concat(Object.keys(CLAIM_STATUS).map(function(k){ return ['cs-' + k, 'Claim status: ' + CLAIM_STATUS[k]]; })); return o; }
+  function statusWord(k){ if(k.indexOf('cs-') === 0) return 'Claim status: ' + (CLAIM_STATUS[k.slice(3)] || k.slice(3)); return { open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied', partial: 'Partial payment', 'follow-up': 'Follow-up due', flagged: 'Escalated / NOIL / Demand / Legal' }[k] || k; }
   var PAYER_OPTS = [['insurance', 'Insurance'], ['pm', 'Commercial or Property Management'], ['private', 'Private Pay']];
   function chipRow(id, opts, picked, multi, allLabel){
     var el = $(id); if(!el) return;
@@ -946,6 +946,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     if(f.status === 'collections' && !a.doNotContact) return false;
     if(f.status === 'escalated' && !a.escalated) return false;
     if(f.status === 'replied' && a.responded !== 'replied') return false;
+    if(f.status === 'partial' && !(!paid && Number(a.paidAmount || 0) > 0.005 && balance(a) > 0.005)) return false;
     if(f.status === 'follow-up' && !followUp(a)) return false;
     if(f.status === 'flagged' && !flagsOf(a).length) return false;
     if(f.status.indexOf('cs-') === 0 && String(a.claimStatus || '') !== f.status.slice(3)) return false;
