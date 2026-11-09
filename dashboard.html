@@ -932,9 +932,17 @@
           <input class="search" id="accts-search" type="search" placeholder="Search accounts&hellip;" autocomplete="off" oninput="setAcctsFilter('search', this.value)" style="min-width:200px;">
           <select class="search" id="accts-sort" onchange="setAcctsFilter('sort', this.value)" style="padding:7px 9px;">
             <option value="open-desc">Open balance (high to low)</option>
+            <option value="open-asc" data-feat="claimsOps" hidden disabled>Open balance (low to high)</option>
             <option value="count-desc">Most invoices</option>
+            <option value="count-asc" data-feat="claimsOps" hidden disabled>Fewest invoices</option>
             <option value="age-desc">Oldest average age</option>
+            <option value="age-asc" data-feat="claimsOps" hidden disabled>Youngest average age</option>
+            <option value="newest" data-feat="claimsOps" hidden disabled>Newest invoice first</option>
+            <option value="oldest" data-feat="claimsOps" hidden disabled>Oldest invoice first</option>
+            <option value="contact-desc" data-feat="claimsOps" hidden disabled>Most recently contacted</option>
+            <option value="contact-asc" data-feat="claimsOps" hidden disabled>Longest since contact</option>
             <option value="name-asc">Account name (A&ndash;Z)</option>
+            <option value="name-desc" data-feat="claimsOps" hidden disabled>Account name (Z&ndash;A)</option>
           </select>
           <label style="font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px;"><input type="checkbox" id="accts-paid" onchange="setAcctsFilter('includePaid', this.checked)"> Include paid invoices</label>
           <label class="accts-partial-lbl" data-feat="claimsOps" style="display:none;" title="Only accounts with an invoice that has a payment applied and a balance still owed"><input type="checkbox" id="accts-partial" onchange="setAcctsFilter('partialOnly', this.checked)"> Partial payments only</label>
@@ -5928,9 +5936,12 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     state.invoices.forEach(function(inv){
       if(!allInvoices && !passesFilters(inv)) return;
       const k = acctKey(inv.name); if(!k) return;
-      const g = groups[k] || (groups[k] = { key: k, name: inv.name, invoices: [], openCount: 0, openTotal: 0, invoiced: 0, biz: {}, cities: {}, lastContact: '', contact: '', contactEmail: '', ageSum: 0, ageN: 0, escalated: 0, dnc: 0 });
+      const g = groups[k] || (groups[k] = { key: k, name: inv.name, invoices: [], openCount: 0, openTotal: 0, invoiced: 0, biz: {}, cities: {}, lastContact: '', contact: '', contactEmail: '', ageSum: 0, ageN: 0, escalated: 0, dnc: 0, newest: '', oldest: '' });
       g.invoices.push(inv);
       g.invoiced += Number(inv.amount || 0);
+      const d = inv.invoiceDate ? String(inv.invoiceDate) : '';
+      if(d && (!g.newest || d > g.newest)) g.newest = d;
+      if(d && (!g.oldest || d < g.oldest)) g.oldest = d;
       g.biz[deptLabel(inv)] = 1; g.cities[OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || ''] = 1;
       if(inv.jobStatus !== 'paid' && invBalance(inv) > 0){ g.openCount++; g.openTotal += invBalance(inv); g.ageSum += agingDays(inv); g.ageN++; }
       if(inv.lastContact && String(inv.lastContact) > String(g.lastContact)) g.lastContact = inv.lastContact;
@@ -5945,6 +5956,8 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   function renderAccountsTab(){
     const wrap = document.getElementById('accounts-wrap'); if(!wrap) return;
     const f = acctsFilters();
+    const PACK_SORTS = { 'open-asc': 1, 'count-asc': 1, 'age-asc': 1, newest: 1, oldest: 1, 'contact-desc': 1, 'contact-asc': 1, 'name-desc': 1 };
+    if(PACK_SORTS[f.sort] && !claimsOps()) f.sort = 'open-desc';
     const sb = document.getElementById('accts-search'); if(sb && document.activeElement !== sb && sb.value !== f.search) sb.value = f.search;
     const ss = document.getElementById('accts-sort'); if(ss && ss.value !== f.sort) ss.value = f.sort;
     const sp = document.getElementById('accts-paid'); if(sp) sp.checked = !!f.includePaid;
@@ -5961,11 +5974,23 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     if(f.partialOnly && claimsOps()) groups = groups.filter(function(g){ return g.invoices.some(isPartiallyPaid); });
     const q = f.search.trim().toLowerCase();
     if(q) groups = groups.filter(function(g){ return g.name.toLowerCase().indexOf(q) !== -1 || Object.keys(g.biz).join(' ').toLowerCase().indexOf(q) !== -1 || String(g.contact || '').toLowerCase().indexOf(q) !== -1; });
+    const byName = function(a, b){ return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }); };
+    const cnt = function(g){ return f.includePaid ? g.count : g.openCount; };
+    // Accounts with no date / no contact sort last in both directions.
+    const dateCmp = function(a, b, newestFirst, key){ const da = a[key] || '', db = b[key] || ''; if(!da && !db) return 0; if(!da) return 1; if(!db) return -1; return newestFirst ? db.localeCompare(da) : da.localeCompare(db); };
     const sorters = {
-      'open-desc': function(a, b){ return b.openTotal - a.openTotal || a.name.localeCompare(b.name); },
-      'count-desc': function(a, b){ return b.count - a.count || a.name.localeCompare(b.name); },
-      'age-desc': function(a, b){ return b.avgAge - a.avgAge || a.name.localeCompare(b.name); },
-      'name-asc': function(a, b){ return a.name.localeCompare(b.name); }
+      'open-desc': function(a, b){ return b.openTotal - a.openTotal || byName(a, b); },
+      'open-asc': function(a, b){ return a.openTotal - b.openTotal || byName(a, b); },
+      'count-desc': function(a, b){ return cnt(b) - cnt(a) || byName(a, b); },
+      'count-asc': function(a, b){ return cnt(a) - cnt(b) || byName(a, b); },
+      'age-desc': function(a, b){ return b.avgAge - a.avgAge || byName(a, b); },
+      'age-asc': function(a, b){ return a.avgAge - b.avgAge || byName(a, b); },
+      'newest': function(a, b){ return dateCmp(a, b, true, 'newest') || byName(a, b); },
+      'oldest': function(a, b){ return dateCmp(a, b, false, 'oldest') || byName(a, b); },
+      'contact-desc': function(a, b){ return dateCmp(a, b, true, 'lastContact') || byName(a, b); },
+      'contact-asc': function(a, b){ return dateCmp(a, b, false, 'lastContact') || byName(a, b); },
+      'name-asc': byName,
+      'name-desc': function(a, b){ return byName(b, a); }
     };
     groups.sort(sorters[f.sort] || sorters['open-desc']);
     if(!groups.length){ wrap.innerHTML = '<div class="empty">No accounts' + (q ? ' match that search' : (f.partialOnly ? ' with a partial payment' : ' with open invoices')) + '.</div>'; return; }
