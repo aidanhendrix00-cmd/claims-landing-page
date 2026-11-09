@@ -1960,6 +1960,8 @@
   let memoryFallback = null;
   // The real dashboard's <head> starts the API requests before this script has
   // even been parsed (see REAL_FLAG in the Worker); each one is used once.
+  function pmark(n){ try { performance.mark('clms:' + n); } catch(e){} }
+  pmark('script-start');
   function takePrefetch(key){ const box = window.__clmsPrefetch; const p = box && box[key]; if (p) box[key] = null; return p || null; }
   const PAYER_LABELS = { insurance: "Insurance", pm: "Commercial or Property Management", private: "Private Pay" };
   const STATUS_LABELS = { pending_start: "Pending Start", in_progress: "In Progress", work_completed: "Work Completed", in_ar: "In A/R", paid: "Paid" };
@@ -2709,7 +2711,7 @@ qbInit();
       if(invSel){ const im = inviteOfficeMap(); invSel.innerHTML = Object.keys(im).map(function(k){ return '<option value="' + hEsc(k) + '">' + hEsc(im[k]) + '</option>'; }).join(''); }
     }
     var searchFieldEl=document.getElementById('search');if(searchFieldEl){searchFieldEl.value='';}
-    if (state.currentUser) { renderAll(); return; } // real companies: the list was painted by loadRealAccounts; one more pass for the shared pieces is enough
+    if (state.currentUser) { renderAll(); pmark('init-done'); return; } // real companies: the list was painted by loadRealAccounts; one more pass for the shared pieces is enough
     renderAll();
     await runCadenceForAll(); // catch up any checkpoints on load (demo only)
     saveState();
@@ -2727,7 +2729,7 @@ qbInit();
     }
     const data = await res.json();
     if (!data.ok) return;
-    window.__me = data;
+    window.__me = data; pmark('me-loaded');
     applyFeatureFlags();
     if (window.__clmsReports && window.__clmsReports.refresh) window.__clmsReports.refresh();
     applyTenantConfig(data);
@@ -3273,7 +3275,8 @@ async function loadRealAccountsNow(){
         if (window.__CLMS_REAL && res.status !== 402) showLoadFailure("We couldn't load your accounts just now" + (res.status === 401 ? ' \u2014 your session may have ended.' : ' (server error ' + res.status + ').'));
         return;
       }
-      const data = await res.json();
+      pmark('accounts-headers');
+      const data = await res.json(); pmark('accounts-parsed');
       const list = Array.isArray(data.accounts) ? data.accounts : [];
       if (!list.length && !data.ok) { if (window.__CLMS_REAL) showLoadFailure("We couldn't load your accounts just now" + (data.error ? ': ' + data.error : '.')); return; }
       showLoadFailure(null);
@@ -3377,6 +3380,7 @@ async function loadRealAccountsNow(){
         if (isPaid && inv.amountPaid + 0.005 < inv.amount) inv.amountPaid = inv.amount;
         invoices.push(inv);
       });
+      pmark('accounts-mapped');
 
       // Collected / Collected MTD are built from the real payment records -
       // every manual "Record a Payment" and every payment the accounting
@@ -3451,7 +3455,7 @@ async function loadRealAccountsNow(){
           });
         }
       });
-      paymentsLog.sort(function(x, y){ return String(x.paidDate) < String(y.paidDate) ? -1 : (String(x.paidDate) > String(y.paidDate) ? 1 : 0); });
+      paymentsLog.sort(function(x, y){ return String(x.paidDate) < String(y.paidDate) ? -1 : (String(x.paidDate) > String(y.paidDate) ? 1 : 0); }); pmark('payments-mapped');
       // Carry over what only this tab knows so a refresh never blanks it: the
       // document list (loaded lazily when Manage is opened), attention flags,
       // and activity lines written here that the server has not echoed back.
@@ -3485,7 +3489,7 @@ async function loadRealAccountsNow(){
         const extra = local.filter(function(x){ return !seen[String(x.text || '').trim()]; });
         if (extra.length) inv.activity = extra.concat(inv.activity || []);
       });
-      await loadServerComms(invoices, commsReq);
+      pmark('notes-done'); await loadServerComms(invoices, commsReq); pmark('comms-done');
       // A send the server could not deliver is something a person has to look
       // at; flag it from the server's own record so the alert survives refreshes.
       const latestStatus = {};
@@ -3524,8 +3528,9 @@ async function loadRealAccountsNow(){
       }
       const unchanged = __accountsLoadedOnce && fp !== null && fp === __accountsFingerprint;
       if (__accountsLoadedOnce) __accountsFingerprint = fp;
+      pmark('before-render');
       if (typeof renderAll === 'function') {
-        if (!__accountsLoadedOnce) renderAll();
+        if (!__accountsLoadedOnce) { renderAll(); pmark('first-render-done'); }
         else if (unchanged) quietRender(function(){ try { renderCustomIntegrations(); } catch (e) {} });
         else quietRender(renderAll);
       }
