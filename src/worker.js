@@ -5743,11 +5743,7 @@ return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control
 cache = caches.default;
 cacheKey = new Request(SITE_URL + '/__cache/payments/' + etag.replace(/\W/g, ''), { method: 'GET' });
 const hit = await cache.match(cacheKey);
-if (hit) {
-const h = new Headers(hit.headers);
-h.set('Cache-Control', 'no-cache'); h.set('ETag', etag); h.set('X-Accounts-Cache', 'hit');
-return new Response(hit.body, { status: 200, headers: h });
-}
+if (hit) return gzipJsonResponse(hit.body, etag, 'hit');
 } catch (e) { cacheKey = null; etag = null; }
 let rows = await pgSelectAllById(env, 'invoice_payments', q);
 rows.sort(newestFirst);
@@ -5757,14 +5753,11 @@ const mine = await pgSelectAllById(env, 'accounts', 'tenant_id=' + pgEq(user.ten
 const allowed = {}; (mine || []).forEach(function (a) { allowed[String(a.id)] = true; });
 rows = (rows || []).filter(function (r) { return allowed[String(r.account_id)]; });
 }
-const body = JSON.stringify({ ok: true, payments: rows || [] });
+const gz = await gzipText(JSON.stringify({ ok: true, payments: (rows || []).map(compactRow) }));
 if (cacheKey && cache) {
-const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
-try { const p = cache.put(cacheKey, stored); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
+try { const p = cache.put(cacheKey, gzipCacheEntry(gz.slice(0))); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
 }
-const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': 'miss' };
-if (etag) headers['ETag'] = etag;
-return new Response(body, { status: 200, headers: headers });
+return gzipJsonResponse(gz, etag, 'miss');
 }
 
 
@@ -7824,6 +7817,39 @@ const stamp = (latest && latest[0] && latest[0].updated_at) || '';
 const maxId = (top && top[0] && top[0].id) || 0;
 return { v: stamp + ':' + maxId, maxId: maxId };
 }
+// Big JSON answers are kept at the edge and sent to the browser gzip-compressed
+// by the Worker itself: a 50 MB /api/accounts body would not stay in the edge
+// cache at all, while the 2 MB compressed form does, and a cache hit then
+// streams 2 MB instead of 50. Stored as opaque bytes so the cache never
+// re-encodes them; the encoding header is put back when they are served.
+async function gzipText(text) {
+const cs = new CompressionStream('gzip');
+const writer = cs.writable.getWriter();
+writer.write(new TextEncoder().encode(text));
+writer.close();
+return new Response(cs.readable).arrayBuffer();
+}
+function gzipJsonResponse(body, etag, cacheState) {
+const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': cacheState, 'Vary': 'Accept-Encoding' };
+if (etag) headers['ETag'] = etag;
+return new Response(body, { status: 200, headers: headers });
+}
+function gzipCacheEntry(bytes) {
+return new Response(bytes, { status: 200, headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'public, max-age=3600' } });
+}
+// Drop the fields that carry nothing (null, empty string, false, {}) from an
+// API row. Every reader already treats a missing field like an empty one, and
+// for a large tenant these were well over half of the bytes.
+function compactRow(o) {
+const out = {};
+for (const k in o) {
+const v = o[k];
+if (v === null || v === undefined || v === '' || v === false) continue;
+if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) continue;
+out[k] = v;
+}
+return out;
+}
 async function sha1Hex(text) {
 const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(text));
 return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
@@ -7849,22 +7875,16 @@ return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control
 cache = caches.default;
 cacheKey = new Request(SITE_URL + '/__cache/accounts/' + etag.replace(/\W/g, ''), { method: 'GET' });
 const hit = await cache.match(cacheKey);
-if (hit) {
-const h = new Headers(hit.headers);
-h.set('Cache-Control', 'no-cache'); h.set('ETag', etag); h.set('X-Accounts-Cache', 'hit');
-return new Response(hit.body, { status: 200, headers: h });
-}
+if (hit) return gzipJsonResponse(hit.body, etag, 'hit');
 } catch (e) { cacheKey = null; }
-const body = await buildAccountsBody(env, user.tenant_id, scope);
+const gz = await gzipText(await buildAccountsBody(env, user.tenant_id, scope));
 if (cacheKey && cache) {
 // Stored for an hour at most; the stamp in the key already retires it
 // the moment anything changes, so a longer life only saves cold reads.
-const stored = new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } });
-try { const p = cache.put(cacheKey, stored); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
+try { const p = cache.put(cacheKey, gzipCacheEntry(gz.slice(0))); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
 }
-const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'X-Accounts-Cache': 'miss' };
-if (version) headers['ETag'] = 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
-return new Response(body, { status: 200, headers: headers });
+const etagOut = version ? 'W/"' + (await sha1Hex(user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"' : null;
+return gzipJsonResponse(gz, etagOut, 'miss');
 }
 // The /api/accounts answer for one tenant and access scope, as JSON text.
 async function buildAccountsBody(env, tenantId, scope) {
@@ -7925,7 +7945,7 @@ lastFollowUpKind: a.last_follow_up_kind || null,
 paidDate: a.paid_at
 };
 });
-return JSON.stringify({ ok: true, accounts: accounts });
+return JSON.stringify({ ok: true, accounts: accounts.map(compactRow) });
 }
 // Called from the 5-second change probe: when the list has changed and the
 // edge has no copy for the new stamp yet, build it now (in the background)
@@ -7938,8 +7958,8 @@ const cache = caches.default;
 const cacheKey = new Request(SITE_URL + '/__cache/accounts/' + etag.replace(/\W/g, ''), { method: 'GET' });
 if (await cache.match(cacheKey)) return;
 const job = (async function () {
-const body = await buildAccountsBody(env, user.tenant_id, scope);
-await cache.put(cacheKey, new Response(body, { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' } }));
+const gz = await gzipText(await buildAccountsBody(env, user.tenant_id, scope));
+await cache.put(cacheKey, gzipCacheEntry(gz));
 })();
 if (ctx && ctx.waitUntil) ctx.waitUntil(job.catch(function () {})); else await job;
 } catch (e) {}
