@@ -29,6 +29,10 @@
   }
   .callout strong{color:var(--ink);}
   a{color:var(--gold);}
+  table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:13.5px;}
+  th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line);}
+  th{font-weight:600;color:var(--ink);background:var(--panel);}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:var(--panel);padding:1px 5px;border-radius:5px;}
   .toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 26px;margin-bottom:32px;}
   .toc a{display:block;color:var(--ink-soft);text-decoration:none;font-size:13.5px;padding:3px 0;}
   .toc a:hover{color:var(--gold);}
@@ -43,7 +47,7 @@
 </header>
 <main>
   <h1>Privacy Policy</h1>
-  <div class="updated">Effective date: October 10, 2026 &mdash; Version 1</div>
+  <div class="updated">Effective date: November 18, 2026 &mdash; Version 2</div>
 
   <div class="callout">
     <strong>In short:</strong> clAIms stores the information your company puts into the Service and the invoice, payment and customer records you choose to sync from connected systems such as QuickBooks Online or a connected mailbox. We use it only to run collections follow-up for your company. We do not sell it, and we do not share it with anyone except the service providers that host and operate clAIms.
@@ -54,6 +58,7 @@
     <a href="#collect">2. Information we collect</a>
     <a href="#use">3. How we use information</a>
     <a href="#integrations">4. Connected systems (QuickBooks Online, email)</a>
+    <a href="#google">4A. Google user data and the Google API Services User Data Policy (Limited Use)</a>
     <a href="#share">5. Who we share information with</a>
     <a href="#retention">6. Data retention and deletion</a>
     <a href="#security">7. Security</a>
@@ -70,7 +75,7 @@
   <h2 id="collect">2. Information we collect</h2>
   <p><strong>Account information you give us.</strong> Your name, work email address, password (stored only as a salted hash), company name, company address and size, office location, and billing details. Payment card data is collected and processed by Stripe; clAIms never sees or stores full card numbers.</p>
   <p><strong>Operational data your company enters.</strong> Invoices, customers, points of contact, notes, uploaded documents (estimates, work authorizations, photos), follow-up settings, and the messages your team sends from the dashboard.</p>
-  <p><strong>Data synced from connected systems.</strong> If your company's administrator connects an accounting system or data source, we import the records needed to run collections: invoices (number, dates, amounts, balances, custom fields such as a claim or purchase-order number, invoice messages and memos), payments applied to those invoices (amount, date, method, reference), and the customer contact details attached to them (name, contact person, email, phone, billing address). Section 4 describes each integration.</p>
+  <p><strong>Data synced from connected systems.</strong> If your company's administrator connects an accounting system or data source, we import the records needed to run collections: invoices (number, dates, amounts, balances, custom fields such as a claim or purchase-order number, invoice messages and memos), payments applied to those invoices (amount, date, method, reference), and the customer contact details attached to them (name, contact person, email, phone, billing address). If a user connects their mailbox, we also keep the messages clAIms sent from it and the replies to those messages, as described in Sections 4 and 4A. Section 4 describes each integration.</p>
   <p><strong>Activity and usage information.</strong> Actions taken in the Service (follow-ups sent, notes added, invoices updated) attributed to the team member who took them, sign-in events, and standard web logs (IP address, browser type, pages requested, timestamps) used for security and troubleshooting.</p>
 
   <h2 id="use">3. How we use information</h2>
@@ -85,8 +90,29 @@
 
   <h2 id="integrations">4. Connected systems</h2>
   <p><strong>QuickBooks Online.</strong> A company administrator may connect the company's QuickBooks Online account through Intuit's own consent screen. clAIms requests the QuickBooks accounting scope only and uses it to <em>read</em> invoices, payments, customers and company information. clAIms does not create, change or delete any record in QuickBooks and does not access payroll, banking or payment-processing data. Intuit notifies clAIms when an invoice, payment or customer changes so the dashboard stays current. The access and refresh tokens Intuit issues are stored encrypted, are never shown to users, and are used only to read the data described here. Disconnecting QuickBooks (from the Integrations tab, or from within QuickBooks) revokes clAIms' access with Intuit and stops all further synchronization. Your use of QuickBooks Online remains subject to <a href="https://www.intuit.com/privacy/statement/">Intuit's privacy statement</a>.</p>
-  <p><strong>Connected email (Google or Microsoft).</strong> A user may authorize clAIms to send follow-up emails from their own mailbox. clAIms requests send-only permission, never reads, searches or stores the contents of the mailbox, and stores the sign-in tokens encrypted. Details are in Section 8A of the Terms.</p>
+  <p><strong>Connected email (Google or Microsoft).</strong> A user may connect their own work mailbox so that collections emails go out from their real address and the replies come back to it. Connecting is optional and happens through Google's or Microsoft's own consent screen. With a connected mailbox clAIms does exactly two things:</p>
+  <ul>
+    <li><strong>Sends</strong> the follow-up emails, account statements and demand letters that the user (or an automation the user turned on) sends from the dashboard. Each sent message is recorded in clAIms so the team can see what went out and when.</li>
+    <li><strong>Reads replies to those messages.</strong> On a schedule, and when a user clicks "Check for replies", clAIms lists recent inbox messages and keeps only the ones that are replies to a conversation clAIms itself started (matched by the email thread and <code>In-Reply-To</code>/<code>References</code> headers). For each matching reply it stores the sender address, subject, date and the new text of the reply (quoted history and signatures stripped), attaches it to the related invoice as a note, marks the invoice as answered, and produces a one- or two-sentence summary for the team. Messages that are not replies to a clAIms conversation are not opened, stored or shown to anyone.</li>
+  </ul>
+  <p>clAIms never reads, stores or displays any other part of the mailbox; does not access contacts, calendar, files or settings; and never deletes, moves or modifies mail. The access and refresh tokens are stored encrypted (Section 7) and are deleted the moment the user disconnects the mailbox from their account page. Google users can also revoke access at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>; Microsoft users at <a href="https://account.live.com/consent/Manage">account.live.com/consent/Manage</a>. The specific Google permissions, and how each is used, are listed in Section 4A.</p>
   <p><strong>Other accounting or CRM systems.</strong> Where the clAIms team wires an integration for your company, the same rules apply: only invoice, payment and customer records needed for collections are imported, and credentials are stored encrypted.</p>
+
+  <h2 id="google">4A. Google user data and the Google API Services User Data Policy</h2>
+  <p>When a user connects a Google Workspace or Gmail account, clAIms requests the following Google OAuth scopes. Each one is requested only for the purpose shown, and clAIms uses the data it receives only for that purpose.</p>
+  <table>
+    <thead><tr><th>Scope</th><th>What it lets clAIms do</th><th>Why clAIms needs it</th></tr></thead>
+    <tbody>
+      <tr><td><code>gmail.send</code></td><td>Send email from the connected mailbox.</td><td>To deliver the follow-ups, account statements and demand letters a user sends (or an automation the user enabled sends) from the dashboard, so they come from the user's own address and appear in their Sent folder.</td></tr>
+      <tr><td><code>gmail.readonly</code></td><td>List and read messages in the connected mailbox. Read-only; clAIms cannot change or delete anything.</td><td>To detect replies to the emails clAIms sent and record them against the right invoice. clAIms only opens messages that belong to a conversation it started, as described in Section 4; everything else in the mailbox is ignored.</td></tr>
+      <tr><td><code>openid</code>, <code>email</code></td><td>See the email address of the Google account.</td><td>To confirm which mailbox was connected and show it on the user's account page.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>What is stored.</strong> From Google, clAIms stores the connected email address, encrypted OAuth tokens, a record of each message clAIms sent (recipient, subject, body, date, Gmail message and thread identifiers), and, for replies to those messages, the sender, subject, date, the new text of the reply and a short summary of it. clAIms does not store any other mailbox content.</p>
+  <p><strong>Who can see it.</strong> Sent messages and logged replies are visible to the connecting user and to the other members of that user's company workspace, according to the roles the company's administrator has set. clAIms staff do not read Google user data except with the user's affirmative agreement for a specific support request, where necessary for security or abuse investigation, where required by law, or in aggregated, anonymized form.</p>
+  <p><strong>Transfers.</strong> Google user data is processed by the infrastructure providers listed in Section 5 (Cloudflare and Supabase) solely to run the Service. The new text of a reply is sent to Anthropic solely to produce the summary shown to the team; Anthropic does not use it to train models. clAIms does not transfer Google user data to anyone else, and does not sell it.</p>
+  <p><strong>Limited Use.</strong> clAIms' use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. In particular, clAIms: uses Google user data only to provide and improve the user-facing email features described above; does not use it for advertising; does not allow humans to read it except as stated above; and does not use Google user data to develop, improve or train generalized artificial intelligence or machine-learning models.</p>
+  <p><strong>Retention and deletion.</strong> Google OAuth tokens are deleted immediately when the user disconnects the mailbox in clAIms or revokes access at Google. Records of sent messages and logged replies remain in the company's workspace, alongside the invoice they relate to, until the company deletes them or closes its account (Section 6). A user may ask us to delete all Google-derived data at any time by writing to the address in Section 12.</p>
 
   <h2 id="share">5. Who we share information with</h2>
   <p>We share information only with the providers that help us run the Service, each under contract to use it solely for that purpose:</p>
@@ -95,7 +121,7 @@
     <li><strong>Supabase</strong> &mdash; database and file storage (United States).</li>
     <li><strong>Stripe</strong> &mdash; subscription billing and card processing.</li>
     <li><strong>Resend</strong> &mdash; delivery of transactional email sent on clAIms' behalf.</li>
-    <li><strong>Anthropic</strong> &mdash; drafting follow-up text from invoice details, when you use AI drafting.</li>
+    <li><strong>Anthropic</strong> &mdash; drafting follow-up text from invoice details when you use AI drafting, and summarizing customer replies logged from a connected mailbox. Anthropic does not use this content to train its models.</li>
     <li><strong>Intuit, Google, Microsoft</strong> &mdash; only when your company connects those systems, and only the data exchange described in Section 4.</li>
   </ul>
   <p>We may also disclose information if required by law, to protect the rights or safety of clAIms or others, or as part of a merger or sale of the business, in which case this policy continues to apply to the information transferred. Other users in your company see the data your company's roles allow them to see; administrators control who is on the team.</p>
@@ -111,7 +137,7 @@
     <li><strong>Access and correction.</strong> Most account and company information can be viewed and edited in the Service. For anything else, contact us.</li>
     <li><strong>Export.</strong> Your company's administrator can request an export of the company's records.</li>
     <li><strong>Deletion.</strong> You may ask us to delete your personal information or your company's workspace, subject to Section 6.</li>
-    <li><strong>Connected systems.</strong> An administrator can disconnect QuickBooks or any integration at any time; a user can disconnect their mailbox at any time.</li>
+    <li><strong>Connected systems.</strong> An administrator can disconnect QuickBooks or any integration at any time; a user can disconnect their mailbox at any time from their account page, or revoke clAIms directly at Google or Microsoft.</li>
     <li><strong>Email.</strong> Service notices are part of the Service; marketing email, if we ever send any, will include an unsubscribe link.</li>
   </ul>
   <p>Residents of California and other states with privacy laws may have additional rights, including the right to know what personal information we hold and to request its deletion. We do not sell or share personal information for cross-context advertising. To exercise any right, contact us; we will verify the request and respond within the time the applicable law requires.</p>
