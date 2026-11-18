@@ -201,6 +201,18 @@
   .badge.partial{background:#FBE9D8;color:#8A4B18;border:1px solid #F1D3B4;}
   /* Sent to Legal, DO NOT CONTACT: the whole account reads red. */
   .badge.dnc{background:#B42318;color:#fff;border:1px solid #912018;letter-spacing:0.04em;}
+  .badge.sensitive{background:#5B2A86;color:#fff;border:1px solid #4A2070;letter-spacing:0.04em;}
+  .badge.baddebt{background:#3F3F3F;color:#fff;border:1px solid #2A2A2A;letter-spacing:0.04em;}
+  .badge.credit{background:#EAF0FA;color:#2B4C7E;border:1px solid #CDDBF0;}
+  .chip.chip-sens.active{background:#5B2A86;border-color:#5B2A86;color:#fff;}
+  .chip.chip-legal.active{background:#B42318;border-color:#912018;color:#fff;}
+  .sens-box{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);margin:10px 0;font-size:13px;}
+  .sens-box.on{border-color:#5B2A86;background:#F5EFFB;}
+  .sens-box .sens-sub{font-size:12px;color:var(--slate);margin-top:2px;}
+  .sens-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0;}
+  .sens-actions .btn-small{white-space:nowrap;}
+  .credit-row td{color:#2B4C7E;}
+  .bd-table td.amt{font-family:var(--font-mono);text-align:right;}
   .card.dnc{background:#FEF3F2;border-color:#F04438;box-shadow:inset 4px 0 0 #B42318;position:relative;}
   .card.dnc .name{color:#912018;}
   .card.dnc .btn-primary[disabled]{background:#FDA29B;border-color:#FDA29B;color:#7A271A;cursor:not-allowed;opacity:1;}
@@ -823,6 +835,7 @@
       <button class="nav-item" data-view="sheet"><span class="left"><span class="ic">S</span> Accounts Receivable</span></button>
       <button class="nav-item" data-view="report"><span class="left"><span class="ic">R</span> Aging Report</span></button>
       <button class="nav-item" data-view="invoicedmtd"><span class="left"><span class="ic">M</span> Invoiced MTD</span><span class="count" id="nav-count-mtd"></span></button>
+      <button class="nav-item" data-view="baddebt" data-feat="claimsOps" style="display:none;"><span class="left"><span class="ic">B</span> Bad Debt</span><span class="count" id="nav-count-baddebt"></span></button>
       <button class="nav-item" data-view="collectedmtd"><span class="left"><span class="ic">$</span> Collected This Month</span><span class="count" id="nav-count-collected"></span></button>
       <button class="nav-item" data-view="collected"><span class="left"><span class="ic">C</span> Collected</span><span class="count" id="nav-count-collectedall"></span></button>
       <button class="nav-item" data-view="sent"><span class="left"><span class="ic">L</span> Comms Log</span><span class="count" id="nav-count-sent"></span></button>
@@ -914,6 +927,11 @@
             <div class="chip chip-partial" data-feat="claimsOps" style="display:none;" data-payer="partial" title="A payment has been applied and a balance is still owed">Partial payment</div>
             <div class="chip chip-fu" data-feat="claimsOps" style="display:none;" data-payer="follow-up" title="No response in 3+ business days">Follow-up due</div>
             <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="flagged" title="Escalated, demand letter, NOIL, lien or Sent to Legal">Flagged</div>
+            <div class="chip chip-fu" data-feat="claimsOps" style="display:none;" data-payer="overdue" title="5+ business days: a reply nobody answered, or no outreach since the last contact">Overdue</div>
+            <div class="chip chip-legal" data-feat="claimsOps" style="display:none;" data-payer="legal" title="Sent to Legal (do not contact)">Sent to Legal</div>
+            <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="demand" title="A demand letter has been sent">Demand letter sent</div>
+            <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="lien" title="A lien is filed on this job">Lien filed</div>
+            <div class="chip chip-sens" data-feat="claimsOps" style="display:none;" data-payer="sensitive" title="Sensitive customers - automated follow-ups paused">Sensitive</div>
           </div>
         </div>
       </div>
@@ -945,7 +963,7 @@
             <option value="name-desc" data-feat="claimsOps" hidden disabled>Account name (Z&ndash;A)</option>
           </select>
           <label style="font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px;"><input type="checkbox" id="accts-paid" onchange="setAcctsFilter('includePaid', this.checked)"> Include paid invoices</label>
-          <label class="accts-partial-lbl" data-feat="claimsOps" style="display:none;" title="Only accounts with an invoice that has a payment applied and a balance still owed"><input type="checkbox" id="accts-partial" onchange="setAcctsFilter('partialOnly', this.checked)"> Partial payments only</label>
+          <label class="accts-partial-lbl" data-feat="claimsOps" style="display:none;" title="Only accounts with at least one invoice in this status">Show <select id="accts-status" onchange="setAcctsFilter('status', this.value)"></select></label>
           <button class="btn-small" id="accts-sync-btn" onclick="pullFromAccounting()" title="Pull the latest invoices and customers from every connected QuickBooks / Intuit Enterprise Suite company">&#8635; Pull from QuickBooks / IES</button>
         </div>
       </div>
@@ -992,8 +1010,14 @@
           <option value="replied">Show: Replied</option>
           <option value="no-reply">Show: No reply yet</option>
           <option value="partial" data-feat="claimsOps" hidden disabled>Show: Partial payment (balance still owed)</option>
-          <option value="follow-up" data-feat="claimsOps" hidden disabled>Show: Follow-up due (3+ business days, no response)</option>
+          <option value="follow-up" data-feat="claimsOps" hidden disabled>Show: Follow-up due (3+ business days)</option>
+          <option value="overdue" data-feat="claimsOps" hidden disabled>Show: Overdue (5+ business days)</option>
           <option value="escalated" data-feat="claimsOps" hidden disabled>Show: Escalated / NOIL / Demand / Legal</option>
+          <option value="legal" data-feat="claimsOps" hidden disabled>Show: Sent to Legal</option>
+          <option value="demand" data-feat="claimsOps" hidden disabled>Show: Demand letter sent</option>
+          <option value="lien" data-feat="claimsOps" hidden disabled>Show: Lien filed</option>
+          <option value="sensitive" data-feat="claimsOps" hidden disabled>Show: Sensitive customers</option>
+          <option value="baddebt" data-feat="claimsOps" hidden disabled>Show: Bad debt (written off)</option>
           <option value="cs-under_review" data-feat="claimsOps" hidden disabled>Claim status: Under Review</option>
           <option value="cs-approved" data-feat="claimsOps" hidden disabled>Claim status: Approved</option>
           <option value="cs-denied" data-feat="claimsOps" hidden disabled>Claim status: Denied</option>
@@ -1039,7 +1063,7 @@
       <div class="topbar"><div><h1>Invoiced Month to Date</h1><p>Synced automatically from NetSuite &amp; your CRM &#8212; sorted by office location, broken down by department</p></div></div>
       <div class="kpis" id="mtd-kpis"></div>
       <div class="mtd-filters" id="mtd-filters" data-scope-panel="mtd" data-scope-bars="1"></div>
-      <div class="report-card" style="margin-bottom:18px;">
+      <div class="report-card" style="margin-bottom:18px;" id="mtd-city-card">
         <h3 id="mtd-chart-title">By City</h3>
         <div class="office-chart" id="mtd-chart"></div>
       </div>
@@ -1052,6 +1076,17 @@
         <div class="report-card"><h3 id="mtd-drill-title">Click a bar for a breakdown</h3><div id="mtd-drilldown"></div></div>
       </div>
       <div id="mtd-office-list"></div>
+    </section>
+
+    <!-- ===================== BAD DEBT VIEW (claims-operations pack) ===================== -->
+    <section class="view" id="view-baddebt">
+      <div class="topbar"><div><h1>Bad Debt</h1><p>Invoices written off in QuickBooks with a credit memo on the <b>Bad Debt</b> service item. They stay here for the record and never enter the follow-up cadence.</p></div></div>
+      <div class="kpis" id="baddebt-kpis"></div>
+      <div class="mtd-filters" data-scope-panel="baddebt"></div>
+      <div class="report-card">
+        <div class="toolbar" style="margin-bottom:10px;"><input class="search" id="baddebt-search" placeholder="Search customer or invoice" oninput="renderBadDebt()"><select class="sort" id="baddebt-sort" onchange="renderBadDebt()"><option value="date-desc">Sort: Written off (newest)</option><option value="date-asc">Sort: Written off (oldest)</option><option value="amount-desc">Sort: Amount (high-low)</option><option value="name-asc">Sort: Customer (A-Z)</option></select></div>
+        <div id="baddebt-list"></div>
+      </div>
     </section>
 
     <!-- ===================== COLLECTED THIS MONTH VIEW ===================== -->
@@ -1068,7 +1103,7 @@
         <div class="report-card"><h3 id="collected-drill-title">Click a bar for a breakdown</h3><div id="collected-drilldown"></div></div>
       </div>
       <div class="section-head" style="margin-top:22px;"><h2>Payments Applied</h2>
-        <div class="toolbar" data-feat="claimsOps" style="display:none;"><select class="sort" id="collectedmtd-show" onchange="setPaymentsShow(this.value)" title="Which payments to show"><option value="all">Show: All payments</option><option value="partial">Show: Partial payments (balance still owed)</option></select></div>
+        <div class="toolbar" data-feat="claimsOps" style="display:none;"><select class="sort" id="collectedmtd-show" onchange="setPaymentsShow(this.value)" title="Which payments to show"><option value="all">Show: All payments</option><option value="partial">Show: Partial payments (balance still owed)</option><option value="credits">Show: Credits &amp; write-offs (not money received)</option></select></div>
       </div>
       <div id="collected-payments-wrap"></div>
     </section>
@@ -1081,7 +1116,7 @@
         <label>Period <select id="collected-period" onchange="setCollectedPeriod(this.value)"><option value="all">All time</option></select></label>
         <label>From <input type="date" id="collected-from" onchange="setCollectedRange()" title="Pick one date in both boxes to see a single day"></label>
         <label>To <input type="date" id="collected-to" onchange="setCollectedRange()"></label>
-        <label data-feat="claimsOps" style="display:none;">Show <select id="collected-show" onchange="setPaymentsShow(this.value)"><option value="all">All payments</option><option value="partial">Partial payments (balance still owed)</option></select></label>
+        <label data-feat="claimsOps" style="display:none;">Show <select id="collected-show" onchange="setPaymentsShow(this.value)"><option value="all">All payments</option><option value="partial">Partial payments (balance still owed)</option><option value="credits">Credits &amp; write-offs (not money received)</option></select></label>
         <button type="button" class="btn-small" id="collected-clear" onclick="clearCollectedFilter()" style="display:none;">Clear</button>
         <span class="collected-filter-note" id="collected-filter-note"></span>
       </div>
@@ -1140,7 +1175,7 @@
       <div class="section-head"><h2>Escalated accounts</h2>
         <div class="toolbar" id="esc-tools">
           <input class="search" id="esc-search" type="search" name="escalations-search" placeholder="Search escalated accounts\u2026" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" onpointerdown="this.removeAttribute('readonly')" oninput="setEscFilter('search', this.value)">
-          <select class="sort" id="esc-payer" onchange="setEscFilter('payer', this.value)"><option value="all">Payer: All</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="partial" data-feat="claimsOps" hidden disabled>Partial payment</option><option value="private">Private Pay</option></select>
+          <select class="sort" id="esc-payer" onchange="setEscFilter('payer', this.value)"><option value="all">Payer: All</option><option value="insurance">Insurance</option><option value="pm">Commercial or Property Management</option><option value="partial" data-feat="claimsOps" hidden disabled>Partial payment</option><option value="private">Private Pay</option><option value="overdue" data-feat="claimsOps" hidden disabled>Overdue (5+ business days)</option><option value="legal" data-feat="claimsOps" hidden disabled>Sent to Legal</option><option value="demand" data-feat="claimsOps" hidden disabled>Demand letter sent</option><option value="lien" data-feat="claimsOps" hidden disabled>Lien filed</option><option value="sensitive" data-feat="claimsOps" hidden disabled>Sensitive customers</option><option value="baddebt" data-feat="claimsOps" hidden disabled>Bad debt (written off)</option></select>
           <select class="sort" id="esc-notified" onchange="setEscFilter('notified', this.value)"><option value="all">Notified: Any</option><option value="yes">Manager notified</option><option value="no">Not yet notified</option></select>
           <select class="sort" id="esc-sort" onchange="setEscFilter('sort', this.value)">
             <option value="balance-desc">Sort: Balance (high\u2013low)</option>
@@ -1646,6 +1681,16 @@
       <div id="detail-activity"></div>
     </div>
 
+    <div class="drawer-section" data-feat="claimsOps" style="display:none;">
+      <h4>Payments</h4>
+      <div class="hint" id="detail-last-payment" style="margin:0;"></div>
+    </div>
+
+    <div class="drawer-section" data-feat="claimsOps" style="display:none;">
+      <h4>Sensitive Customer</h4>
+      <div id="detail-sensitive"></div>
+    </div>
+
     <div class="drawer-section">
       <h4 data-feat-text="Sent to Legal">Collections Agency</h4>
       <label class="dnc-toggle" id="detail-dnc-toggle">
@@ -1688,6 +1733,7 @@
     <div class="drawer-section">
       <h4>Payments</h4>
       <div id="hist-payments"></div>
+      <div id="hist-sensitive"></div>
     </div>
     <div class="drawer-section">
       <h4>Documents</h4>
@@ -2007,22 +2053,41 @@
     return (a > b ? a : b) || '';
   }
   // null | { level: 'due' | 'overdue', days }
+  // Due after 3 business days, overdue after 5, on either trigger:
+  //   reply  - the customer answered and nobody has followed up since;
+  //   silent - nothing has gone out since the last outreach / contact.
   function followUpReminder(inv){
     if (!claimsOps()) return null;
     if (!inv || inv.jobStatus === 'paid' || isDoNotContact(inv)) return null;
     if (balanceDue(inv) <= 0.005) return null;
-    if (inv.responded === 'replied') return null;
-    const since = lastOutreachDay(inv); if (!since) return null;
+    const fu = inv.lastFollowUpAt ? String(inv.lastFollowUpAt).slice(0, 10) : '';
+    const lc = inv.lastContact ? String(inv.lastContact).slice(0, 10) : '';
+    let since, reason;
+    if (inv.responded === 'replied') {
+      if (!lc || (fu && fu >= lc)) return null;   // answered already
+      since = lc; reason = 'reply';
+    } else {
+      since = lastOutreachDay(inv); reason = 'silent';
+    }
+    if (!since) return null;
     const days = businessDaysSince(since); if (days === null) return null;
-    if (days >= 5) return { level: 'overdue', days: days };
-    if (days >= 3) return { level: 'due', days: days };
+    if (days >= 5) return { level: 'overdue', days: days, reason: reason, since: since };
+    if (days >= 3) return { level: 'due', days: days, reason: reason, since: since };
     return null;
+  }
+  function followUpReasonText(r, inv){
+    if (!r) return '';
+    const when = r.since ? fmtDate(r.since) : '';
+    return r.reason === 'reply'
+      ? 'Customer replied ' + when + ' - no follow-up since (' + r.days + ' business days)' + (inv && inv.responseSummary ? ': "' + String(inv.responseSummary).slice(0, 120) + '"' : '')
+      : 'No activity since ' + when + ' (' + r.days + ' business days, no response)';
   }
   function followUpBadgeHTML(inv){
     const r = followUpReminder(inv); if (!r) return '';
+    const why = hEsc(followUpReasonText(r, inv));
     return r.level === 'overdue'
-      ? '<span class="badge fu-overdue" title="No response in ' + r.days + ' business days - follow up now">FOLLOW-UP OVERDUE \u00b7 ' + r.days + 'd</span>'
-      : '<span class="badge fu-due" title="No response in ' + r.days + ' business days - follow up due">FOLLOW-UP DUE \u00b7 ' + r.days + 'd</span>';
+      ? '<span class="badge fu-overdue" title="' + why + ' - follow up now">FOLLOW-UP OVERDUE \u00b7 ' + r.days + 'd' + (r.reason === 'reply' ? ' \u00b7 REPLY' : '') + '</span>'
+      : '<span class="badge fu-due" title="' + why + ' - follow up due">FOLLOW-UP DUE \u00b7 ' + r.days + 'd' + (r.reason === 'reply' ? ' \u00b7 REPLY' : '') + '</span>';
   }
   const DEPARTMENT_LABELS = { mitigation: "Mitigation", contents: "Contents", reconstruction: "Reconstruction" };
   const CATEGORY_LABELS = {
@@ -2734,7 +2799,7 @@ qbInit();
     if (window.__clmsReports && window.__clmsReports.refresh) window.__clmsReports.refresh();
     applyTenantConfig(data);
     showSenderBanner(false);
-    state.currentUser = { email: data.email, role: data.role, office: data.office || null, fullName: data.fullName || null };
+    state.currentUser = { email: data.email, role: data.role, office: data.office || null, fullName: data.fullName || null, companyName: data.companyName || null, demandTemplate: data.demandTemplate || null };
     // Demo-only controls: the time simulator and the local cadence trigger.
     document.querySelectorAll('.sim-clock, [data-demo-only]').forEach(function(el){ el.style.display = 'none'; });
     document.querySelectorAll('[data-admin-only]').forEach(function(el){
@@ -3375,7 +3440,12 @@ async function loadRealAccountsNow(){
           contactInfo: a.contactInfo || '',
           lastFollowUpAt: a.lastFollowUpAt || null,
           lastFollowUpBy: a.lastFollowUpBy || null,
-          lastFollowUpKind: a.lastFollowUpKind || null
+          lastFollowUpKind: a.lastFollowUpKind || null,
+          sensitive: !!a.sensitive,
+          sensitiveScope: a.sensitiveScope || null,
+          badDebt: !!a.badDebt,
+          badDebtAt: dayOnly(a.badDebtAt),
+          creditAmount: Number(a.creditAmount || 0)
         };
         if (isPaid && inv.amountPaid + 0.005 < inv.amount) inv.amountPaid = inv.amount;
         invoices.push(inv);
@@ -3424,7 +3494,9 @@ async function loadRealAccountsNow(){
             bankName: r.bank_name || null,
             memo: r.memo || null,
             invoiceDateSnapshot: inv.invoiceDate,
-            source: r.source || (r.recorded_by ? 'manual' : 'integration')
+            source: r.source || (r.recorded_by ? 'manual' : 'integration'),
+            kind: r.kind === 'credit' ? 'credit' : 'payment',
+            itemName: r.item_name || null
           });
         });
         // Anything the accounting system counts as paid that is not itemised
@@ -3684,6 +3756,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     sheet: ['renderSheet'],
     report: ['renderReport'],
     invoicedmtd: ['renderInvoicedMTD'],
+    baddebt: ['renderBadDebt'],
     collectedmtd: ['renderCollectedMTD'],
     collected: ['renderCollectedAll'],
     sent: ['renderSent'],
@@ -3731,7 +3804,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       '<span class="pager-info">Showing ' + (pg.from + 1).toLocaleString() + '\u2013' + pg.to.toLocaleString() + ' of ' + pg.total.toLocaleString() + ' ' + noun + ' \u00b7 page ' + (pg.page + 1) + ' of ' + pg.pages + '</span>' +
       '<button type="button" class="btn-small"' + (pg.page >= pg.pages - 1 ? ' disabled' : '') + ' onclick="setPage(\'' + pg.key + '\', 1)">Next &rarr;</button></div>';
   }
-  const PAGE_VIEW = { queue: 'queue', sheet: 'sheet', accounts: 'accounts', sent: 'sent', responses: 'responses', escalations: 'escalations', collected: 'collected', collectedmtd: 'collectedmtd', report: 'report', mtdlist: 'invoicedmtd' };
+  const PAGE_VIEW = { queue: 'queue', sheet: 'sheet', accounts: 'accounts', sent: 'sent', responses: 'responses', escalations: 'escalations', collected: 'collected', collectedmtd: 'collectedmtd', report: 'report', mtdlist: 'invoicedmtd', baddebt: 'baddebt' };
   function setPage(key, delta){
     const st = __pageState[key]; if (!st) return;
     st.page = Math.max(0, st.page + delta);
@@ -3760,6 +3833,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       setChecked('auto-review', state.automationSettings.requireReview);
       syncScopeSelect('dept-filter', scopeDepts(), DEPARTMENT_LABELS);
       syncScopeSelect('office-filter', scopeOffices(), OFFICE_LABELS);
+      if(citySubfilter()){ const ob = document.getElementById('officeFilterBox'); if(ob) ob.style.display = 'none'; }
     }catch(e){ console.error('renderAll toggles failed:', e); }
   }
 
@@ -3905,13 +3979,36 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
      comma-separated list of keys. The same chip panel sits on every list and
      report tab, the sidebar drop-downs mirror it, and passesFilters() applies it. */
   var SCOPE_HIDE_OFFICES = false;   // managers/employees are already scoped to their office by the server
+  // Claims-operations pack (Revolve): there is no stand-alone city filter.
+  // Businesses are the filter; the cities each business works in appear as a
+  // sub-filter only once a business is picked, and the $ tabs chart by
+  // business with the cities shown when a bar is clicked.
+  function citySubfilter(){ return claimsOps() && TENANT_DEPTS_CUSTOM; }
+  function citiesForDepts(depts){
+    const seen = {};
+    state.invoices.forEach(function(inv){ if(!depts.length || depts.indexOf(inv.department) !== -1){ if(inv.officeLocation) seen[inv.officeLocation] = 1; } });
+    const order = OFFICE_LOCATIONS.slice();
+    Object.keys(seen).forEach(function(o){ if(order.indexOf(o) === -1) order.push(o); });
+    return order.filter(function(o){ return seen[o]; });
+  }
+  // Keep the city selection inside what the chosen businesses cover.
+  function pruneCityScope(){
+    if(!citySubfilter()) return;
+    const depts = scopeDepts();
+    const offices = scopeOffices();
+    if(!offices.length) return;
+    if(!depts.length){ state.officeFilter = 'all'; return; }
+    const allowed = citiesForDepts(depts);
+    const kept = offices.filter(function(o){ return allowed.indexOf(o) !== -1; });
+    if(kept.length !== offices.length) state.officeFilter = kept.length ? kept.join(',') : 'all';
+  }
   function scopeList(v, valid){ if(!v || v === 'all') return []; return String(v).split(',').map(function(s){ return s.trim(); }).filter(function(k, i, a){ return k && (!valid || valid[k] !== undefined) && a.indexOf(k) === i; }); }
   function scopeOffices(){ return scopeList(state.officeFilter, OFFICE_LABELS); }
   function scopeDepts(){ return scopeList(state.deptFilter, DEPARTMENT_LABELS); }
   function deptMatches(inv){ const s = scopeDepts(); return !s.length || s.indexOf(inv.department) !== -1; }
   function officeMatches(inv){ const s = scopeOffices(); return !s.length || s.indexOf(inv.officeLocation) !== -1; }
   function passesFilters(inv){ return deptMatches(inv) && officeMatches(inv); }
-  function scopeSet(kind, list){ state[kind === 'office' ? 'officeFilter' : 'deptFilter'] = list.length ? list.join(',') : 'all'; saveState(); renderAll(); }
+  function scopeSet(kind, list){ state[kind === 'office' ? 'officeFilter' : 'deptFilter'] = list.length ? list.join(',') : 'all'; pruneCityScope(); saveState(); renderAll(); }
   function scopeToggle(kind, key){
     const cur = kind === 'office' ? scopeOffices() : scopeDepts();
     const i = cur.indexOf(key);
@@ -3934,16 +4031,26 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     const offices = scopeOffices(), depts = scopeDepts();
     const cityWord = TENANT_DEPTS_CUSTOM ? 'cities' : 'offices', bizWord = TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments';
     const chip = function(key, label, on, fn){ return '<div class="chip multi' + (on ? ' active' : '') + '" data-key="' + hEsc(key) + '" onclick="' + fn + '(\'' + hEsc(key) + '\')" title="Click to ' + (on ? 'remove' : 'add') + '">' + hEsc(label) + '</div>'; };
+    const sub = citySubfilter();
+    if(sub) pruneCityScope();
+    const subCities = sub && depts.length ? citiesForDepts(depts) : [];
     document.querySelectorAll('[data-scope-panel]').forEach(function(panel){
       const tab = panel.dataset.scopePanel, bars = panel.dataset.scopeBars === '1';
-      const cityRow = SCOPE_HIDE_OFFICES ? '' : '<div class="mtd-filter-group"><span class="wf-label">' + (TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices') + '</span><div class="chips" id="' + tab + '-city-chips">' +
-        '<div class="chip' + (offices.length ? '' : ' active') + '" onclick="scopeClear(\'office\')">All</div>' + OFFICE_LOCATIONS.map(function(o){ return chip(o, OFFICE_LABELS[o] || o, offices.indexOf(o) !== -1, 'scopeToggleOffice'); }).join('') + '</div></div>';
+      let cityRow = '';
+      if(sub){
+        if(subCities.length > 1) cityRow = '<div class="mtd-filter-group"><span class="wf-label">Cities in ' + hEsc(depts.map(function(d){ return DEPARTMENT_LABELS[d] || d; }).join(', ')) + '</span><div class="chips" id="' + tab + '-city-chips">' +
+          '<div class="chip' + (offices.length ? '' : ' active') + '" onclick="scopeClear(\'office\')">All</div>' + subCities.map(function(o){ return chip(o, OFFICE_LABELS[o] || o, offices.indexOf(o) !== -1, 'scopeToggleOffice'); }).join('') + '</div></div>';
+      } else if(!SCOPE_HIDE_OFFICES){
+        cityRow = '<div class="mtd-filter-group"><span class="wf-label">' + (TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices') + '</span><div class="chips" id="' + tab + '-city-chips">' +
+          '<div class="chip' + (offices.length ? '' : ' active') + '" onclick="scopeClear(\'office\')">All</div>' + OFFICE_LOCATIONS.map(function(o){ return chip(o, OFFICE_LABELS[o] || o, offices.indexOf(o) !== -1, 'scopeToggleOffice'); }).join('') + '</div></div>';
+      }
       const deptRow = '<div class="mtd-filter-group"><span class="wf-label">' + (TENANT_DEPTS_CUSTOM ? 'Businesses' : 'Departments') + '</span><div class="chips" id="' + tab + '-dept-chips">' +
         '<div class="chip' + (depts.length ? '' : ' active') + '" onclick="scopeClear(\'dept\')">All</div>' + Object.keys(DEPARTMENT_LABELS).map(function(d){ return chip(d, DEPARTMENT_LABELS[d] || d, depts.indexOf(d) !== -1, 'scopeToggleDept'); }).join('') + '</div></div>';
-      const hint = '<div class="hint" style="margin:0;font-size:12.5px;">Pick any number of ' + (SCOPE_HIDE_OFFICES ? bizWord : cityWord + ' and ' + bizWord) + (bars ? ' (or click the bars)' : '') + '. ' +
-        (bars ? 'The charts, the breakdown and the list below follow the selection' : 'Everything on this tab follows the selection') + ', and so does every other tab.' +
+      const hint = '<div class="hint" style="margin:0;font-size:12.5px;">' +
+        (sub ? ('Pick any number of businesses' + (bars ? ' (or click the bars)' : '') + (depts.length ? (subCities.length > 1 ? '; narrow to a city with the row above. ' : '. ') : '; the cities a business works in appear once you pick one. ') + (bars ? 'The chart, the breakdown and the list below follow the selection' : 'Everything on this tab follows the selection') + ', and so does every other tab.')
+             : ('Pick any number of ' + (SCOPE_HIDE_OFFICES ? bizWord : cityWord + ' and ' + bizWord) + (bars ? ' (or click the bars)' : '') + '. ' + (bars ? 'The charts, the breakdown and the list below follow the selection' : 'Everything on this tab follows the selection') + ', and so does every other tab.')) +
         ((offices.length || depts.length) ? ' <a href="#" onclick="scopeClearAll(); return false;">Show everything</a>' : '') + '</div>';
-      panel.innerHTML = cityRow + deptRow + hint;
+      panel.innerHTML = (sub ? deptRow + cityRow : cityRow + deptRow) + hint;
     });
   }
   // The sidebar drop-downs show a single pick as before, or "N selected" when
@@ -4043,6 +4150,96 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
      drafted or sent, and the autonomous cadence skips it entirely. */
   function dncLabel(){ return claimsOps() ? 'Sent to Legal, DO NOT CONTACT' : 'DO NOT CONTACT - Sent to Collections Agency'; }
   function isDoNotContact(inv){ return !!(inv && inv.doNotContact); }
+  // ---- Claims-operations pack: Sensitive customers, bad debt, last payment,
+  // and the one status filter every tab shares. ----
+  function isSensitive(inv){ return !!(inv && inv.sensitive); }
+  function isBadDebt(inv){ return !!(inv && inv.badDebt); }
+  function sensitiveTitle(inv){ return 'Sensitive customer' + (inv.sensitiveScope === 'customer' ? ' (every invoice for this customer)' : ' (this invoice)') + (inv.sensitiveBy ? ' - marked by ' + inv.sensitiveBy : '') + '. Automated follow-ups are paused; contact by hand only.'; }
+  function sensitiveBadgeHTML(inv){ return isSensitive(inv) ? '<span class="badge sensitive" title="' + hEsc(sensitiveTitle(inv)) + '">SENSITIVE</span>' : ''; }
+  function badDebtBadgeHTML(inv){ return isBadDebt(inv) ? '<span class="badge baddebt" title="Written off as bad debt in QuickBooks' + (inv.badDebtAt ? ' ' + fmtDate(inv.badDebtAt) : '') + '">BAD DEBT</span>' : ''; }
+  // The most recent real payment (credit memos are not money received).
+  function lastPaymentOf(inv){
+    let best = null;
+    (state.paymentsLog || []).forEach(function(p){
+      if (String(p.invoiceId) !== String(inv.id) || p.kind === 'credit') return;
+      if (!best || String(p.paidDate) > String(best.paidDate) || (String(p.paidDate) === String(best.paidDate) && String(p.id) > String(best.id))) best = p;
+    });
+    return best;
+  }
+  function lastPaymentOfGroup(g){
+    let best = null;
+    (g.invoices || []).forEach(function(inv){ const p = lastPaymentOf(inv); if (p && (!best || String(p.paidDate) > String(best.paidDate))) best = p; });
+    return best;
+  }
+  function paymentMethodLabel(m){ return m ? (PAYMENT_METHOD_LABELS[m] || PAYMENT_TYPE_LABELS[m] || (m === 'integration' ? 'QuickBooks' : m)) : ''; }
+  function lastPaymentHTML(p, opts){
+    opts = opts || {};
+    if (!p) return '<span style="color:var(--slate-soft);">' + (opts.none || 'No payments yet') + '</span>';
+    const method = paymentMethodLabel(p.paymentMethod);
+    return '<b>$' + Number(p.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b> <span style="color:var(--slate-soft);">on</span> ' + fmtDate(p.paidDate) +
+      (method ? ' <span style="color:var(--slate-soft);">' + hEsc(method) + (p.referenceNumber ? ' #' + hEsc(p.referenceNumber) : '') + '</span>' : '') +
+      (opts.invoice && p.invoiceNumber ? ' <span style="color:var(--slate-soft);">' + hEsc(p.invoiceNumber) + '</span>' : '');
+  }
+  // One status filter, the same keys on every tab: Partial payment, Sent to
+  // Legal, Demand letter sent, Lien filed, Sensitive, Bad debt, Overdue.
+  const STATUS_SHOW_OPTS = [
+    ['partial', 'Partial payment (balance still owed)'],
+    ['overdue', 'Overdue (5+ business days)'],
+    ['legal', 'Sent to Legal'],
+    ['demand', 'Demand letter sent'],
+    ['lien', 'Lien filed'],
+    ['sensitive', 'Sensitive customers'],
+    ['baddebt', 'Bad debt (written off)']
+  ];
+  const STATUS_SHOW_LABELS = {}; STATUS_SHOW_OPTS.forEach(function(o){ STATUS_SHOW_LABELS[o[0]] = o[1]; });
+  function statusShowMatches(inv, key){
+    if (!key || key === 'all') return true;
+    if (!claimsOps()) return true;
+    switch (key) {
+      case 'partial': return isPartiallyPaid(inv);
+      case 'overdue': { const r = followUpReminder(inv); return !!(r && r.level === 'overdue'); }
+      case 'legal': return isDoNotContact(inv);
+      case 'demand': return !!inv.demandLetterSentAt;
+      case 'lien': return !!inv.lienFiled;
+      case 'sensitive': return isSensitive(inv);
+      case 'baddebt': return isBadDebt(inv);
+      default: return true;
+    }
+  }
+  function statusShowOptionsHTML(current, allLabel){
+    return '<option value="all"' + (!current || current === 'all' ? ' selected' : '') + '>' + hEsc(allLabel || 'All') + '</option>' +
+      STATUS_SHOW_OPTS.map(function(o){ return '<option value="' + o[0] + '"' + (current === o[0] ? ' selected' : '') + '>' + hEsc(o[1]) + '</option>'; }).join('');
+  }
+  function statusShowValue(v){ return STATUS_SHOW_LABELS[v] ? v : 'all'; }
+  // Mark a customer Sensitive: this invoice, or every invoice of the customer.
+  async function setSensitive(id, on, scope){
+    const inv = findInv(id); if (!inv) return;
+    scope = scope === 'customer' ? 'customer' : 'invoice';
+    const targets = scope === 'customer' ? state.invoices.filter(function(x){ return acctKey(x.name) === acctKey(inv.name); }) : [inv];
+    const who = (state.currentUser && (state.currentUser.fullName || state.currentUser.email)) || 'You';
+    if (isRemoteInvoice(inv)) {
+      try {
+        const res = await fetch('/api/accounts/sensitive', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accountId: inv.id, on: !!on, scope: scope }) });
+        const d = await res.json().catch(function(){ return null; });
+        if (!res.ok || !d || !d.ok) { showToast((d && d.error) || 'Could not update the Sensitive flag.'); return; }
+      } catch (e) { showToast('Could not update the Sensitive flag.'); return; }
+    }
+    targets.forEach(function(x){ x.sensitive = !!on; x.sensitiveScope = on ? scope : null; x.sensitiveBy = on ? who : null; x.sensitiveAt = on ? new Date().toISOString() : null; });
+    addActivity(inv, on ? ('Marked as a Sensitive customer' + (scope === 'customer' ? ' (every invoice for ' + inv.name + ')' : ' (this invoice only)') + '. Automated follow-ups are paused.') : 'Sensitive customer flag cleared. Automated follow-ups may resume.', 'manual', 'escalation');
+    saveState(); renderAll();
+    if (currentDetailId === inv.id) openDetail(inv.id);
+    showToast(on ? (inv.name + ' marked Sensitive' + (scope === 'customer' ? ' - ' + targets.length + ' invoice' + (targets.length === 1 ? '' : 's') : '') + '. Automated follow-ups will skip ' + (scope === 'customer' ? 'this customer' : 'this invoice') + '.') : 'Sensitive flag cleared for ' + inv.name + '.');
+  }
+  function sensitiveControlsHTML(inv){
+    if (!claimsOps()) return '';
+    const id = JSON.stringify(inv.id);
+    if (isSensitive(inv)) {
+      return '<div class="sens-box on"><div><b>Sensitive customer</b> <span class="sens-sub">' + (inv.sensitiveScope === 'customer' ? 'every invoice for this customer' : 'this invoice only') + (inv.sensitiveBy ? ' &middot; marked by ' + hEsc(inv.sensitiveBy) : '') + '</span><div class="sens-sub">Automated follow-ups are paused. Manual sends still work, with a reminder.</div></div>' +
+        '<div class="sens-actions"><button type="button" class="btn-small" onclick="setSensitive(' + id + ', false, \'' + (inv.sensitiveScope === 'customer' ? 'customer' : 'invoice') + '\')">Clear flag</button></div></div>';
+    }
+    return '<div class="sens-box"><div><b>Sensitive customer?</b><div class="sens-sub">Flag accounts that need a personal touch: automated follow-ups stop, the badge shows everywhere.</div></div>' +
+      '<div class="sens-actions"><button type="button" class="btn-small" onclick="setSensitive(' + id + ', true, \'customer\')">All invoices for ' + hEsc(inv.name) + '</button><button type="button" class="btn-small" onclick="setSensitive(' + id + ', true, \'invoice\')">Just this invoice</button></div></div>';
+  }
   function dncBadgeHTML(inv){ return isDoNotContact(inv) ? '<span class="badge dnc" title="' + dncLabel() + '">' + (claimsOps() ? 'SENT TO LEGAL &middot; DO NOT CONTACT' : 'DO NOT CONTACT &middot; COLLECTIONS AGENCY') + '</span>' : ''; }
   // Every escalation flag an invoice carries, as one consistent set of pills:
   // Escalated (out of the cadence), Demand letter sent, NOIL sent, Lien filed,
@@ -4050,6 +4247,8 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   // Collected, Escalations and the invoice drawer so nothing is missed.
   function escalationFlags(inv){
     const f = [];
+    if (isSensitive(inv)) f.push({ cls: 'sensitive', text: 'SENSITIVE', title: sensitiveTitle(inv) });
+    if (isBadDebt(inv)) f.push({ cls: 'baddebt', text: 'BAD DEBT', title: 'Written off as bad debt in QuickBooks' + (inv.badDebtAt ? ' ' + fmtDate(inv.badDebtAt) : '') + (inv.creditAmount ? ' - $' + Number(inv.creditAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + ' credited' : '') });
     if (inv.escalated) f.push({ cls: 'escalated', text: 'ESCALATED', title: 'Escalated - out of the automated cadence' + (inv.notifiedName ? ' (' + inv.notifiedName + ' notified)' : '') });
     if (inv.demandLetterSentAt) f.push({ cls: 'esc-demand', text: 'DEMAND LETTER SENT', title: 'Demand letter sent ' + fmtDate(inv.demandLetterSentAt) });
     if (inv.noilSentAt || inv.noilSent) f.push({ cls: 'esc-noil', text: 'NOIL SENT', title: 'Notice of Intent to Lien sent' + (inv.noilSentAt ? ' ' + fmtDate(inv.noilSentAt) : '') });
@@ -4250,7 +4449,7 @@ function todoRowHTML(item, num, priority){
     const el = document.getElementById('kpis');
     el.innerHTML = `
       <div class="kpi"><div class="label">Total AR Outstanding</div><div class="value">$${totalAR.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">across ${active.length} open invoices${partialCount ? ' &middot; ' + partialCount + ' partially paid' : ''}</div></div>
-      ${claimsOps() ? `<div class="kpi fu-kpi" title="Open invoices with no response 3+ business days after the last outreach"><div class="label">Follow-ups Due</div><div class="value">${active.filter(function(i){ return !!followUpReminder(i); }).length}</div><div class="sub">${active.filter(function(i){ const r = followUpReminder(i); return r && r.level === 'overdue'; }).length} overdue (5+ business days)</div></div>` : ''}
+      ${claimsOps() ? `<div class="kpi fu-kpi" title="Open invoices with no response 3+ business days after the last outreach"><div class="label">Follow-ups Due</div><div class="value">${active.filter(function(i){ return !!followUpReminder(i); }).length}</div><div class="sub">${(function(){ const od = active.map(followUpReminder).filter(function(r){ return r && r.level === 'overdue'; }); const rep = od.filter(function(r){ return r.reason === 'reply'; }).length; return od.length + ' overdue (5+ business days' + (rep ? ' \u00b7 ' + rep + ' with a reply waiting' : '') + ')'; })()}</div></div>` : ''}
       <div class="kpi"><div class="label">Avg. Days Outstanding</div><div class="value">${avgDays}</div><div class="sub">across all open invoices</div></div>
       <div class="kpi"><div class="label">In Active Cadence</div><div class="value">${active.filter(i=>!i.escalated).length}</div><div class="sub ${state.invoices.filter(i=>i.escalated).length?'up':''}">${state.invoices.filter(i=>i.escalated).length} escalated</div></div>
       <div class="kpi"><div class="label">Autonomous Sends</div><div class="value">${state.automationLog.length + state.commsLog.filter(c=>c.source==='automation').length}</div><div class="sub ${needsAttn ? 'up' : ''}">${needsAttn ? needsAttn + ' need attention' : 'all running cleanly'}</div></div>
@@ -4352,8 +4551,9 @@ function todoRowHTML(item, num, priority){
 
     let items = activeInvoices().filter(inv => !inv.escalated).filter(inv => {
       const matchesSearch = !searchVal || [inv.name, inv.meta, inv.invoiceNumber, inv.jobNumber, inv.claimNumber, inv.contact].some(v => String(v || '').toLowerCase().includes(searchVal));
-      const matchesPayer = payerFilter === 'all' || payerFilter === 'follow-up' || payerFilter === 'flagged' || payerFilter === 'partial' || inv.payer === payerFilter;
-      const matchesSpecial = payerFilter === 'follow-up' ? !!followUpReminder(inv) : (payerFilter === 'flagged' ? !!escalationFlags(inv).length : (payerFilter === 'partial' ? isPartiallyPaid(inv) : true));
+      const special = payerFilter === 'follow-up' || payerFilter === 'flagged' || !!STATUS_SHOW_LABELS[payerFilter];
+      const matchesPayer = payerFilter === 'all' || special || inv.payer === payerFilter;
+      const matchesSpecial = payerFilter === 'follow-up' ? !!followUpReminder(inv) : (payerFilter === 'flagged' ? !!escalationFlags(inv).length : statusShowMatches(inv, payerFilter));
       return matchesSearch && matchesPayer && matchesSpecial;
     });
     const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true });
@@ -4663,7 +4863,7 @@ function todoRowHTML(item, num, priority){
   // state so they survive a refresh; the inputs are only written when they
   // differ, so typing is never interrupted by a background render.
   const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'days-desc': 1, 'days-asc': 1, 'followup-desc': 1, 'followup-asc': 1, 'collections': 1, 'collections-last': 1 };
-  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
+  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, overdue: 1, legal: 1, demand: 1, lien: 1, sensitive: 1, baddebt: 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
   function sheetSearchValue(){
     const box = document.getElementById('sheet-search');
     if (!box) return String(state.sheetSearch || '');
@@ -4707,7 +4907,7 @@ function todoRowHTML(item, num, priority){
     if (show === 'not-collections' && isDoNotContact(inv)) return false;
     if (show === 'replied' && inv.responded !== 'replied') return false;
     if (show === 'no-reply' && inv.responded === 'replied') return false;
-    if (show === 'partial' && claimsOps() && !isPartiallyPaid(inv)) return false;
+    if (STATUS_SHOW_LABELS[show] && !statusShowMatches(inv, show)) return false;
     if (show === 'follow-up' && !followUpReminder(inv)) return false;
     if (show === 'escalated' && !escalationFlags(inv).length) return false;
     if (show.indexOf('cs-') === 0 && (inv.claimStatus || '') !== show.slice(3)) return false;
@@ -4926,13 +5126,13 @@ function todoRowHTML(item, num, priority){
     window.__ageTip = { show: show, hide: hide };
   })();
   const AGING_GROUPS = { city: 1, business: 1, both: 1 };
-  function agingGroupMode(){ let m = 'city'; try { m = localStorage.getItem('clms_aging_group') || 'city'; } catch (e) {} return AGING_GROUPS[m] ? m : 'city'; }
+  function agingGroupMode(){ const dflt = citySubfilter() ? 'business' : 'city'; let m = dflt; try { m = localStorage.getItem('clms_aging_group') || dflt; } catch (e) {} return AGING_GROUPS[m] ? m : dflt; }
   function setAgingGroup(m){ try { localStorage.setItem('clms_aging_group', AGING_GROUPS[m] ? m : 'city'); } catch (e) {} renderReport(); }
   function agingBucketClass(days){ return days <= 30 ? 'b1' : (days <= 60 ? 'b2' : 'b3'); }
   let agingSort = 'age';
   function setAgingSort(v){ agingSort = v || 'age'; renderReport(); }
   let agingShow = 'all';
-  function setAgingShow(v){ agingShow = v === 'partial' ? 'partial' : 'all'; renderReport(); }
+  function setAgingShow(v){ agingShow = statusShowValue(v); renderReport(); }
 
   function renderReport(){
     // Every account that still carries a balance, whatever its status - the
@@ -4983,25 +5183,22 @@ function todoRowHTML(item, num, priority){
     const listEl = document.getElementById('report-accounts');
     if(!summaryEl || !listEl) return;
     if(!claimsOps()) agingShow = 'all';
-    const listRows = agingShow === 'partial' ? all.filter(isPartiallyPaid) : all;
+    const listRows = agingShow === 'all' ? all : all.filter(function(i){ return statusShowMatches(i, agingShow); });
     const partialCount = all.filter(isPartiallyPaid).length;
     const avgAge = listRows.length ? Math.round(listRows.reduce((s,i) => s + agingDays(i), 0) / listRows.length) : 0;
-    const listOwed = agingShow === 'partial' ? listRows.reduce((s,i) => s + balanceDue(i), 0) : totalOwed;
-    summaryEl.innerHTML = `<span><b>${listRows.length}</b> ${agingShow === 'partial' ? 'partially paid account' : 'account'}${listRows.length===1?'':'s'} with a balance</span>` +
+    const listOwed = agingShow !== 'all' ? listRows.reduce((s,i) => s + balanceDue(i), 0) : totalOwed;
+    summaryEl.innerHTML = `<span><b>${listRows.length}</b> ${agingShow === 'partial' ? 'partially paid account' : (agingShow !== 'all' ? (STATUS_SHOW_LABELS[agingShow] || '').replace(/\s*\(.*$/, '').toLowerCase() + ' account' : 'account')}${listRows.length===1?'':'s'} with a balance</span>` +
       `<span>Total owed <b>${money2(listOwed)}</b></span>` +
       `<span>Average age <b>${avgAge}</b> days</span>` +
       (partialCount && agingShow !== 'partial' ? `<span><b>${partialCount}</b> partially paid</span>` : '') +
-      (claimsOps() ? `<span style="margin-left:auto;">Show <select onchange="setAgingShow(this.value)">` +
-        `<option value="all" ${agingShow==='all'?'selected':''}>All open balances</option>` +
-        `<option value="partial" ${agingShow==='partial'?'selected':''}>Partial payment (balance still owed)</option>` +
-      `</select></span>` : '') +
+      (claimsOps() ? `<span style="margin-left:auto;">Show <select onchange="setAgingShow(this.value)">` + statusShowOptionsHTML(agingShow, 'All open balances') + `</select></span>` : '') +
       `<span${claimsOps() ? '' : ' style="margin-left:auto;"'}>Sort accounts by <select onchange="setAgingSort(this.value)">` +
         `<option value="age" ${agingSort==='age'?'selected':''}>Oldest first</option>` +
         `<option value="balance" ${agingSort==='balance'?'selected':''}>Largest balance</option>` +
         `<option value="name" ${agingSort==='name'?'selected':''}>Customer name</option>` +
       `</select></span>`;
     if(!listRows.length){
-      listEl.innerHTML = `<div class="empty" style="margin-top:14px;">${agingShow === 'partial' ? 'No partially paid invoices match the current filters.' : 'No open balances match the current filters.'}</div>`;
+      listEl.innerHTML = `<div class="empty" style="margin-top:14px;">${agingShow !== 'all' ? 'No invoices in "' + hEsc(STATUS_SHOW_LABELS[agingShow] || agingShow) + '" match the current filters.' : 'No open balances match the current filters.'}</div>`;
       return;
     }
     const sorter = (a,b) => {
@@ -5229,18 +5426,23 @@ function todoRowHTML(item, num, priority){
     document.getElementById('mtd-kpis').innerHTML = `
       <div class="kpi"><div class="label">Invoiced &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${records.length} invoice${records.length===1?'':'s'} dated this month \u00b7 ${hEsc(selectionNote)}</div></div>
       <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Synced automatically, no manual entry' : 'Not connected yet'}</div></div>
-      <div class="kpi"><div class="label">${TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${mtdDeptKeys().filter(d => records.some(r => r.department === d)).length}/${mtdDeptKeys().length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with invoices</div></div>
+      ${citySubfilter()
+        ? `<div class="kpi"><div class="label">Businesses Reporting</div><div class="value">${mtdDeptKeys().filter(d => records.some(r => r.department === d)).length}/${mtdDeptKeys().length}</div><div class="sub">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length} cit${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length === 1 ? 'y' : 'ies'} with invoices</div></div>`
+        : `<div class="kpi"><div class="label">${TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${mtdDeptKeys().filter(d => records.some(r => r.department === d)).length}/${mtdDeptKeys().length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with invoices</div></div>`}
     `;
     renderMtdFilterChips();
     // Clicking a bar selects that city or business (click again to unselect;
     // any number can be selected). The breakdown box shows the bar just
     // clicked, and the list at the bottom shows every matching invoice by month.
-    renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', officeRecords, function(office){ mtdToggleOffice(office); }, mtdSelectedOffices);
+    const cityCard = document.getElementById('mtd-city-card'); if(cityCard) cityCard.style.display = citySubfilter() ? 'none' : '';
+    if(!citySubfilter()) renderOfficeChart('mtd-chart', 'mtd-legend', 'mtd-drilldown', 'mtd-drill-title', officeRecords, function(office){ mtdToggleOffice(office); }, mtdSelectedOffices);
+    else { const lg = document.getElementById('mtd-legend'); if(lg) lg.innerHTML = citiesForDepts(mtdSelectedDepts).map(function(o){ return '<div class="legend-item"><span class="legend-swatch" style="background:' + cityColor(o) + ';"></span><span>' + hEsc(OFFICE_LABELS[o] || o) + '</span></div>'; }).join('') || '<div class="empty" style="padding:8px;">Pick a business to see its cities.</div>'; }
     const deptGrouped = renderDeptChart('mtd-dept-chart', deptRecords, function(dept){ mtdToggleDept(dept); }, mtdSelectedDepts);
     const grouped = groupByOfficeDept(officeRecords);
-    if(mtdLast && mtdLast.kind === 'office' && mtdSelectedOffices.indexOf(mtdLast.key) !== -1 && grouped[mtdLast.key]) showOfficeDrilldown('mtd-drilldown', 'mtd-drill-title', mtdLast.key, grouped[mtdLast.key]);
+    if(!citySubfilter() && mtdLast && mtdLast.kind === 'office' && mtdSelectedOffices.indexOf(mtdLast.key) !== -1 && grouped[mtdLast.key]) showOfficeDrilldown('mtd-drilldown', 'mtd-drill-title', mtdLast.key, grouped[mtdLast.key]);
     else if(mtdLast && mtdLast.kind === 'dept' && mtdSelectedDepts.indexOf(mtdLast.key) !== -1 && deptGrouped && deptGrouped[mtdLast.key]) showDeptDrilldown('mtd-drilldown', 'mtd-drill-title', mtdLast.key, deptGrouped[mtdLast.key]);
-    else { document.getElementById('mtd-drill-title').textContent = 'Click a bar for a breakdown'; document.getElementById('mtd-drilldown').innerHTML = ''; }
+    else if(citySubfilter() && mtdSelectedDepts.length === 1 && deptGrouped && deptGrouped[mtdSelectedDepts[0]]) showDeptDrilldown('mtd-drilldown', 'mtd-drill-title', mtdSelectedDepts[0], deptGrouped[mtdSelectedDepts[0]]);
+    else { document.getElementById('mtd-drill-title').textContent = citySubfilter() ? 'Click a business bar to see its cities' : 'Click a bar for a breakdown'; document.getElementById('mtd-drilldown').innerHTML = ''; }
     renderMtdOfficeList(start, end);
     const navCount = document.getElementById('nav-count-mtd');
     if(navCount) navCount.textContent = monthInvoices.length;
@@ -5260,10 +5462,10 @@ function todoRowHTML(item, num, priority){
     if(!mtdSelectedOffices.length && !mtdSelectedDepts.length){ listEl.innerHTML = ''; return; }
     const allRows = state.invoices.filter(inv => mtdMatches(inv) && dateInRange(inv.invoiceDate, start, end));
     if(!claimsOps()) mtdShow = 'all';
-    const rows = mtdShow === 'partial' ? allRows.filter(isPartiallyPaid) : allRows;
+    const rows = mtdShow === 'all' ? allRows : allRows.filter(function(i){ return statusShowMatches(i, mtdShow); });
     const total = rows.reduce((s,i) => s + Number(i.amount || 0), 0);
     const offices = [mtdSelectedOffices.map(o => OFFICE_LABELS[o] || o).join(', '), mtdSelectedDepts.map(d => DEPARTMENT_LABELS[d] || d).join(', ')].filter(Boolean).join(' \u00b7 ');
-    const showSel = !claimsOps() ? '' : `<span class="mtd-show">Show <select onchange="setMtdShow(this.value)"><option value="all" ${mtdShow==='all'?'selected':''}>All invoices</option><option value="partial" ${mtdShow==='partial'?'selected':''}>Partial payment (balance still owed)</option></select></span>`;
+    const showSel = !claimsOps() ? '' : `<span class="mtd-show">Show <select onchange="setMtdShow(this.value)">` + statusShowOptionsHTML(mtdShow, 'All invoices') + `</select></span>`;
     const head = `<div class="mtd-list-head"><h3>${hEsc(offices)}<span class="cnt">${rows.length} ${mtdShow === 'partial' ? 'partially paid invoice' : 'invoice'}${rows.length===1?'':'s'} dated this month</span>${showSel}<span class="hist-link" onclick="mtdClearAll()">Clear selection</span></h3><span class="tot">${money2(total)}</span></div>`;
     if(!rows.length){ listEl.innerHTML = head + `<div class="aging-dept"><div class="empty" style="padding:16px;">No ${mtdShow === 'partial' ? 'partially paid ' : ''}invoices dated this month for ${hEsc(offices)}.</div></div>`; return; }
     const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -5301,8 +5503,49 @@ function todoRowHTML(item, num, priority){
     }).join('') + pagerHTML(pg, 'invoices');
   }
   var mtdShow = 'all';
-  function setMtdShow(v){ mtdShow = v === 'partial' ? 'partial' : 'all'; renderInvoicedMTD(); }
+  function setMtdShow(v){ mtdShow = statusShowValue(v); renderInvoicedMTD(); }
 
+  // Bad Debt: every invoice QuickBooks wrote off with a Bad Debt credit memo.
+  function renderBadDebt(){
+    const listEl = document.getElementById('baddebt-list'); if(!listEl) return;
+    const q = String((document.getElementById('baddebt-search') || {}).value || '').trim().toLowerCase();
+    const sort = String((document.getElementById('baddebt-sort') || {}).value || 'date-desc');
+    let rows = state.invoices.filter(function(inv){ return isBadDebt(inv) && passesFilters(inv); });
+    if(q) rows = rows.filter(function(inv){ return (String(inv.name || '') + ' ' + String(inv.invoiceNumber || '') + ' ' + String(inv.claimNumber || '')).toLowerCase().indexOf(q) !== -1; });
+    const writtenOff = function(inv){ return Number(inv.creditAmount || 0) || Math.max(0, Number(inv.amount || 0) - Number(inv.amountPaid || 0)); };
+    rows.sort(function(a, b){
+      if(sort === 'amount-desc') return writtenOff(b) - writtenOff(a);
+      if(sort === 'name-asc') return String(a.name).localeCompare(String(b.name));
+      const da = String(a.badDebtAt || ''), db = String(b.badDebtAt || '');
+      return sort === 'date-asc' ? da.localeCompare(db) : db.localeCompare(da);
+    });
+    const total = rows.reduce(function(s, inv){ return s + writtenOff(inv); }, 0);
+    const invoiced = rows.reduce(function(s, inv){ return s + Number(inv.amount || 0); }, 0);
+    const { start, end } = monthRange();
+    const thisMonth = rows.filter(function(inv){ return dateInRange(inv.badDebtAt, start, end); });
+    const customers = {}; rows.forEach(function(inv){ customers[acctKey(inv.name)] = 1; });
+    document.getElementById('baddebt-kpis').innerHTML =
+      '<div class="kpi"><div class="label">Written off</div><div class="value">$' + total.toLocaleString(undefined,{maximumFractionDigits:0}) + '</div><div class="sub">across ' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + ' · ' + Object.keys(customers).length + ' customer' + (Object.keys(customers).length === 1 ? '' : 's') + '</div></div>' +
+      '<div class="kpi"><div class="label">Written off — ' + monthLabel() + '</div><div class="value">$' + thisMonth.reduce(function(s, inv){ return s + writtenOff(inv); }, 0).toLocaleString(undefined,{maximumFractionDigits:0}) + '</div><div class="sub">' + thisMonth.length + ' invoice' + (thisMonth.length === 1 ? '' : 's') + ' this month</div></div>' +
+      '<div class="kpi"><div class="label">Originally invoiced</div><div class="value">$' + invoiced.toLocaleString(undefined,{maximumFractionDigits:0}) + '</div><div class="sub">' + (invoiced > 0 ? Math.round(total / invoiced * 100) + '% written off' : '—') + '</div></div>' +
+      '<div class="kpi"><div class="label">Source</div><div class="value" style="font-size:15px;">QuickBooks credit memos</div><div class="sub">Bad Debt service item, synced automatically</div></div>';
+    const nav = document.getElementById('nav-count-baddebt'); if(nav) nav.textContent = state.invoices.filter(isBadDebt).length || '';
+    if(!rows.length){ listEl.innerHTML = '<div class="empty">No invoices have been written off as bad debt' + (q ? ' matching "' + hEsc(q) + '"' : '') + '.</div>'; return; }
+    const pg = pageOf('baddebt', rows, [q, sort, state.deptFilter, state.officeFilter].join('|'));
+    listEl.innerHTML = '<table class="sheet-table bd-table"><thead><tr><th>Customer</th><th>Invoice #</th><th>Business</th><th>City</th><th>Invoice date</th><th>Written off</th><th class="amt">Invoiced</th><th class="amt">Paid before write-off</th><th class="amt">Written off</th><th class="amt">Balance left</th></tr></thead><tbody>' +
+      pg.rows.map(function(inv){
+        const paidCash = Math.max(0, Number(inv.amountPaid || 0) - Number(inv.creditAmount || 0));
+        const left = Math.max(0, Number(inv.amount || 0) - Number(inv.amountPaid || 0));
+        return '<tr><td><a href="#" onclick="event.preventDefault(); openDetail(' + JSON.stringify(inv.id) + ')"><b>' + hEsc(inv.name) + '</b></a>' + (inv.claimNumber ? '<div class="acct-sub">' + hEsc(inv.claimNumber) + '</div>' : '') + '</td>' +
+          '<td>' + hEsc(inv.invoiceNumber || ('#' + inv.id)) + '</td><td>' + hEsc(deptLabel(inv)) + '</td><td>' + hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '') + '</td>' +
+          '<td>' + (inv.invoiceDate ? fmtDate(inv.invoiceDate) : '—') + '</td><td>' + (inv.badDebtAt ? fmtDate(inv.badDebtAt) : '—') + '</td>' +
+          '<td class="amt">$' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
+          '<td class="amt">$' + paidCash.toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
+          '<td class="amt"><b>$' + writtenOff(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b></td>' +
+          '<td class="amt">' + (left > 0.005 ? '$' + left.toLocaleString(undefined,{minimumFractionDigits:2}) : '<span style="color:var(--slate-soft);">—</span>') + '</td></tr>';
+      }).join('') +
+      '<tr><td style="font-weight:600;" colspan="8">' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + '</td><td class="amt" style="font-weight:600;">$' + total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</td><td></td></tr></tbody></table>' + pagerHTML(pg, 'invoices');
+  }
   function renderCollectedMTD(){
     const { start, end } = monthRange();
     const toRecord = p => ({ officeLocation: p.officeLocation, department: p.department, category: p.category, amount: p.amount });
@@ -5320,11 +5563,23 @@ function todoRowHTML(item, num, priority){
       <div class="kpi"><div class="label">Source</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Posts automatically when a payment is applied' : 'Not connected yet'}</div></div>
       <div class="kpi"><div class="label">${TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${Object.keys(DEPARTMENT_LABELS).filter(d => records.some(r => r.department === d)).length}/${Object.keys(DEPARTMENT_LABELS).length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with payments</div></div>
     `;
-    const cct = document.getElementById('collected-chart-title'); if(cct) cct.textContent = (TENANT_DEPTS_CUSTOM ? 'By City' : 'By Office Location') + (scopeDepts().length ? ' \u2014 ' + scopeDepts().map(d => DEPARTMENT_LABELS[d] || d).join(', ') : '');
-    renderOfficeChart('collected-chart', 'collected-legend', 'collected-drilldown', 'collected-drill-title', chartRecords, function(office){ scopeToggle('office', office); }, selectedOffices);
-    const grouped = groupByOfficeDept(chartRecords);
-    if(mtdLast && mtdLast.kind === 'office' && selectedOffices.indexOf(mtdLast.key) !== -1 && grouped[mtdLast.key]) showOfficeDrilldown('collected-drilldown', 'collected-drill-title', mtdLast.key, grouped[mtdLast.key]);
-    else { document.getElementById('collected-drill-title').textContent = 'Click a bar for a breakdown'; document.getElementById('collected-drilldown').innerHTML = ''; }
+    const cct = document.getElementById('collected-chart-title');
+    if(citySubfilter()){
+      const selectedDepts = scopeDepts();
+      if(cct) cct.textContent = 'By Business' + (selectedOffices.length ? ' \u2014 ' + selectedOffices.map(o => OFFICE_LABELS[o] || o).join(', ') : '');
+      const bizRecords = monthPayments.filter(officeMatches).map(toRecord);
+      const dg = renderDeptChart('collected-chart', bizRecords, function(dept){ scopeToggle('dept', dept); }, selectedDepts);
+      const lg = document.getElementById('collected-legend'); if(lg) lg.innerHTML = citiesForDepts(selectedDepts).map(function(o){ return '<div class="legend-item"><span class="legend-swatch" style="background:' + cityColor(o) + ';"></span><span>' + hEsc(OFFICE_LABELS[o] || o) + '</span></div>'; }).join('') || '<div class="empty" style="padding:8px;">Pick a business to see its cities.</div>';
+      if(mtdLast && mtdLast.kind === 'dept' && selectedDepts.indexOf(mtdLast.key) !== -1 && dg && dg[mtdLast.key]) showDeptDrilldown('collected-drilldown', 'collected-drill-title', mtdLast.key, dg[mtdLast.key]);
+      else if(selectedDepts.length === 1 && dg && dg[selectedDepts[0]]) showDeptDrilldown('collected-drilldown', 'collected-drill-title', selectedDepts[0], dg[selectedDepts[0]]);
+      else { document.getElementById('collected-drill-title').textContent = 'Click a business bar to see its cities'; document.getElementById('collected-drilldown').innerHTML = ''; }
+    } else {
+      if(cct) cct.textContent = (TENANT_DEPTS_CUSTOM ? 'By City' : 'By Office Location') + (scopeDepts().length ? ' \u2014 ' + scopeDepts().map(d => DEPARTMENT_LABELS[d] || d).join(', ') : '');
+      renderOfficeChart('collected-chart', 'collected-legend', 'collected-drilldown', 'collected-drill-title', chartRecords, function(office){ scopeToggle('office', office); }, selectedOffices);
+      const grouped = groupByOfficeDept(chartRecords);
+      if(mtdLast && mtdLast.kind === 'office' && selectedOffices.indexOf(mtdLast.key) !== -1 && grouped[mtdLast.key]) showOfficeDrilldown('collected-drilldown', 'collected-drill-title', mtdLast.key, grouped[mtdLast.key]);
+      else { document.getElementById('collected-drill-title').textContent = 'Click a bar for a breakdown'; document.getElementById('collected-drilldown').innerHTML = ''; }
+    }
     const navCount = document.getElementById('nav-count-collected');
     if(navCount) navCount.textContent = payments.length;
 
@@ -5357,9 +5612,16 @@ function todoRowHTML(item, num, priority){
   // "Show: Partial payments" on Collected This Month and Collected - the same
   // choice on both tabs, kept per browser.
   let paymentsShow = 'all';
-  try { paymentsShow = localStorage.getItem('clms.payments.show') === 'partial' ? 'partial' : 'all'; } catch(e){}
-  function setPaymentsShow(v){ paymentsShow = v === 'partial' ? 'partial' : 'all'; try { localStorage.setItem('clms.payments.show', paymentsShow); } catch(e){} renderCollectedMTD(); renderCollectedAll(); }
-  function paymentShowMatches(p){ return !claimsOps() || paymentsShow !== 'partial' || paymentIsPartial(p); }
+  try { const sv = localStorage.getItem('clms.payments.show'); paymentsShow = (sv === 'partial' || sv === 'credits') ? sv : 'all'; } catch(e){}
+  function setPaymentsShow(v){ paymentsShow = (v === 'partial' || v === 'credits') ? v : 'all'; try { localStorage.setItem('clms.payments.show', paymentsShow); } catch(e){} renderCollectedMTD(); renderCollectedAll(); }
+  // Credit memos and write-offs are not money received: they only show under
+  // "Credits & write-offs", never in the collected totals.
+  function paymentShowMatches(p){
+    if (p.kind === 'credit') return claimsOps() && paymentsShow === 'credits';
+    if (!claimsOps()) return true;
+    if (paymentsShow === 'credits') return false;
+    return paymentsShow !== 'partial' || paymentIsPartial(p);
+  }
   function syncPaymentsShow(){ ['collectedmtd-show', 'collected-show'].forEach(function(id){ const el = document.getElementById(id); if(el && el.value !== paymentsShow) el.value = paymentsShow; }); }
   function paymentRemainingHTML(p){
     const rem = Number(p.remainingBalance || 0);
@@ -5937,7 +6199,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   function fromAccountsName(by){ return String(by || '').replace(/\s*\(Accounts tab\)\s*$/, ''); }
   function acctKey(name){ return String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); }
   function acctsFilters(){ return state.acctsFilters || (state.acctsFilters = { search: '', sort: 'open-desc', includePaid: false }); }
-  function setAcctsFilter(k, v){ const f = acctsFilters(); f[k] = (k === 'includePaid' || k === 'partialOnly') ? !!v : String(v == null ? '' : v); saveState(); renderAccountsTab(); }
+  function setAcctsFilter(k, v){ const f = acctsFilters(); f[k] = (k === 'includePaid' || k === 'partialOnly') ? !!v : String(v == null ? '' : v); if (k === 'status') f.partialOnly = false; saveState(); renderAccountsTab(); }
   function invBalance(inv){ return Math.max(0, +(Number(inv.amount || 0) - Number(inv.amountPaid || 0)).toFixed(2)); }
   // Groups every invoice (optionally including paid ones) by customer name.
   function accountGroups(allInvoices){
@@ -5959,6 +6221,8 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       if(!g.contactEmail && inv.contactEmail) g.contactEmail = inv.contactEmail;
       if(inv.escalated) g.escalated++;
       if(isDoNotContact(inv)) g.dnc++;
+      if(isSensitive(inv)) g.sensitive = (g.sensitive || 0) + 1;
+      if(isBadDebt(inv)) g.badDebt = (g.badDebt || 0) + 1;
     });
     return Object.keys(groups).map(function(k){ const g = groups[k]; g.avgAge = g.ageN ? Math.round(g.ageSum / g.ageN) : 0; g.count = g.invoices.length; return g; });
   }
@@ -5971,7 +6235,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     const sb = document.getElementById('accts-search'); if(sb && document.activeElement !== sb && sb.value !== f.search) sb.value = f.search;
     const ss = document.getElementById('accts-sort'); if(ss && ss.value !== f.sort) ss.value = f.sort;
     const sp = document.getElementById('accts-paid'); if(sp) sp.checked = !!f.includePaid;
-    const spp = document.getElementById('accts-partial'); if(spp) spp.checked = !!f.partialOnly;
+    const sst = document.getElementById('accts-status'); if(sst){ const cur = statusShowValue(f.partialOnly ? 'partial' : f.status); sst.innerHTML = statusShowOptionsHTML(cur, 'All accounts'); sst.value = cur; }
     const hasQb = (state.realIntegrations || []).some(function(i){ return i.status === 'connected' && /quickbooks|intuit/i.test(String(i.provider || '')); });
     const syncBtn = document.getElementById('accts-sync-btn');
     if(syncBtn) syncBtn.style.display = (state.currentUser && state.currentUser.role === 'admin') ? '' : 'none';
@@ -5981,7 +6245,8 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       : 'Demo workspace — accounts are grouped from the sample invoices.';
     let groups = accountGroups(false);
     if(!f.includePaid) groups = groups.filter(function(g){ return g.openCount > 0; });
-    if(f.partialOnly && claimsOps()) groups = groups.filter(function(g){ return g.invoices.some(isPartiallyPaid); });
+    const acctStatus = statusShowValue(f.partialOnly ? 'partial' : f.status);
+    if(acctStatus !== 'all' && claimsOps()) groups = groups.filter(function(g){ return g.invoices.some(function(inv){ return statusShowMatches(inv, acctStatus); }); });
     const q = f.search.trim().toLowerCase();
     if(q) groups = groups.filter(function(g){ return g.name.toLowerCase().indexOf(q) !== -1 || Object.keys(g.biz).join(' ').toLowerCase().indexOf(q) !== -1 || String(g.contact || '').toLowerCase().indexOf(q) !== -1; });
     const byName = function(a, b){ return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }); };
@@ -6006,20 +6271,21 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     if(!groups.length){ wrap.innerHTML = '<div class="empty">No accounts' + (q ? ' match that search' : (f.partialOnly ? ' with a partial payment' : ' with open invoices')) + '.</div>'; return; }
     const totOpen = groups.reduce(function(s2, g){ return s2 + g.openTotal; }, 0);
     const totInv = groups.reduce(function(s2, g){ return s2 + (f.includePaid ? g.count : g.openCount); }, 0);
-    const pg = pageOf('accounts', groups, [q, f.sort, f.includePaid ? 1 : 0, f.partialOnly ? 1 : 0, state.deptFilter, state.officeFilter].join('|'));
+    const pg = pageOf('accounts', groups, [q, f.sort, f.includePaid ? 1 : 0, acctStatus, state.deptFilter, state.officeFilter].join('|'));
     wrap.innerHTML = pagerHTML(pg, 'accounts', 'top') + `
       <table class="log">
-        <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>City</th><th>Total open</th><th>Avg age</th><th>Last contact</th><th></th></tr></thead>
+        <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>City</th><th>Total open</th><th>Avg age</th><th>Last contact</th>${claimsOps() ? '<th>Last payment</th>' : ''}<th></th></tr></thead>
         <tbody>
           ${pg.rows.map(g => `
             <tr class="acct-row" data-key="${hEsc(g.key)}" onclick="openAccountPanel(this.dataset.key)">
-              <td><div class="acct-name">${hEsc(g.name)}</div><div class="acct-sub">${hEsc(g.contact || 'No contact on file')}${g.contactEmail ? ' · ' + hEsc(g.contactEmail) : ''}${g.escalated ? ' · <span style="color:var(--rust);font-weight:600;">' + g.escalated + ' escalated</span>' : ''}${g.dnc ? ' · <span style="color:var(--rust);font-weight:600;">Do not contact</span>' : ''}</div>${escalationGroupHTML(g.invoices)}</td>
+              <td><div class="acct-name">${hEsc(g.name)}</div><div class="acct-sub">${hEsc(g.contact || 'No contact on file')}${g.contactEmail ? ' · ' + hEsc(g.contactEmail) : ''}${g.sensitive ? ' · <span class="badge sensitive" style="font-size:9.5px;">SENSITIVE</span>' : ''}${g.badDebt ? ' · <span class="badge baddebt" style="font-size:9.5px;">BAD DEBT ×' + g.badDebt + '</span>' : ''}${g.escalated ? ' · <span style="color:var(--rust);font-weight:600;">' + g.escalated + ' escalated</span>' : ''}${g.dnc ? ' · <span style="color:var(--rust);font-weight:600;">Do not contact</span>' : ''}</div>${escalationGroupHTML(g.invoices)}</td>
               <td><b>${f.includePaid ? g.count : g.openCount}</b>${f.includePaid && g.openCount !== g.count ? '<div class="acct-sub">' + g.openCount + ' open</div>' : ''}</td>
               <td>${hEsc(acctBizLabel(g))}</td>
               <td>${hEsc(Object.keys(g.cities).filter(Boolean).sort().join(', '))}</td>
               <td class="amt">$${g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
               <td>${g.openCount ? g.avgAge + ' days' : '—'}</td>
               <td>${g.lastContact ? fmtDate(g.lastContact) : '<span style="color:var(--slate-soft);">—</span>'}</td>
+              ${claimsOps() ? '<td style="font-size:12.5px;white-space:nowrap;">' + lastPaymentHTML(lastPaymentOfGroup(g), { none: '—', invoice: true }) + '</td>' : ''}
               <td style="white-space:nowrap;"><button class="btn-small" data-key="${hEsc(g.key)}" onclick="event.stopPropagation(); openAccountPanel(this.dataset.key)">Open</button></td>
             </tr>`).join('')}
         </tbody>
@@ -6082,10 +6348,11 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       '<div class="acct-kpi"><div class="l">Invoices</div><div class="v">' + g.count + '</div><div class="s">' + g.openCount + ' open</div></div>' +
       '<div class="acct-kpi"><div class="l">Open balance</div><div class="v">$' + g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div><div class="s">of $' + g.invoiced.toLocaleString(undefined,{minimumFractionDigits:2}) + ' invoiced</div></div>' +
       '<div class="acct-kpi"><div class="l">Average age</div><div class="v">' + (g.openCount ? g.avgAge + 'd' : '—') + '</div><div class="s">open invoices</div></div>' +
-      '<div class="acct-kpi"><div class="l">Last contact</div><div class="v" style="font-size:15px;">' + (g.lastContact ? fmtDate(g.lastContact) : '—') + '</div><div class="s">' + (g.invoices.filter(sentFromAccounts).length ? 'statement sent from Accounts tab' : 'across all invoices') + '</div></div>';
+      '<div class="acct-kpi"><div class="l">Last contact</div><div class="v" style="font-size:15px;">' + (g.lastContact ? fmtDate(g.lastContact) : '—') + '</div><div class="s">' + (g.invoices.filter(sentFromAccounts).length ? 'statement sent from Accounts tab' : 'across all invoices') + '</div></div>' +
+      (claimsOps() ? (function(){ const p = lastPaymentOfGroup(g); return '<div class="acct-kpi"><div class="l">Last payment</div><div class="v" style="font-size:15px;">' + (p ? '$' + Number(p.amount).toLocaleString(undefined,{minimumFractionDigits:2}) : '—') + '</div><div class="s">' + (p ? fmtDate(p.paidDate) + (p.paymentMethod ? ' · ' + hEsc(paymentMethodLabel(p.paymentMethod)) : '') + (p.invoiceNumber ? ' · ' + hEsc(p.invoiceNumber) : '') : 'no payments yet') + '</div></div>'; })() : '');
     const rows = g.invoices.slice().sort(function(a, b){ return String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')); });
     document.getElementById('acct-inv-table').innerHTML =
-      '<thead><tr><th></th><th>Invoice #</th><th>Invoice date</th><th>Age</th><th>Business</th><th>City</th><th>Amount</th><th>Balance</th><th>Status</th><th>Last follow-up</th></tr></thead><tbody>' +
+      '<thead><tr><th></th><th>Invoice #</th><th>Invoice date</th><th>Age</th><th>Business</th><th>City</th><th>Amount</th><th>Balance</th><th>Status</th><th>Last follow-up</th>' + (claimsOps() ? '<th>Last payment</th>' : '') + '</tr></thead><tbody>' +
       rows.map(function(inv){
         const paid = inv.jobStatus === 'paid' || invBalance(inv) <= 0;
         return '<tr class="' + (paid ? 'paid' : '') + '">' +
@@ -6099,6 +6366,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
           '<td class="amt">$' + invBalance(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
           '<td>' + hEsc(STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '') + (claimsOps() ? escalationCellHTML(inv) : escStatusHTML(inv) + (isDoNotContact(inv) ? ' <span class="badge escalated">DNC</span>' : '')) + '</td>' +
           '<td>' + lastFollowUpHTML(inv) + '</td>' +
+          (claimsOps() ? '<td style="font-size:12px;white-space:nowrap;">' + lastPaymentHTML(lastPaymentOf(inv), { none: '—' }) + '</td>' : '') +
         '</tr>';
       }).join('') + '</tbody>';
     document.getElementById('acct-sel-hint').textContent = sel.length ? (sel.length + ' invoice' + (sel.length === 1 ? '' : 's') + ' selected — $' + selTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + ' on the statement') : 'Select the invoices to put on the statement.';
@@ -6477,7 +6745,7 @@ Hard rules - these override everything above:
       if (q && [inv.name, inv.invoiceNumber, inv.meta, inv.contact, inv.contactInfo, inv.notifiedName, inv.claimNumber].map(x => String(x || '').toLowerCase()).join(' ').indexOf(q) === -1) return false;
       if (f.office !== 'all' && inv.officeLocation !== f.office) return false;
       if (f.dept !== 'all' && inv.department !== f.dept) return false;
-      if (f.payer === 'partial' ? (claimsOps() && !isPartiallyPaid(inv)) : (f.payer !== 'all' && inv.payer !== f.payer)) return false;
+      if (STATUS_SHOW_LABELS[f.payer] ? !statusShowMatches(inv, f.payer) : (f.payer !== 'all' && inv.payer !== f.payer)) return false;
       if (f.notified === 'yes' && !inv.notifiedName) return false;
       if (f.notified === 'no' && inv.notifiedName) return false;
       return true;
@@ -6667,6 +6935,14 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     syncUploadOther();
     uploadNote('');
     loadRemoteDocuments(inv);
+    if (claimsOps()) {
+      const lp = lastPaymentOf(inv);
+      const lpEl = document.getElementById('detail-last-payment');
+      if (lpEl) lpEl.innerHTML = '<b>Last payment:</b> ' + lastPaymentHTML(lp, { none: 'none recorded yet' }) +
+        (inv.creditAmount ? '<div style="margin-top:4px;"><b>Credits applied:</b> $' + Number(inv.creditAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + (isBadDebt(inv) ? ' <span class="badge baddebt">BAD DEBT</span>' : '') + '</div>' : '') +
+        '<div style="margin-top:4px;color:var(--slate-soft);">Balance due $' + balanceDue(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + ' of $' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '. Full payment history is under Account History.</div>';
+      const sEl = document.getElementById('detail-sensitive'); if (sEl) sEl.innerHTML = sensitiveControlsHTML(inv);
+    }
     // DO NOT CONTACT: reflect the flag, and hide every way of drafting a message
     // to this customer while it is on.
     const dnc = isDoNotContact(inv);
@@ -7089,7 +7365,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       }
     }
     const payments = ((state.paymentsLog) || []).filter(function(p){ return String(p.invoiceId) === String(inv.id); }).map(function(p){
-      return { at: p.paidDate, amount: p.amount, method: p.paymentMethod, reference: p.referenceNumber || p.checkNumber || null, payerName: p.payerName, bankName: p.bankName, memo: p.memo };
+      return { at: p.paidDate, amount: p.amount, method: p.paymentMethod, reference: p.referenceNumber || p.checkNumber || null, payerName: p.payerName, bankName: p.bankName, memo: p.memo, kind: p.kind || 'payment', itemName: p.itemName || null };
     });
     const documents = (inv.documents || []).map(function(d){ return { id: d.id, name: d.name, kind: d.kind, label: d.label || null, createdAt: null, remote: !!d.remote }; });
     const notes = (inv.activity || []).map(function(a){ return { text: a.text, ts: a.ts, author: a.source === 'automation' ? 'clAIms automation' : (a.source || null), source: a.source || null }; });
@@ -7247,6 +7523,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         ? ('<input type="date" value="' + hEsc(lastDay ? String(lastDay).slice(0,10) : '') + '" onchange="setLastDayOnSite(' + inv.id + ', this.value)">')
         : ('<div class="v ' + (lastDay ? '' : 'muted') + '">' + (lastDay ? hDate(lastDay) : 'Not recorded') + '</div>')) +
       (lastDayDays != null ? ('<div class="k" style="margin-top:4px;">' + lastDayDays + ' day' + (lastDayDays === 1 ? '' : 's') + ' ago</div>') : '') + '</div>';
+    const sensEl = document.getElementById('hist-sensitive'); if (sensEl) sensEl.innerHTML = sensitiveControlsHTML(inv);
     document.getElementById('hist-summary').innerHTML =
       tile('Invoice amount', hMoney(a.amount)) +
       tile('Paid', hMoney(paid)) +
@@ -7255,6 +7532,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Invoice date', hDate(a.invoicedAt) + (a.invoicedAt ? (' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.invoicedAt) + 'd)</span>') : '')) +
       tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>' + fromAccountsBadge(a)) : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
       tile('Follow-ups sent', String(a.followUpCount || 0), '', 'followups') +
+      (claimsOps() ? tile('Last payment', lastPaymentHTML(lastPaymentOf(inv), { none: 'No payments yet' }), lastPaymentOf(inv) ? '' : 'muted') : '') +
+      (claimsOps() && (a.creditAmount || inv.creditAmount) ? tile('Credits applied', hMoney(a.creditAmount || inv.creditAmount) + (isBadDebt(inv) ? ' <span class="badge baddebt">BAD DEBT</span>' : ''), '') : '') +
       lastDayTile +
       (TENANT_DEPTS_CUSTOM ? tile('Work Authorization signed', a.waSignedAt ? ('Signed <span style="font-weight:400;color:var(--slate-soft);">' + hDate(a.waSignedAt) + '</span>') : 'Not signed', a.waSignedAt ? '' : 'muted', 'waSignedDate') : dateTile('Work Authorization signed', a.waSignedAt, 'waSignedDate')) +
       dateTile('COS signed', a.cosSignedAt, 'cosSignedDate') +
@@ -7274,6 +7553,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         tile(claimsOps() ? 'Sent to Legal (DNC)' : 'Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted', 'doNotContact')
       ) : '') +
       (claimsOps() ? tile('Claim status', inv.claimStatus ? hEsc(CLAIM_STATUS_LABELS[inv.claimStatus] || inv.claimStatus) : 'Not set', inv.claimStatus ? '' : 'muted', 'claimStatus') : '') +
+      (claimsOps() ? tile('Sensitive customer', isSensitive(inv) ? ('Yes' + (inv.sensitiveScope === 'customer' ? ' · all invoices' : ' · this invoice') + (inv.sensitiveBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.sensitiveBy) + '</div>' : '')) : 'No', isSensitive(inv) ? '' : 'muted') : '') +
       tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted', 'escalated') +
       tile('Last response', (a.responded && a.responded !== 'none' && a.responseSummary) ? hEsc(a.responseSummary) : 'None yet', (a.responded && a.responded !== 'none' && a.responseSummary) ? '' : 'muted', 'responseSummary');
 
@@ -7293,11 +7573,13 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       : '<div class="hist-empty">No follow-ups, demand letters or NOILs have been sent on this account.</div>';
 
     const pays = data.payments || [];
-    const payTotal = pays.reduce(function(s, p){ return s + Number(p.amount || 0); }, 0);
+    const payTotal = pays.filter(function(p){ return p.kind !== 'credit'; }).reduce(function(s, p){ return s + Number(p.amount || 0); }, 0);
+    const creditTotal = pays.filter(function(p){ return p.kind === 'credit'; }).reduce(function(s, p){ return s + Number(p.amount || 0); }, 0);
     document.getElementById('hist-payments').innerHTML = pays.length
       ? ('<table class="hist-table"><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Payer</th><th>Memo</th></tr></thead><tbody>' + pays.map(function(p){
-          return '<tr><td style="white-space:nowrap;">' + hEsc(hDate(p.at)) + '</td><td style="font-family:var(--font-mono);">' + hMoney(p.amount) + '</td><td>' + hEsc(p.method || '—') + '</td><td>' + hEsc(p.reference || '—') + '</td><td>' + hEsc(p.payerName || '—') + (p.bankName ? ('<div style="font-size:11px;color:var(--slate-soft);">' + hEsc(p.bankName) + '</div>') : '') + '</td><td>' + hEsc(p.memo || '') + '</td></tr>';
-        }).join('') + '<tr><td></td><td style="font-family:var(--font-mono);font-weight:600;">' + hMoney(payTotal) + '</td><td colspan="4" style="color:var(--slate-soft);">total received · balance ' + hMoney(balance) + '</td></tr></tbody></table>')
+          const credit = p.kind === 'credit';
+          return '<tr' + (credit ? ' class="credit-row"' : '') + '><td style="white-space:nowrap;">' + hEsc(hDate(p.at)) + '</td><td style="font-family:var(--font-mono);">' + (credit ? '<span class="badge credit">CREDIT</span> ' : '') + hMoney(p.amount) + '</td><td>' + hEsc(p.method || '—') + (p.itemName ? '<div style="font-size:11px;color:var(--slate-soft);">' + hEsc(p.itemName) + '</div>' : '') + '</td><td>' + hEsc(p.reference || '—') + '</td><td>' + hEsc(p.payerName || '—') + (p.bankName ? ('<div style="font-size:11px;color:var(--slate-soft);">' + hEsc(p.bankName) + '</div>') : '') + '</td><td>' + hEsc(p.memo || '') + '</td></tr>';
+        }).join('') + '<tr><td></td><td style="font-family:var(--font-mono);font-weight:600;">' + hMoney(payTotal) + '</td><td colspan="4" style="color:var(--slate-soft);">total received' + (creditTotal > 0.005 ? ' · ' + hMoney(creditTotal) + ' in credits / write-offs' : '') + ' · balance ' + hMoney(balance) + '</td></tr></tbody></table>')
       : '<div class="hist-empty">No payments recorded yet' + (balance > 0 ? (' · balance ' + hMoney(balance)) : '') + '.</div>';
 
     const docs = data.documents || [];
@@ -8156,6 +8438,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     for(const inv of trackedInvoices()){
       if(inv.escalated) continue;
       if(isDoNotContact(inv)) continue;   // sent to Legal: the cadence never touches it
+      if(isSensitive(inv)) continue;      // Sensitive customers are contacted by hand
       const checkpoint = nextCadenceCheckpoint(inv);
       if(checkpoint && inv.days >= checkpoint.day){
         await autoSendForCheckpoint(inv, checkpoint);
@@ -8164,7 +8447,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
   }
 
   async function autoSendForCheckpoint(inv, checkpoint){
-    if(isDoNotContact(inv)) return;
+    if(isDoNotContact(inv) || isSensitive(inv)) return;
     const draftType = checkpointDraftType(checkpoint);
     if(state.automationSettings.requireReview){
       addActivity(inv, `Day ${checkpoint.day} cadence checkpoint reached (${checkpoint.label}) \u2014 held for manual review before sending.`, 'automation');
@@ -8292,10 +8575,31 @@ Hard rules - these override everything above:
       `\n\nReturn only the revised email body, ending with a closing line and no signature.`;
   }
 
+  // The company's own demand-letter template (My Account > Settings), filled
+  // in from the invoice. Present: it replaces the AI draft for demand letters.
+  function demandTemplate(){ const t = state.currentUser && state.currentUser.demandTemplate; return (t && t.body) ? t : null; }
+  function demandMergeValues(inv, recipient){
+    const money = function(n){ return '$' + Number(n || 0).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); };
+    const longDate = function(v){ if(!v) return ''; const d = new Date(String(v).length > 10 ? v : v + 'T12:00:00'); return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); };
+    const me = state.currentUser || {};
+    const sig = (typeof currentSignature === 'function') ? currentSignature() : null;
+    const due = /^Due\s+(\d{4}-\d{2}-\d{2})/.exec(String(inv.meta || ''));
+    return {
+      customer_name: inv.name || '', contact_name: (recipient === 'contact' ? contactPersonName(inv) : '') || inv.contact || '',
+      invoice_number: inv.invoiceNumber || '', invoice_date: longDate(inv.invoiceDate),
+      amount: money(inv.amount), paid: money(inv.amountPaid), balance: money(balanceDue(inv)),
+      days_outstanding: String(inv.days || 0), due_date: due ? longDate(due[1]) : '', claim_number: inv.claimNumber || '',
+      business: deptLabel(inv), city: OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '',
+      company: me.companyName || '', sender_name: (sig && sig.name) || me.fullName || '', sender_email: (sig && sig.email) || me.email || '', sender_phone: (sig && sig.phone) || '',
+      today: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+    };
+  }
+  function mergeDemand(text, vals){ return String(text || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, function(m, k){ const key = String(k).toLowerCase(); return Object.prototype.hasOwnProperty.call(vals, key) ? String(vals[key] == null ? '' : vals[key]) : ''; }); }
   async function fetchDraftText(inv, draftType, docs, recipient, extraInstruction){
     // The interactive demo has no signed-in user, so there is no AI endpoint to
     // call; it drafts from the standard templates instead of surfacing a failure.
     if(!state.currentUser) return templateDraftText(inv, draftType, recipient || recipientDefault(inv));
+    if(draftType === 'demand' && demandTemplate() && !extraInstruction) return mergeDemand(demandTemplate().body, demandMergeValues(inv, recipient || recipientDefault(inv)));
     let prompt = buildPrompt(inv, draftType, docs, recipient);
     if(extraInstruction) prompt += instructionBlock(extraInstruction);
     const response = await fetch("/api/ai-draft", {
@@ -8387,6 +8691,7 @@ Hard rules - these override everything above:
   let customSubject = null; // homeowner-tab subject the user typed for this drawer session
 
   function defaultSubjectFor(inv, draftType){
+    if(draftType === 'demand' && demandTemplate() && demandTemplate().subject && inv) return mergeDemand(demandTemplate().subject, demandMergeValues(inv, currentRecipient || recipientDefault(inv)));
     return (draftType === 'noil' ? 'Notice of Intent to Lien - ' : draftType === 'demand' ? 'Demand for payment - ' : 'Outstanding invoice - ') + ((inv && inv.name) || '');
   }
   function onSubjectInput(){
@@ -8476,6 +8781,9 @@ Hard rules - these override everything above:
       showToast(currentInvoice.name + ' is marked Sent to Legal, DO NOT CONTACT. Nothing can be drafted or sent.');
       currentInvoice = null;
       return;
+    }
+    if(isSensitive(currentInvoice)){
+      showToast(currentInvoice.name + ' is a Sensitive customer: automated follow-ups are paused. Review this draft carefully before sending.');
     }
     currentRecipient = recipientDefault(currentInvoice);
     customSubject = null;
