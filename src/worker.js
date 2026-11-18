@@ -834,10 +834,13 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   function followUpDay(ts){ return day(ts); }
   // Escalation flags and follow-up reminders, same rules as the dashboard
   // (claims-operations pack companies only).
-  function flagsOf(a){ var f = []; if(a.escalated) f.push('Escalated'); if(a.demandLetterSentAt) f.push('Demand letter sent'); if(a.noilSentAt || a.noilSent) f.push('NOIL sent'); if(a.lienFiled) f.push('Lien filed'); if(a.doNotContact) f.push(legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'); return f; }
+  function flagsOf(a){ var f = []; if(a.sensitive) f.push('Sensitive'); if(a.badDebt) f.push('Bad debt'); if(a.escalated) f.push('Escalated'); if(a.demandLetterSentAt) f.push('Demand letter sent'); if(a.noilSentAt || a.noilSent) f.push('NOIL sent'); if(a.lienFiled) f.push('Lien filed'); if(a.doNotContact) f.push(legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'); return f; }
   function bizDaysSince(v){ var d = day(v); if(!d) return null; var start = new Date(d + 'T12:00:00'); if(isNaN(start.getTime())) return null; var t = new Date(); t.setHours(12,0,0,0); var n = 0, x = new Date(start); while(x < t){ x.setDate(x.getDate() + 1); var wd = x.getDay(); if(wd !== 0 && wd !== 6) n++; if(n > 400) break; } return n; }
-  function followUp(a){ if(!legal() || isPaid(a) || a.doNotContact || a.responded === 'replied' || balance(a) <= 0) return null; var last = [a.lastFollowUpAt, a.lastContact].map(day).filter(Boolean).sort().pop(); if(!last) return null; var n = bizDaysSince(last); if(n == null || n < 3) return null; return { level: n >= 5 ? 'overdue' : 'due', days: n }; }
-  function followUpText(a){ var r = followUp(a); return r ? ((r.level === 'overdue' ? 'OVERDUE' : 'DUE') + ' (' + r.days + ' business days)') : ''; }
+  // Due after 3 business days, overdue after 5, on either trigger: the customer
+  // replied and nobody has followed up since, or nothing has touched the
+  // invoice since the last outreach.
+  function followUp(a){ if(!legal() || isPaid(a) || a.doNotContact || balance(a) <= 0) return null; var fu = day(a.lastFollowUpAt), lc = day(a.lastContact); var replied = a.responded === 'replied'; var since, why; if(replied){ if(!lc || (fu && fu >= lc)) return null; since = lc; why = 'reply'; } else { since = [fu, lc].filter(Boolean).sort().pop(); why = 'silent'; } if(!since) return null; var n = bizDaysSince(since); if(n == null || n < 3) return null; return { level: n >= 5 ? 'overdue' : 'due', days: n, reason: why }; }
+  function followUpText(a){ var r = followUp(a); return r ? ((r.level === 'overdue' ? 'OVERDUE' : 'DUE') + ' (' + r.days + ' business days' + (r.reason === 'reply' ? ', reply unanswered' : '') + ')') : ''; }
   var CLAIM_STATUS = { under_review: 'Under Review', approved: 'Approved', denied: 'Denied', pending_documentation: 'Pending Documentation', resolved: 'Resolved' };
   function claimStatusText(a){ return CLAIM_STATUS[a.claimStatus] || ''; }
   // Extra columns for pack companies, appended to the invoice-level reports.
@@ -883,7 +886,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   // picked is always visible, and City / Business / Payer take several.
   function legal(){ return !!(R.me && R.me.features && R.me.features.claimsOps); }
   function dncWord(){ return legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'; }
-  function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['partial', 'Partial payment'], ['follow-up', 'Follow-up due'], ['flagged', 'Escalated / NOIL / Demand / Legal']]).concat(Object.keys(CLAIM_STATUS).map(function(k){ return ['cs-' + k, 'Claim status: ' + CLAIM_STATUS[k]]; })); return o; }
+  function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['partial', 'Partial payment'], ['follow-up', 'Follow-up due'], ['overdue', 'Overdue (5+ business days)'], ['legal', 'Sent to Legal'], ['demand', 'Demand letter sent'], ['lien', 'Lien filed'], ['sensitive', 'Sensitive customer'], ['baddebt', 'Bad debt (written off)'], ['flagged', 'Escalated / NOIL / Demand / Legal']]).concat(Object.keys(CLAIM_STATUS).map(function(k){ return ['cs-' + k, 'Claim status: ' + CLAIM_STATUS[k]]; })); return o; }
   function statusWord(k){ if(k.indexOf('cs-') === 0) return 'Claim status: ' + (CLAIM_STATUS[k.slice(3)] || k.slice(3)); return { open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied', partial: 'Partial payment', 'follow-up': 'Follow-up due', flagged: 'Escalated / NOIL / Demand / Legal' }[k] || k; }
   var PAYER_OPTS = [['insurance', 'Insurance'], ['pm', 'Commercial or Property Management'], ['private', 'Private Pay']];
   function chipRow(id, opts, picked, multi, allLabel){
@@ -948,6 +951,12 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     if(f.status === 'replied' && a.responded !== 'replied') return false;
     if(f.status === 'partial' && !(!paid && Number(a.paidAmount || 0) > 0.005 && balance(a) > 0.005)) return false;
     if(f.status === 'follow-up' && !followUp(a)) return false;
+    if(f.status === 'overdue' && !(followUp(a) && followUp(a).level === 'overdue')) return false;
+    if(f.status === 'legal' && !a.doNotContact) return false;
+    if(f.status === 'demand' && !a.demandLetterSentAt) return false;
+    if(f.status === 'lien' && !a.lienFiled) return false;
+    if(f.status === 'sensitive' && !a.sensitive) return false;
+    if(f.status === 'baddebt' && !a.badDebt) return false;
     if(f.status === 'flagged' && !flagsOf(a).length) return false;
     if(f.status.indexOf('cs-') === 0 && String(a.claimStatus || '') !== f.status.slice(3)) return false;
     return true;
@@ -1513,6 +1522,16 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '</div> ' +
   ' ' +
   '<div class="acct-panel" id="panel-settings"> ' +
+  '<div class="acct-card" id="demandTemplateCard" style="display:none;"> ' +
+  '<h3>Demand letter template</h3> ' +
+  '<div class="acct-card-sub">Your company\'s own demand letter. When a template is saved here, every demand letter clAIms drafts (from the invoice drawer or the Day-30 cadence) uses it instead of the generic AI letter, filled in with the invoice and customer details.</div> ' +
+  '<div id="demandTemplateRestricted" class="restricted-box" style="display:none;">Only admins and managers can change the template. The current template is shown below.</div> ' +
+  '<div class="acct-field" style="margin-top:12px;"><label>Subject line</label><input type="text" id="dtSubject" class="acct-input" placeholder="Demand for payment - {{customer_name}} - {{invoice_number}}" style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #D9D6CE;border-radius:6px;font-size:14px;"></div> ' +
+  '<div class="acct-field" style="margin-top:10px;"><label>Letter body</label><textarea id="dtBody" rows="16" placeholder="Paste your demand letter here. Use the merge fields below where the invoice details go." style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #D9D6CE;border-radius:6px;font-size:13.5px;line-height:1.5;font-family:inherit;"></textarea></div> ' +
+  '<div class="acct-card-sub" style="margin-top:8px;">Merge fields (type them exactly, with the braces): <span id="dtFields" style="font-family:ui-monospace,Menlo,monospace;font-size:12px;"></span></div> ' +
+  '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><button class="btn-dark btn-sm" id="dtSaveBtn">Save template</button><button class="btn-outline btn-sm" id="dtClearBtn">Remove template (use the generic letter)</button><span id="dtMsg" style="font-size:13px;"></span></div> ' +
+  '<div class="acct-card-sub" id="dtMeta" style="margin-top:8px;"></div> ' +
+  '</div> ' +
   '<div class="acct-card" id="permissionsCard" style="display:none;"> ' +
   '<h3>Permissions</h3> ' +
   '<div class="acct-card-sub">What each account type can do at your company.</div> ' +
@@ -1762,7 +1781,23 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
  'document.getElementById("integrationsModalBackdrop").classList.remove("open"); ' +
  '} ' +
  ' ' +
-'  function renderSettingsTab(){ ' +
+'  function renderDemandTemplateCard(){ ' +
+  '    var card=document.getElementById("demandTemplateCard"); if(!card) return; ' +
+  '    var me=state.me||{}; var feats=me.features||{}; if(!feats.claimsOps){ card.style.display="none"; return; } ' +
+  '    card.style.display="block"; var r=role(); var canEdit=(r==="admin"||r==="manager"); ' +
+  '    document.getElementById("demandTemplateRestricted").style.display=canEdit?"none":"block"; ' +
+  '    var sub=document.getElementById("dtSubject"), body=document.getElementById("dtBody"); sub.disabled=!canEdit; body.disabled=!canEdit; ' +
+  '    document.getElementById("dtSaveBtn").style.display=canEdit?"inline-block":"none"; document.getElementById("dtClearBtn").style.display=canEdit?"inline-block":"none"; ' +
+  '    var t=me.demandTemplate||null; if(!sub.dataset.loaded){ sub.value=t?(t.subject||""):""; body.value=t?(t.body||""):""; sub.dataset.loaded="1"; } ' +
+  '    document.getElementById("dtFields").textContent=(me.demandMergeFields||[]).map(function(k){ return "{{"+k+"}}"; }).join("  "); ' +
+  '    document.getElementById("dtMeta").textContent=t?("Saved "+(t.updatedAt?new Date(t.updatedAt).toLocaleString():"")+(t.updatedBy?" by "+t.updatedBy:"")+"."):"No template saved - demand letters use the generic clAIms letter."; ' +
+  '    var save=document.getElementById("dtSaveBtn"), clear=document.getElementById("dtClearBtn"), msg=document.getElementById("dtMsg"); ' +
+  '    function post(payload,okText){ save.disabled=true; clear.disabled=true; msg.textContent="Saving\u2026"; fetch("/api/settings/demand-template",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(function(x){return x.json();}).then(function(d){ save.disabled=false; clear.disabled=false; if(d&&d.ok){ me.demandTemplate=d.template||null; msg.style.color="#1F5346"; msg.textContent=okText; if(!d.template){ sub.value=""; body.value=""; } renderDemandTemplateCard(); } else { msg.style.color="#8A1C13"; msg.textContent=(d&&d.error)||"Could not save."; } }).catch(function(){ save.disabled=false; clear.disabled=false; msg.style.color="#8A1C13"; msg.textContent="Could not save."; }); } ' +
+  '    if(!save.dataset.wired){ save.dataset.wired="1"; save.addEventListener("click",function(){ if(!body.value.trim()){ msg.style.color="#8A1C13"; msg.textContent="Paste the letter body first."; return; } post({subject:sub.value,body:body.value},"Template saved. Demand letters now use it."); }); ' +
+  '      clear.addEventListener("click",function(){ post({clear:true},"Template removed. Demand letters use the generic letter again."); }); } ' +
+  '  } ' +
+  '  function renderSettingsTab(){ ' +
+  '    renderDemandTemplateCard(); ' +
   '    var r=role(); ' +
   '    document.getElementById("integrationsCardOuter").style.display=(r==="admin")?"block":"none"; ' +
   '    document.getElementById("permissionsCard").style.display="block"; ' +
@@ -4132,8 +4167,19 @@ const amt = round2(p.amount);
 if (!(amt > 0)) continue;
 const ext = p.id || p.externalId || p.paymentId || null;
 if (ext) {
-const dup = await pgSelectOne(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&external_id=' + pgEq(String(ext).slice(0, 120)) + '&select=id');
-if (dup) continue;
+const dup = await pgSelectOne(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&external_id=' + pgEq(String(ext).slice(0, 120)) + '&select=id,amount,kind,item_name');
+if (dup) {
+// Same QuickBooks line seen again: keep one row, but let its amount and kind
+// follow the source (a payment that used to include an applied credit memo
+// shrinks to the cash part once credits are tracked on their own).
+const wantKind = p.kind === 'credit' ? 'credit' : 'payment';
+const wantItem = p.itemName ? String(p.itemName).slice(0, 160) : null;
+if (Math.abs(round2(dup.amount) - amt) > 0.005 || (dup.kind || 'payment') !== wantKind || (dup.item_name || null) !== wantItem) {
+await pgUpdate(env, 'invoice_payments', 'id=' + pgEq(dup.id), { amount: amt, kind: wantKind, item_name: wantItem,
+method: p.method ? String(p.method).slice(0, 40) : 'integration', memo: p.memo ? String(p.memo).slice(0, 500) : 'Synced from accounting integration' });
+}
+continue;
+}
 }
 await pgInsert(env, 'invoice_payments', {
 tenant_id: tenantId, account_id: accountId, amount: amt,
@@ -4144,7 +4190,9 @@ reference: p.reference ? String(p.reference).slice(0, 80) : null,
 bank_name: p.bankName ? String(p.bankName).slice(0, 120) : null,
 memo: p.memo ? String(p.memo).slice(0, 500) : 'Synced from accounting integration',
 source: 'integration',
-external_id: ext ? String(ext).slice(0, 120) : null
+external_id: ext ? String(ext).slice(0, 120) : null,
+kind: p.kind === 'credit' ? 'credit' : 'payment',
+item_name: p.itemName ? String(p.itemName).slice(0, 160) : null
 });
 recorded = round2(recorded + amt);
 }
@@ -4298,6 +4346,20 @@ if (raw.sentToCollections) { commonFields.do_not_contact_at = nowIso; commonFiel
 else { commonFields.do_not_contact_at = null; commonFields.do_not_contact_by = null; }
 }
 if (raw.pa !== undefined) commonFields.pa = !!raw.pa;
+// Credits and write-offs from the accounting system (QuickBooks credit memos).
+if (raw.creditAmount !== undefined && raw.creditAmount !== null) commonFields.credit_amount = round2(raw.creditAmount);
+if (raw.badDebt !== undefined && raw.badDebt !== null) {
+commonFields.bad_debt = !!raw.badDebt;
+commonFields.bad_debt_at = raw.badDebt ? (normalizeDateOnly(raw.badDebtAt) || (existing && existing.bad_debt_at) || nowIso.slice(0, 10)) : null;
+}
+// A customer the team marked Sensitive (whole customer): every new invoice
+// that arrives for that customer inherits the flag.
+if (!existing && raw.customerName) {
+try {
+const sens = await pgSelectOne(env, 'accounts', 'tenant_id=' + pgEq(integration.tenant_id) + '&customer_name=' + pgEq(String(raw.customerName).slice(0, 200)) + '&sensitive=is.true&sensitive_scope=' + pgEq('customer') + '&select=id,sensitive_by');
+if (sens) { commonFields.sensitive = true; commonFields.sensitive_scope = 'customer'; commonFields.sensitive_at = nowIso; commonFields.sensitive_by = sens.sensitive_by || 'Inherited from customer'; }
+} catch (e) {}
+}
 // Last day crews were on the job - drives lien deadlines. Accept the common
 // field names CRMs use for it.
 const rawLastDay = raw.lastDayOnSite || raw.last_day_on_site || raw.lastOnSiteDate || raw.lastOnSite || raw.completionDate || raw.jobCompletedAt || raw.completedAt || null;
@@ -4663,22 +4725,49 @@ if (label && label.length >= 4 && (target.indexOf(label) === 0 || label.indexOf(
 }
 return null;
 }
-function qboPaymentsForInvoice(inv, paymentsById, conn) {
+// Service items on a credit memo ("Bad Debt", "Discount", ...), as one label.
+function qboCreditItems(cm) {
+const names = [];
+for (const l of ((cm && cm.Line) || [])) {
+const d = l && l.SalesItemLineDetail;
+const n = d && d.ItemRef && d.ItemRef.name;
+if (n && names.indexOf(n) === -1) names.push(String(n));
+}
+return names;
+}
+const BAD_DEBT_RE = /bad\s*debt|write[\s-]*off|uncollect/i;
+function qboCreditIsBadDebt(cm) {
+if (!cm) return false;
+if (qboCreditItems(cm).some(function (n) { return BAD_DEBT_RE.test(n); })) return true;
+return BAD_DEBT_RE.test(String(cm.PrivateNote || '')) || BAD_DEBT_RE.test(String((cm.CustomerMemo && cm.CustomerMemo.value) || ''));
+}
+// Every payment line QuickBooks applied to this invoice. A credit memo is
+// applied through a zero-dollar Payment whose line links both the invoice and
+// the CreditMemo, so each line is either real money (kind 'payment') or a
+// credit (kind 'credit'); the dashboard keeps the two apart.
+function qboPaymentsForInvoice(inv, paymentsById, conn, creditsById) {
 const out = [];
+creditsById = creditsById || {};
 for (const link of (inv.LinkedTxn || [])) {
 if (!link || link.TxnType !== 'Payment') continue;
 const p = paymentsById[String(link.TxnId)];
 if (!p) continue;
-let amount = 0;
+let cash = 0;
+const credits = [];
 for (const line of (p.Line || [])) {
-for (const lt of (line.LinkedTxn || [])) {
-if (lt && lt.TxnType === 'Invoice' && String(lt.TxnId) === String(inv.Id)) amount += Number(line.Amount) || 0;
+const links = line.LinkedTxn || [];
+const hitsInvoice = links.some(function (lt) { return lt && lt.TxnType === 'Invoice' && String(lt.TxnId) === String(inv.Id); });
+if (!hitsInvoice) continue;
+const cmLink = links.find(function (lt) { return lt && lt.TxnType === 'CreditMemo'; });
+const amt = Number(line.Amount) || 0;
+if (cmLink) credits.push({ id: String(cmLink.TxnId), amount: amt, cm: creditsById[String(cmLink.TxnId)] || null });
+else cash += amt;
 }
-}
-if (!(amount > 0)) continue;
+if (cash > 0) {
 out.push({
 id: qboPayPrefix(conn) + p.Id + '-' + inv.Id,
-amount: round2(amount),
+kind: 'payment',
+amount: round2(cash),
 date: p.TxnDate || null,
 method: (p.PaymentMethodRef && p.PaymentMethodRef.name) || 'QuickBooks',
 reference: p.PaymentRefNum || null,
@@ -4686,19 +4775,43 @@ payerName: (p.CustomerRef && p.CustomerRef.name) || null,
 memo: 'Payment recorded in QuickBooks'
 });
 }
+for (const c of credits) {
+if (!(c.amount > 0)) continue;
+const items = qboCreditItems(c.cm);
+const bad = qboCreditIsBadDebt(c.cm);
+out.push({
+id: qboPayPrefix(conn) + p.Id + '-' + inv.Id + '-cm' + c.id,
+kind: 'credit',
+amount: round2(c.amount),
+date: (c.cm && c.cm.TxnDate) || p.TxnDate || null,
+method: bad ? 'Bad debt write-off' : 'Credit memo',
+reference: (c.cm && c.cm.DocNumber) || null,
+payerName: (p.CustomerRef && p.CustomerRef.name) || null,
+itemName: items.join(', ').slice(0, 160) || null,
+badDebt: bad,
+memo: (bad ? 'Written off as bad debt in QuickBooks' : 'Credit memo applied in QuickBooks') + (items.length ? ' (' + items.join(', ') + ')' : '')
+});
+}
+}
 return out;
 }
-function qboInvoiceToItem(inv, customer, departments, paymentsById, conn) {
+function qboInvoiceToItem(inv, customer, departments, paymentsById, conn, creditsById) {
 const total = round2(inv.TotalAmt);
 const balance = round2(inv.Balance);
 const voided = total === 0 && /voided/i.test(String(inv.PrivateNote || ''));
 const addr = inv.BillAddr || inv.ShipAddr || (customer && (customer.BillAddr || customer.ShipAddr)) || {};
 const notes = [inv.PrivateNote, inv.CustomerMemo && inv.CustomerMemo.value].filter(function (v) { return v && String(v).trim(); }).join('\n\n');
 const person = customer ? ([customer.GivenName, customer.FamilyName].filter(Boolean).join(' ') || customer.DisplayName || null) : null;
-const payments = qboPaymentsForInvoice(inv, paymentsById || {}, conn);
+const payments = qboPaymentsForInvoice(inv, paymentsById || {}, conn, creditsById);
 const fullyPaid = balance <= 0.005;
 let lastPaidOn = null;
-for (const p of payments) { if (p.date && (!lastPaidOn || p.date > lastPaidOn)) lastPaidOn = p.date; }
+for (const p of payments) { if (p.kind !== 'credit' && p.date && (!lastPaidOn || p.date > lastPaidOn)) lastPaidOn = p.date; }
+let creditAmount = 0, badDebtAt = null, badDebt = false;
+for (const p of payments) {
+if (p.kind !== 'credit') continue;
+creditAmount = round2(creditAmount + p.amount);
+if (p.badDebt) { badDebt = true; if (p.date && (!badDebtAt || p.date > badDebtAt)) badDebtAt = p.date; }
+}
 const item = {
 externalId: qboExtPrefix(conn) + inv.Id,
 customerName: (inv.CustomerRef && inv.CustomerRef.name) || (customer && customer.DisplayName) || 'QuickBooks customer',
@@ -4714,7 +4827,10 @@ claimNumber: qboClaimNumber(inv),
 office: addr.City || null,
 department: qboConnDepartment(conn, departments) || qboDepartmentKey(inv, departments),
 meta: inv.DueDate ? ('Due ' + inv.DueDate) : null,
-payments: payments
+payments: payments,
+creditAmount: creditAmount,
+badDebt: badDebt,
+badDebtAt: badDebtAt
 };
 if (voided) item.note = 'Voided in QuickBooks' + (notes ? '\n\n' + notes : '');
 else if (notes) item.note = notes;
@@ -4734,8 +4850,17 @@ const customersById = {};
 for (const c of await qboFetchByIds(env, conn, 'Customer', customerIds)) customersById[String(c.Id)] = c;
 const paymentsById = {};
 for (const p of await qboFetchByIds(env, conn, 'Payment', paymentIds)) paymentsById[String(p.Id)] = p;
+// Credit memos those payments applied (a $100 invoice with a $25 credit memo
+// shows a $25 credit, not an anonymous $25 "payment"; a "Bad Debt" credit
+// marks the invoice written off).
+const creditIds = [];
+Object.keys(paymentsById).forEach(function (k) {
+for (const line of (paymentsById[k].Line || [])) for (const lt of (line.LinkedTxn || [])) if (lt && lt.TxnType === 'CreditMemo') creditIds.push(lt.TxnId);
+});
+const creditsById = {};
+if (creditIds.length) { try { for (const c of await qboFetchByIds(env, conn, 'CreditMemo', creditIds)) creditsById[String(c.Id)] = c; } catch (e) { console.log('QBO_CREDITMEMO_FETCH_FAILED ' + (e && e.message)); } }
 const items = invoices.map(function (inv) {
-return qboInvoiceToItem(inv, customersById[String(inv.CustomerRef && inv.CustomerRef.value)], departments, paymentsById, conn);
+return qboInvoiceToItem(inv, customersById[String(inv.CustomerRef && inv.CustomerRef.value)], departments, paymentsById, conn, creditsById);
 });
 const result = await ingestAccountingItems(env, { id: conn.id, tenant_id: conn.tenant_id }, items);
 return result.processed;
@@ -5611,6 +5736,93 @@ const s = String(v);
 return s.length > 10 ? s.slice(0, 10) : s;
 }
 
+// Sensitive customers. Anyone on the team may flag one; the flag covers
+// either this invoice alone or every invoice of that customer (and new ones
+// as they arrive, see ingestAccountingItems). Automated cadences skip
+// sensitive accounts; manual sends still work, with a warning in the drawer.
+async function handleSensitiveFlag(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const account = await accountForUser(env, user, body.accountId);
+if (!account) return json({ ok: false, error: 'Account not found' }, 404);
+const on = !!body.on;
+const scope = body.scope === 'customer' ? 'customer' : 'invoice';
+const who = String(user.full_name || user.email || '').slice(0, 160);
+const now = new Date().toISOString();
+const patch = on ? { sensitive: true, sensitive_scope: scope, sensitive_at: now, sensitive_by: who, updated_at: now }
+: { sensitive: false, sensitive_scope: null, sensitive_at: null, sensitive_by: null, updated_at: now };
+let ids = [account.id];
+if (scope === 'customer' && account.customer_name) {
+const rows = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&customer_name=' + pgEq(account.customer_name) + '&select=id') || [];
+ids = rows.map(function (r) { return r.id; });
+if (ids.indexOf(account.id) === -1) ids.push(account.id);
+await pgUpdate(env, 'accounts', 'tenant_id=' + pgEq(user.tenant_id) + '&customer_name=' + pgEq(account.customer_name), patch);
+} else {
+await pgUpdate(env, 'accounts', 'id=' + pgEq(account.id), patch);
+}
+const text = on
+? ('Marked as a Sensitive customer' + (scope === 'customer' ? ' (every invoice for ' + (account.customer_name || 'this customer') + ')' : ' (this invoice only)') + '. Automated follow-ups are paused; contact by hand only.')
+: ('Sensitive customer flag cleared' + (scope === 'customer' ? ' for every invoice of ' + (account.customer_name || 'this customer') : ' on this invoice') + '. Automated follow-ups may resume.');
+await logUserActivity(env, user, account, 'escalation', text);
+try { await pgInsert(env, 'account_notes', { occurred_at: now, tenant_id: user.tenant_id, account_id: account.id, body: text, author_name: who || 'Team member', source: 'dashboard' }); } catch (e) {}
+return json({ ok: true, ids: ids, sensitive: on, scope: on ? scope : null, by: who, at: now });
+}
+
+// The company's own demand-letter template (tenants.settings.demandLetterTemplate):
+// a subject line and a body with merge fields such as {{customer_name}},
+// {{invoice_number}}, {{balance}}. Used by the drawer's "Draft Demand Letter"
+// and by the Day-30 cadence in place of the AI draft.
+const DEMAND_MERGE_FIELDS = ['customer_name', 'contact_name', 'invoice_number', 'invoice_date', 'amount', 'paid', 'balance', 'days_outstanding', 'due_date', 'claim_number', 'business', 'city', 'company', 'sender_name', 'sender_email', 'sender_phone', 'today'];
+function demandTemplateOf(t) {
+const v = tenantSettingsOf(t).demandLetterTemplate;
+if (!v || typeof v !== 'object') return null;
+const body = String(v.body || '').trim();
+if (!body) return null;
+return { subject: String(v.subject || '').trim().slice(0, 200), body: body.slice(0, 12000), updatedAt: v.updatedAt || null, updatedBy: v.updatedBy || null };
+}
+function mergeDemandTemplate(text, vals) {
+return String(text || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, function (m, k) {
+const key = String(k).toLowerCase();
+return Object.prototype.hasOwnProperty.call(vals, key) && vals[key] != null ? String(vals[key]) : '';
+});
+}
+function demandMergeValues(account, balance, tenant, sig, offices, departments) {
+const money = function (n) { return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+const day = function (v) { if (!v) return ''; const d = new Date(String(v).length > 10 ? v : v + 'T12:00:00'); return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }); };
+let days = '';
+if (account.invoiced_at) { const t = new Date(String(account.invoiced_at).slice(0, 10) + 'T12:00:00'); if (!isNaN(t.getTime())) days = String(Math.max(0, Math.round((Date.now() - t.getTime()) / 86400000))); }
+const meta = String(account.meta || '');
+const due = /^Due\s+(\d{4}-\d{2}-\d{2})/.exec(meta);
+return {
+customer_name: account.customer_name || '', contact_name: account.contact || '',
+invoice_number: account.invoice_number || ('INV-' + (10000 + account.id)), invoice_date: day(account.invoiced_at),
+amount: money(account.amount), paid: money(account.paid_amount), balance: money(balance != null ? balance : (Number(account.amount || 0) - Number(account.paid_amount || 0))),
+days_outstanding: days, due_date: due ? day(due[1]) : '', claim_number: account.claim_number || '',
+business: (departments && departments[account.department]) || account.department || '', city: (offices && offices[account.office]) || account.office || '',
+company: (tenant && tenant.company_name) || '', sender_name: (sig && sig.name) || '', sender_email: (sig && sig.email) || '', sender_phone: (sig && sig.phone) || '',
+today: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+};
+}
+async function handleDemandTemplateSave(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+if (user.role !== 'admin' && user.role !== 'manager') return json({ ok: false, error: 'Only admins and managers can change the demand letter template.' }, 403);
+let body;
+try { body = await request.json(); } catch (e) { return json({ ok: false, error: 'Invalid request body' }, 400); }
+const tenant = await pgSelectOne(env, 'tenants', 'id=' + pgEq(user.tenant_id) + '&select=id,settings');
+if (!tenant) return json({ ok: false, error: 'Company not found' }, 404);
+const settings = tenantSettingsOf(tenant);
+const text = String(body.body || '').trim();
+if (body.clear || !text) { delete settings.demandLetterTemplate; }
+else {
+settings.demandLetterTemplate = { subject: String(body.subject || '').trim().slice(0, 200), body: text.slice(0, 12000), updatedAt: new Date().toISOString(), updatedBy: String(user.full_name || user.email || '').slice(0, 160) };
+}
+await pgUpdate(env, 'tenants', 'id=' + pgEq(tenant.id), { settings: settings });
+return json({ ok: true, template: demandTemplateOf({ settings: settings }) });
+}
+
 async function handleInvoiceUpdate(request, env) {
 const user = await getSessionUser(request, env);
 if (!user) return json({ ok: false }, 401);
@@ -5728,7 +5940,7 @@ return json({ ok: true, paidAmount: newPaid, remaining: Math.max(0, Math.round((
 
 // Only the columns the dashboard and the reports read (external_id and
 // tenant_id alone were a third of the old 12 MB answer for 35k payments).
-const PAYMENT_LIST_COLS = 'id,account_id,amount,deposited_on,created_at,method,source,reference,recorded_by,payer_name,bank_name,memo';
+const PAYMENT_LIST_COLS = 'id,account_id,amount,deposited_on,created_at,method,source,reference,recorded_by,payer_name,bank_name,memo,kind,item_name';
 // Cheap "has anything changed?" stamp for the payments list: the newest row's
 // id and the row count. Payments are appended (and occasionally deleted), so
 // the pair moves whenever the list would read differently.
@@ -5914,6 +6126,8 @@ const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
 for (const account of accounts) {
 // Filtered out above already; restated so the rule holds even if the query changes.
 if (isDoNotContact(account)) { summary.skipped++; continue; }
+// Sensitive customers: the team contacts them by hand, never on a cadence.
+if (account.sensitive) { summary.skipped++; continue; }
 if (account.escalated) { summary.skipped++; continue; }
 if (!account.invoiced_at) { summary.skipped++; continue; }
 const balance = Number(account.amount || 0) - Number(account.paid_amount || 0);
@@ -5969,10 +6183,20 @@ summary.held++;
 continue;
 }
 
-const subject = due.kind === 'noil' ? 'Notice of Intent to Lien - ' + (account.customer_name || 'Invoice')
+let subject = due.kind === 'noil' ? 'Notice of Intent to Lien - ' + (account.customer_name || 'Invoice')
 : due.kind === 'demand_letter' ? 'Demand for payment - ' + (account.customer_name || 'Invoice')
 : 'Outstanding invoice - ' + (account.customer_name || 'Invoice');
-const html = cadenceEmailBody(account, due, recipient, settings, balance, ownerSig);
+let html = cadenceEmailBody(account, due, recipient, settings, balance, ownerSig);
+let demandSubject = null;
+if (due.kind === 'demand_letter') {
+const tpl = demandTemplateOf(cadenceTenant);
+if (tpl) {
+const vals = demandMergeValues(account, balance, cadenceTenant, ownerSig, resolveOffices(cadenceTenant && cadenceTenant.offices), resolveDepartments(cadenceTenant && cadenceTenant.departments));
+html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:600px;white-space:pre-wrap;line-height:1.5;">' + escapeHtml(mergeDemandTemplate(tpl.body, vals)) + '</div>';
+if (tpl.subject) demandSubject = mergeDemandTemplate(tpl.subject, vals);
+}
+}
+if (demandSubject) subject = demandSubject;
 const cadenceThreadRow = await threadLoad(env, settings.tenant_id, threadKeyInvoice(account.id));
 const cadenceJoin = threadJoin(cadenceThreadRow, ownerMailbox, subject);
 const cadenceSubject = cadenceJoin.subject;
@@ -6073,7 +6297,7 @@ if (contact.length) lines.push(contact.join('  |  '));
 const html = '<div style="margin-top:18px;line-height:1.5;color:#171717;font-family:Arial,sans-serif;font-size:14px;">' +
 '<strong>' + escapeHtml(lines[0]) + '</strong>' +
 lines.slice(1).map(function (l) { return '<br><span style="color:#615D53;">' + escapeHtml(l) + '</span>'; }).join('') + '</div>';
-return { name: name, lines: lines, text: lines.join('\n'), html: html };
+return { name: name, lines: lines, text: lines.join('\n'), html: html, email: replyEmail || '', phone: phone || '' };
 }
 // The body a user approved, plus their signature (once - a body that already
 // carries it is left alone).
@@ -7816,13 +8040,15 @@ demandLetterSentAt: a.demand_letter_sent_at, noilSentAt: a.noil_sent_at, lienFil
 escalated: !!a.escalated, notifiedName: a.notified_name, notifiedAt: a.notified_at,
 doNotContact: !!a.do_not_contact, doNotContactAt: a.do_not_contact_at || null, doNotContactBy: a.do_not_contact_by || null,
 claimStatus: a.claim_status || null,
+sensitive: !!a.sensitive, sensitiveScope: a.sensitive_scope || null, sensitiveAt: a.sensitive_at || null, sensitiveBy: a.sensitive_by || null,
+badDebt: !!a.bad_debt, badDebtAt: a.bad_debt_at || null, creditAmount: money(a.credit_amount) || 0,
 projectedPaymentDate: a.projected_payment_date, paymentType: a.payment_type, lastDayOnSite: a.last_day_on_site || null,
 note: a.note, externalId: a.external_id, createdAt: a.created_at, updatedAt: a.updated_at,
 contactInfo: a.contact_info || null, lastFollowUpAt: a.last_follow_up_at || null, lastFollowUpBy: a.last_follow_up_by || null, lastFollowUpKind: a.last_follow_up_kind || null
 },
 comms: commsJson,
 activity: activity.map(function (x) { return { id: x.id, at: x.sent_at, type: x.type, recipient: x.recipient, subject: x.subject, status: x.status, source: x.source }; }),
-payments: payments.map(function (p) { return { id: p.id, at: p.deposited_on, amount: money(p.amount), method: p.method, payerName: p.payer_name, reference: p.reference, bankName: p.bank_name, memo: p.memo }; }),
+payments: payments.map(function (p) { return { id: p.id, at: p.deposited_on, amount: money(p.amount), method: p.method, payerName: p.payer_name, reference: p.reference, bankName: p.bank_name, memo: p.memo, kind: p.kind || 'payment', itemName: p.item_name || null }; }),
 documents: docs.map(documentToJson),
 notes: notes.map(noteToJson),
 related: related.map(function (r) { return { id: r.id, invoiceNumber: r.invoice_number || ('INV-' + (10000 + r.id)), amount: money(r.amount), paidAmount: money(r.paid_amount), status: r.status, invoicedAt: r.invoiced_at, paidAt: r.paid_at, office: r.office, department: r.department, category: r.category, claimNumber: r.claim_number }; }),
@@ -7968,6 +8194,11 @@ contactInfo: a.contact_info || null,
 lastFollowUpAt: a.last_follow_up_at || null,
 lastFollowUpBy: a.last_follow_up_by || null,
 lastFollowUpKind: a.last_follow_up_kind || null,
+sensitive: !!a.sensitive,
+sensitiveScope: a.sensitive_scope || null,
+badDebt: !!a.bad_debt,
+badDebtAt: a.bad_debt_at || null,
+creditAmount: a.credit_amount || 0,
 paidDate: a.paid_at
 };
 });
@@ -10067,6 +10298,83 @@ await sendEmail(env, { to: admin.email, subject: 'Action needed: payment failed 
 return new Response('ok', { status: 200 });
 }
 
+// Overdue follow-ups (claims-operations pack). Business days since the
+// trigger: a customer reply nobody has answered, or no outreach at all since
+// the last contact. Mirrors followUp() in the dashboard and the reports script.
+function bizDaysBetween(fromDay, now) {
+if (!fromDay) return null;
+const start = new Date(String(fromDay).slice(0, 10) + 'T12:00:00');
+if (isNaN(start.getTime())) return null;
+const t = new Date(now || Date.now()); t.setHours(12, 0, 0, 0);
+let n = 0; const d = new Date(start);
+while (d < t) { d.setDate(d.getDate() + 1); const wd = d.getDay(); if (wd !== 0 && wd !== 6) n++; if (n > 400) break; }
+return n;
+}
+function overdueOf(a, now) {
+if (!a || a.status === 'paid' || a.do_not_contact) return null;
+const balance = Number(a.amount || 0) - Number(a.paid_amount || 0);
+if (balance <= 0.005) return null;
+const dayOf = function (v) { return v ? String(v).slice(0, 10) : null; };
+const fu = dayOf(a.last_follow_up_at), lc = dayOf(a.last_contact);
+let since, reason;
+if (a.responded === 'replied') {
+if (!lc || (fu && fu >= lc)) return null;
+since = lc; reason = 'reply';
+} else {
+since = [fu, lc].filter(Boolean).sort().pop(); reason = 'silent';
+}
+if (!since) return null;
+const n = bizDaysBetween(since, now);
+if (n == null || n < 3) return null;
+return { level: n >= 5 ? 'overdue' : 'due', days: n, reason: reason, since: since, balance: balance };
+}
+function overdueReasonText(r, a) {
+const when = r.since ? new Date(r.since + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+if (r.reason === 'reply') return 'Customer replied ' + when + ' - no follow-up since (' + r.days + ' business days)' + (a.response_summary ? ': "' + String(a.response_summary).slice(0, 140) + '"' : '');
+return 'No activity since ' + when + ' (' + r.days + ' business days, ' + (a.follow_up_count || 0) + ' follow-up' + ((a.follow_up_count || 0) === 1 ? '' : 's') + ' sent, no response)';
+}
+async function runOverdueDigest(env) {
+let tenants = [];
+try { tenants = await pgSelect(env, 'tenants', 'select=id,company_name,settings,offices,departments') || []; } catch (e) { return; }
+const now = new Date();
+for (const tenant of tenants) {
+try {
+if (!claimsOpsOn(tenant)) continue;
+const cfg = tenantSettingsOf(tenant).overdueDigest;
+const to = cfg && (Array.isArray(cfg.to) ? cfg.to : String(cfg.to || '').split(/[,;\s]+/)).map(function (x) { return String(x || '').trim(); }).filter(function (x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x); });
+if (!to || !to.length) continue;
+const accounts = await pgSelectAll(env, 'accounts', 'tenant_id=' + pgEq(tenant.id) + '&status=neq.paid&do_not_contact=not.is.true&select=id,customer_name,invoice_number,amount,paid_amount,status,invoiced_at,office,department,contact,contact_email,last_contact,last_follow_up_at,last_follow_up_by,follow_up_count,responded,response_summary,sensitive,claim_number&order=id.asc') || [];
+const rows = [];
+for (const a of accounts) { const r = overdueOf(a, now); if (r && r.level === 'overdue') rows.push({ a: a, r: r }); }
+if (!rows.length) continue;
+rows.sort(function (x, y) { return y.r.days - x.r.days || y.r.balance - x.r.balance; });
+const offices = resolveOffices(tenant.offices), departments = resolveDepartments(tenant.departments);
+const money = function (n) { return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+const total = rows.reduce(function (s, x) { return s + x.r.balance; }, 0);
+const dateLabel = now.toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+const tr = rows.map(function (x) {
+const a = x.a, r = x.r;
+const inv = a.invoice_number || ('INV-' + (10000 + a.id));
+const biz = (departments[a.department] || a.department || '') + (offices[a.office] ? ' - ' + offices[a.office] : '');
+return '<tr>' +
+'<td style="padding:8px 6px;border-bottom:1px solid #E5E7EB;vertical-align:top;"><b>' + escapeHtml(a.customer_name || '') + '</b>' + (a.sensitive ? ' <span style="font-size:11px;color:#8A1C13;">SENSITIVE</span>' : '') + '<br><span style="color:#615D53;font-size:12px;">' + escapeHtml(inv) + (biz ? ' &middot; ' + escapeHtml(biz) : '') + (a.claim_number ? ' &middot; ' + escapeHtml(a.claim_number) : '') + '</span></td>' +
+'<td style="padding:8px 6px;border-bottom:1px solid #E5E7EB;text-align:right;white-space:nowrap;vertical-align:top;"><b>' + money(r.balance) + '</b><br><span style="color:#615D53;font-size:12px;">of ' + money(a.amount) + '</span></td>' +
+'<td style="padding:8px 6px;border-bottom:1px solid #E5E7EB;vertical-align:top;font-size:13px;">' + escapeHtml(overdueReasonText(r, a)) + '<br><span style="color:#615D53;font-size:12px;">' + (a.last_follow_up_by ? 'Last follow-up by ' + escapeHtml(a.last_follow_up_by) + ' &middot; ' : '') + (a.contact ? 'Contact: ' + escapeHtml(a.contact) : '') + (a.contact_email ? ' (' + escapeHtml(a.contact_email) + ')' : '') + '</span></td>' +
+'</tr>';
+}).join('');
+const html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:720px;">' +
+'<h2 style="margin:0 0 4px 0;">Overdue follow-ups &mdash; ' + escapeHtml(tenant.company_name || '') + '</h2>' +
+'<p style="margin:0 0 14px 0;color:#615D53;">' + escapeHtml(dateLabel) + ' &middot; ' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + ' overdue (5+ business days) &middot; ' + money(total) + ' outstanding</p>' +
+'<p style="margin:0 0 14px 0;font-size:13px;">An invoice is overdue when the customer replied and nobody has followed up for 5+ business days, or when nothing has gone out for 5+ business days after the last contact. Paid invoices and accounts sent to legal are excluded.</p>' +
+'<table style="border-collapse:collapse;width:100%;font-size:14px;">' +
+'<tr><th style="text-align:left;padding:6px;border-bottom:2px solid #171717;">Customer / invoice</th><th style="text-align:right;padding:6px;border-bottom:2px solid #171717;">Balance</th><th style="text-align:left;padding:6px;border-bottom:2px solid #171717;">Why it is overdue</th></tr>' + tr + '</table>' +
+'<p style="margin:16px 0 0 0;font-size:13px;"><a href="' + SITE_URL + '/dashboard" style="color:#9A7634;font-weight:600;">Open the Invoice Queue</a> and use the "Follow-up due" chip to work the list.</p>' +
+'</div>';
+await sendEmail(env, { to: to, subject: 'Overdue follow-ups: ' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + ' (' + money(total) + ') - ' + (tenant.company_name || 'clAIms'), html: html, kind: 'overdue_digest', tenantId: tenant.id });
+} catch (e) { console.log('OVERDUE_DIGEST_FAILED tenant=' + tenant.id + ' ' + (e && e.message)); }
+}
+}
+
 async function runWeeklyDigest(env) {
 try {
 const tenantList = await pgSelect(env, 'tenants', 'select=id,company_name,offices');
@@ -10709,6 +11017,9 @@ async function handleMe(request, env) {
     allDepartments: resolveDepartments(user.tenant_departments),
     access: { office: user.role === 'admin' ? null : (user.office || null), offices: user.role === 'admin' ? null : userOffices(user), departments: user.role === 'admin' ? null : userDepartments(user) },
     features: tenantFeatures(user),
+    demandTemplate: demandTemplateOf(user),
+    demandMergeFields: DEMAND_MERGE_FIELDS,
+    overdueDigestTo: (function () { const c = tenantSettingsOf(user).overdueDigest; return c && c.to ? (Array.isArray(c.to) ? c.to.join(', ') : String(c.to)) : null; })(),
     officesConfigured: !!user.tenant_offices,
     integrationMode: selfServeIntegrationMode(user),
     integrationProvider: selfServeIntegrationMode(user) ? SELF_SERVE_INTEGRATION_MODES[selfServeIntegrationMode(user)] : null,
@@ -10945,6 +11256,8 @@ if (url.pathname === '/api/mailbox' && request.method === 'GET') { return handle
 if (url.pathname === '/api/mailbox/connect' && request.method === 'GET') { return handleMailboxConnect(request, env); }
 if (url.pathname === '/api/mailbox/callback' && request.method === 'GET') { return handleMailboxCallback(request, env); }
 if (url.pathname === '/api/mailbox/disconnect' && request.method === 'POST') { return handleMailboxDisconnect(request, env); }
+if (url.pathname === '/api/accounts/sensitive' && request.method === 'POST') { return handleSensitiveFlag(request, env); }
+if (url.pathname === '/api/settings/demand-template' && request.method === 'POST') { return handleDemandTemplateSave(request, env); }
 if (url.pathname === '/api/documents' && request.method === 'GET') {
 return handleDocumentList(request, env);
 }
@@ -11123,6 +11436,9 @@ ctx.waitUntil(runWeeklyDigest(env));
 if (topOfHour && weekday === 'Fri' && hour === 18) {
 ctx.waitUntil(runWeeklyUsersReport(env));
 }
+// End-of-business-day overdue list, 4:30pm Central Monday-Friday, for
+// companies that configured a recipient (tenants.settings.overdueDigest.to).
+if (weekday !== 'Sat' && weekday !== 'Sun' && hour === 16 && minute >= 30 && minute < 35) ctx.waitUntil(runOverdueDigest(env));
 // Follow-up cadence runs every hour; each tenant's own quiet hours and
 // weekly send cap decide whether anything actually goes out.
 if (topOfHour) ctx.waitUntil(runCadenceSweep(env));
