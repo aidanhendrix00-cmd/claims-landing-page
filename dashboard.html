@@ -566,6 +566,9 @@
   .unapplied-head{display:flex;justify-content:space-between;font-weight:700;color:#9A3F00;margin-bottom:6px;}
   .unapplied-row{display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-top:1px solid #F5E3C8;}
   .unapplied-note{font-size:11px;color:var(--slate);margin-top:6px;}
+  .unapplied-split{font-size:11.5px;color:#9A3F00;margin:-2px 0 6px;}
+  .unapplied-box.compact{margin:8px 0 0;padding:8px 10px;font-size:12px;max-width:520px;}
+  .unapplied-box.compact .unapplied-head{font-size:12px;margin-bottom:4px;}
   .hist-kv .v.unapplied{color:#9A3F00;} .unapplied-sub{font-size:11px;font-weight:400;color:var(--slate);}
   .prev-email{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-left:3px solid var(--brand-rust);border-radius:10px;padding:10px 12px;background:#fff;margin:0 0 12px;}
   .prev-email-text{display:flex;flex-direction:column;gap:3px;min-width:0;}
@@ -1792,6 +1795,7 @@
     <div class="drawer-head"><h3 id="hist-title">Account History</h3><button class="close" onclick="closeAccountHistory()">Close ×</button></div>
     <div class="drawer-sub" id="hist-sub"></div>
     <div id="hist-summary" class="hist-grid"></div>
+    <div id="hist-unapplied"></div>
     <div class="drawer-section">
       <h4>Timeline <span id="hist-timeline-count" style="text-transform:none;font-weight:400;"></span></h4>
       <div id="hist-timeline"></div>
@@ -4697,6 +4701,7 @@ function todoRowHTML(item, num, priority){
             <span class="badge cw">WITH: ${CURRENTLY_WITH_LABELS[inv.currentlyWith].toUpperCase()}</span>
             ${claimsOps() ? claimStatusBadgeHTML(inv) + followUpBadgeHTML(inv) + escalationBadgesHTML(inv) + partialBadgeHTML(inv) + unappliedBadgeHTML(inv) : dncBadgeHTML(inv) + partialBadgeHTML(inv) + escBadge}${warnBadge}${staleBadge}
           </div>
+          ${unappliedCardBoxHTML(inv)}
         </div>
         <div class="amount">${isPartiallyPaid(inv) ? '<span class="owed-label">Balance owed</span>' : ''}${money2(balanceDue(inv))}
           ${isPartiallyPaid(inv) ? `<span class="paid-line" title="Invoice total ${money2(inv.amount)}">Amount paid: ${money2(paidAmt(inv))} of ${money2(inv.amount)}</span>` : ''}
@@ -6415,25 +6420,42 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   function unappliedBadgeHTML(inv){
     if (!claimsOps() || !inv) return '';
     const u = unappliedSummary(inv.customerName || inv.name); if (!u) return '';
-    return '<span class="badge unapplied" title="' + hEsc(u.label) + ' sitting unapplied in QuickBooks for this customer; not netted against the balance">UNAPPLIED IN QB: $' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>';
+    const t = ' in QuickBooks for this customer, not applied to any invoice; not netted against the balance';
+    return (u.pays ? '<span class="badge unapplied" title="' + u.pays + ' unapplied payment' + (u.pays === 1 ? '' : 's') + t + '">UNAPPLIED PAYMENTS: $' + u.payTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '') +
+           (u.cms ? '<span class="badge unapplied" title="' + u.cms + ' open credit memo' + (u.cms === 1 ? '' : 's') + t + '">CREDIT MEMOS: $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '');
   }
   function unappliedSubHTML(inv){
     if (!claimsOps() || !inv) return '';
     const u = unappliedSummary(inv.customerName || inv.name); if (!u) return '';
-    return '<span class="unapplied-sub-cell" title="' + hEsc(u.label) + ' in QuickBooks, not yet applied to an invoice">Unapplied in QB $' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>';
+    const tip = u.rows.map(function(x){ return (x.kind === 'payment' ? 'Payment' : 'Credit memo') + (x.reference ? ' #' + x.reference : '') + (x.date ? ' ' + fmtDate(x.date) : '') + ': $' + Number(x.amount).toLocaleString(undefined,{minimumFractionDigits:2}); }).join('\n');
+    return (u.pays ? '<span class="unapplied-sub-cell" title="' + hEsc(tip) + '">Unapplied payments $' + u.payTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '') +
+           (u.cms ? '<span class="unapplied-sub-cell" title="' + hEsc(tip) + '">Credit memos $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '');
   }
   function unappliedTotal(rows){ return rows.reduce(function(s, u){ return s + Number(u.amount || 0); }, 0); }
   function unappliedSummary(name){
     const rows = unappliedFor(name); if(!rows.length) return null;
-    const pays = rows.filter(function(u){ return u.kind === 'payment'; }).length, cms = rows.length - pays;
+    const payRows = rows.filter(function(u){ return u.kind === 'payment'; }), cmRows = rows.filter(function(u){ return u.kind !== 'payment'; });
+    const pays = payRows.length, cms = cmRows.length;
     const parts = []; if(pays) parts.push(pays + ' unapplied payment' + (pays === 1 ? '' : 's')); if(cms) parts.push(cms + ' credit memo' + (cms === 1 ? '' : 's'));
-    return { rows: rows, total: unappliedTotal(rows), label: parts.join(', ') };
+    return { rows: rows, total: unappliedTotal(rows), label: parts.join(', '), pays: pays, cms: cms, payTotal: unappliedTotal(payRows), cmTotal: unappliedTotal(cmRows) };
   }
-  function unappliedListHTML(name){
+  function unappliedRowHTML(u){
+    return '<div class="unapplied-row"><span>' + (u.kind === 'payment' ? 'Payment' : 'Credit memo') + (u.reference ? ' #' + hEsc(u.reference) : '') + (u.date ? ' \u00b7 ' + fmtDate(u.date) : '') + (u.file ? ' \u00b7 ' + hEsc(u.file) : '') + '</span><b>$' + Number(u.amount).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b></div>';
+  }
+  function unappliedListHTML(name, opts){
     const rows = unappliedFor(name); if(!rows.length) return '';
-    return '<div class="unapplied-box"><div class="unapplied-head">Unapplied in QuickBooks <span>$' + unappliedTotal(rows).toLocaleString(undefined,{minimumFractionDigits:2}) + '</span></div>' +
-      rows.map(function(u){ return '<div class="unapplied-row"><span>' + (u.kind === 'payment' ? 'Payment' : 'Credit memo') + (u.reference ? ' #' + hEsc(u.reference) : '') + (u.date ? ' \u00b7 ' + fmtDate(u.date) : '') + (u.file ? ' \u00b7 ' + hEsc(u.file) : '') + '</span><b>$' + Number(u.amount).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b></div>'; }).join('') +
-      '<div class="unapplied-note">Not netted against the balances above. Apply it to an invoice in QuickBooks and the balance here updates on the next sync.</div></div>';
+    const o = opts || {}; const max = o.max || rows.length; const compact = !!o.compact;
+    const u = unappliedSummary(name);
+    const sub = [u.pays ? 'Payments $' + u.payTotal.toLocaleString(undefined,{minimumFractionDigits:2}) : '', u.cms ? 'Credit memos $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) : ''].filter(Boolean).join(' \u00b7 ');
+    return '<div class="unapplied-box' + (compact ? ' compact' : '') + '"><div class="unapplied-head">Unapplied in QuickBooks <span>$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span></div>' +
+      (sub ? '<div class="unapplied-split">' + sub + '</div>' : '') +
+      rows.slice(0, max).map(unappliedRowHTML).join('') +
+      (rows.length > max ? '<div class="unapplied-note">+ ' + (rows.length - max) + ' more under Account History.</div>' : '') +
+      (compact ? '' : '<div class="unapplied-note">Not netted against the balances above. Apply it to an invoice in QuickBooks and the balance here updates on the next sync.</div>') + '</div>';
+  }
+  function unappliedCardBoxHTML(inv){
+    if (!claimsOps() || !inv) return '';
+    return unappliedListHTML(inv.customerName || inv.name, { compact: true, max: 5 });
   }
   // Groups every invoice (optionally including paid ones) by customer name.
   function accountGroups(allInvoices){
@@ -6517,7 +6539,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
               <td><b>${f.includePaid ? g.count : g.openCount}</b>${f.includePaid && g.openCount !== g.count ? '<div class="acct-sub">' + g.openCount + ' open</div>' : ''}</td>
               <td>${hEsc(acctBizLabel(g))}</td>
               <td>${hEsc(Object.keys(g.cities).filter(Boolean).sort().join(', '))}</td>
-              <td class="amt">$${g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2})}${(function(){ const u = claimsOps() ? unappliedSummary(g.name) : null; return u ? '<div class="unapplied-tag" title="' + hEsc(u.label) + ' in QuickBooks, not yet applied to an invoice">Unapplied $' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div>' : ''; })()}</td>
+              <td class="amt">$${g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2})}${(function(){ const u = claimsOps() ? unappliedSummary(g.name) : null; return u ? (u.pays ? '<div class="unapplied-tag" title="' + u.pays + ' unapplied payment' + (u.pays === 1 ? '' : 's') + ' in QuickBooks">Unapplied payments $' + u.payTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div>' : '') + (u.cms ? '<div class="unapplied-tag" title="' + u.cms + ' open credit memo' + (u.cms === 1 ? '' : 's') + ' in QuickBooks">Credit memos $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div>' : '') : ''; })()}</td>
               <td>${g.openCount ? g.avgAge + ' days' : '—'}</td>
               <td>${g.lastContact ? fmtDate(g.lastContact) : '<span style="color:var(--slate-soft);">—</span>'}</td>
               ${claimsOps() ? '<td style="font-size:12.5px;white-space:nowrap;">' + lastPaymentHTML(lastPaymentOfGroup(g), { none: '—', invoice: true }) + '</td>' : ''}
@@ -7013,6 +7035,7 @@ Hard rules - these override everything above:
             <span class="badge escalated">ESCALATED</span>${unappliedBadgeHTML(inv)}
 ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F5346;border-color:#BFE0D3;">NOTIFIED: ${inv.notifiedName.toUpperCase()}</span>` : ''}
           </div>
+          ${unappliedCardBoxHTML(inv)}
         </div>
         <div class="amount">${isPartiallyPaid(inv) ? '<span class="owed-label">Balance owed</span>' : ''}${money2(balanceDue(inv))}
           ${isPartiallyPaid(inv) ? `<span class="paid-line" title="Invoice total ${money2(inv.amount)}">Amount paid: ${money2(paidAmt(inv))} of ${money2(inv.amount)}</span>` : ''}
@@ -7178,7 +7201,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       if (lpEl) lpEl.innerHTML = '<b>Last payment:</b> ' + lastPaymentHTML(lp, { none: 'none recorded yet' }) +
         (inv.creditAmount ? '<div style="margin-top:4px;"><b>Credits applied:</b> $' + Number(inv.creditAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + (isBadDebt(inv) ? ' <span class="badge baddebt">BAD DEBT</span>' : '') + '</div>' : '') +
         '<div style="margin-top:4px;color:var(--slate-soft);">Balance due $' + balanceDue(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + ' of $' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '. Full payment history is under Account History.</div>' +
-        (function(){ const u = unappliedSummary(inv.customerName || inv.name); return u ? '<div class="unapplied-box" style="margin:8px 0 0;"><div class="unapplied-head">Unapplied in QuickBooks <span>$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span></div>' + u.rows.slice(0, 6).map(function(x){ return '<div class="unapplied-row"><span>' + (x.kind === 'payment' ? 'Payment' : 'Credit memo') + (x.reference ? ' #' + hEsc(x.reference) : '') + (x.date ? ' \u00b7 ' + fmtDate(x.date) : '') + '</span><b>$' + Number(x.amount).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b></div>'; }).join('') + (u.rows.length > 6 ? '<div class="unapplied-note">+ ' + (u.rows.length - 6) + ' more under Account History.</div>' : '') + '<div class="unapplied-note">Not netted against the balance. Apply it in QuickBooks and the balance here follows on the next sync.</div></div>' : ''; })();
+        unappliedListHTML(inv.customerName || inv.name);
       const sEl = document.getElementById('detail-sensitive'); if (sEl) sEl.innerHTML = sensitiveControlsHTML(inv);
     }
     // DO NOT CONTACT: reflect the flag, and hide every way of drafting a message
@@ -7249,6 +7272,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('hist-title').textContent = 'Account History — ' + inv.name;
     document.getElementById('hist-sub').textContent = [inv.invoiceNumber, TENANT_DEPTS_CUSTOM ? null : (OFFICE_LABELS[inv.officeLocation] || inv.officeLocation), deptLabel(inv), inv.claimNumber ? ('Claim ' + inv.claimNumber) : null].filter(Boolean).join(' · ');
     document.getElementById('hist-summary').innerHTML = '';
+    (function(){ const el = document.getElementById('hist-unapplied'); if (el) el.innerHTML = ''; })();
     document.getElementById('hist-timeline').innerHTML = '<div class="hist-empty">Loading…</div>';
     ['hist-comms','hist-responses','hist-payments','hist-docs','hist-notes','hist-related'].forEach(function(k){ document.getElementById(k).innerHTML = ''; });
     // Everything you can do from here, so the name is a real front door.
@@ -7767,7 +7791,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Invoice amount', hMoney(a.amount)) +
       tile('Paid', hMoney(paid)) +
       tile('Balance due', hMoney(balance), balance > 0 ? '' : 'muted') +
-      (function(){ const u = claimsOps() ? unappliedSummary(a.customerName || (inv && inv.name)) : null; return u ? tile('Unapplied in QuickBooks', hMoney(u.total) + '<div class="unapplied-sub">' + hEsc(u.label) + '</div>', 'unapplied') : ''; })() +
+      (function(){ const u = claimsOps() ? unappliedSummary(a.customerName || (inv && inv.name)) : null; return u ? tile('Unapplied in QuickBooks', hMoney(u.total) + '<div class="unapplied-sub">' + hEsc([u.pays ? 'Payments ' + hMoney(u.payTotal) : '', u.cms ? 'Credit memos ' + hMoney(u.cmTotal) : ''].filter(Boolean).join(' \u00b7 ')) + '</div>', 'unapplied') : ''; })() +
       tile('Status', hEsc(STATUS_LABELS[a.status] || a.status || '—')) +
       tile('Invoice date', hDate(a.invoicedAt) + (a.invoicedAt ? (' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.invoicedAt) + 'd)</span>') : '')) +
       tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>' + fromAccountsBadge(a)) : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
@@ -7796,6 +7820,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       (claimsOps() ? tile('Sensitive customer', isSensitive(inv) ? ('Yes' + (inv.sensitiveScope === 'customer' ? ' · all invoices' : ' · this invoice') + (inv.sensitiveBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.sensitiveBy) + '</div>' : '')) : 'No', isSensitive(inv) ? '' : 'muted') : '') +
       tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted', 'escalated') +
       tile('Last response', (a.responded && a.responded !== 'none' && a.responseSummary) ? hEsc(a.responseSummary) : 'None yet', (a.responded && a.responded !== 'none' && a.responseSummary) ? '' : 'muted', 'responseSummary');
+    (function(){ const el = document.getElementById('hist-unapplied'); if (el) el.innerHTML = claimsOps() ? unappliedListHTML(a.customerName || (inv && inv.name)) : ''; })();
 
     const tl = data.timeline || [];
     document.getElementById('hist-timeline-count').textContent = tl.length ? ('· ' + tl.length + ' event' + (tl.length === 1 ? '' : 's')) : '';
