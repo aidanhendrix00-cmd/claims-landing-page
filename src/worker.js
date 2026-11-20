@@ -5329,8 +5329,11 @@ const user = await getSessionUser(request, env);
 if (!user || user.role !== 'admin') return json({ ok: false }, 403);
 const url = new URL(request.url);
 const cap = Math.min(Math.max(parseInt(url.searchParams.get('max'), 10) || 600, 100), 2000);
-const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id));
-const out = { ok: true, connections: [] };
+// The platform admin (base workspace) may audit another company by id; everyone else sees their own.
+const tenantParam = parseInt(url.searchParams.get('tenant'), 10);
+const tenantId = (user.tenant_slug === 'base' && tenantParam) ? tenantParam : user.tenant_id;
+const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(tenantId));
+const out = { ok: true, tenantId: tenantId, connections: [] };
 for (const conn of conns) {
 const r = { id: conn.id, company: (conn.cfg && (conn.cfg.companyName || conn.cfg.realmId)) || String(conn.id), status: conn.status,
 open: 0, withRealItem: 0, withDescription: 0, withServiceDate: 0, multiLine: 0, genericOnly: 0, nothingUsable: 0, items: {}, samples: [], truncated: false };
