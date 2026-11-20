@@ -212,7 +212,9 @@
   .sens-actions{display:flex;flex-direction:column;gap:6px;flex-shrink:0;}
   .sens-actions .btn-small{white-space:nowrap;}
   .credit-row td{color:#2B4C7E;}
-  .bd-table td.amt{font-family:var(--font-mono);text-align:right;}
+  table.bd-table th.amt,table.bd-table td.amt{text-align:right;white-space:nowrap;}
+  table.bd-table td.amt{font-family:var(--font-mono);font-size:12px;}
+  table.bd-table tr.total td{font-weight:600;background:#FAFBFA;}
   .card.dnc{background:#FEF3F2;border-color:#F04438;box-shadow:inset 4px 0 0 #B42318;position:relative;}
   .card.dnc .name{color:#912018;}
   .card.dnc .btn-primary[disabled]{background:#FDA29B;border-color:#FDA29B;color:#7A271A;cursor:not-allowed;opacity:1;}
@@ -749,10 +751,18 @@
 
   /* Paged tables: 100 rows at a time; search, sort and filters still span
      every row. Keeps the page light with thousands of invoices. */
-  .pager{display:flex;align-items:center;justify-content:center;gap:14px;padding:12px 0 4px;flex-wrap:wrap;}
+  .pager{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0 4px;}
+  .pager .pager-row{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;}
   .pager .pager-info{font-size:12.5px;color:var(--slate);}
   .pager .btn-small[disabled]{opacity:.45;cursor:default;}
   .pager.top{padding:0 0 10px;}
+  .pager .pager-nums{display:inline-flex;align-items:center;gap:4px;}
+  .pager .pager-num{min-width:32px;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font:600 12.5px var(--font-body);cursor:pointer;}
+  .pager .pager-num:hover{background:var(--paper);}
+  .pager .pager-num.on{background:var(--brand-navy);border-color:var(--brand-navy);color:#fff;cursor:default;}
+  .pager .pager-gap{padding:0 2px;color:var(--slate);font-size:12.5px;}
+  .pager .pager-jump{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);}
+  .pager .pager-jump input{width:58px;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;font:500 12.5px var(--font-body);color:var(--ink);text-align:center;}
 
   /* Business / city access checklists (invite modal, access modal). The
      rules below out-rank the generic .form-row label/input styling, which
@@ -1091,10 +1101,8 @@
       <div class="topbar"><div><h1>Bad Debt</h1><p>Invoices written off in QuickBooks with a credit memo on the <b>Bad Debt</b> service item. They stay here for the record and never enter the follow-up cadence.</p></div></div>
       <div class="kpis" id="baddebt-kpis"></div>
       <div class="mtd-filters" data-scope-panel="baddebt"></div>
-      <div class="report-card">
-        <div class="toolbar" style="margin-bottom:10px;"><input class="search" id="baddebt-search" placeholder="Search customer or invoice" oninput="renderBadDebt()"><select class="sort" id="baddebt-sort" onchange="renderBadDebt()"><option value="date-desc">Sort: Written off (newest)</option><option value="date-asc">Sort: Written off (oldest)</option><option value="amount-desc">Sort: Amount (high-low)</option><option value="name-asc">Sort: Customer (A-Z)</option></select></div>
-        <div id="baddebt-list"></div>
-      </div>
+      <div class="collected-filter"><input class="search" style="width:240px;" id="baddebt-search" placeholder="Search customer or invoice" oninput="renderBadDebt()"><select class="sort" id="baddebt-sort" onchange="renderBadDebt()"><option value="date-desc">Sort: Written off (newest)</option><option value="date-asc">Sort: Written off (oldest)</option><option value="amount-desc">Sort: Amount (high-low)</option><option value="name-asc">Sort: Customer (A-Z)</option></select></div>
+      <div id="baddebt-list"></div>
     </section>
 
     <!-- ===================== COLLECTED THIS MONTH VIEW ===================== -->
@@ -3806,13 +3814,41 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     const from = st.page * PAGE_SIZE;
     return { rows: rows.slice(from, from + PAGE_SIZE), page: st.page, pages: pages, from: from, to: Math.min(rows.length, from + PAGE_SIZE), total: rows.length, key: key };
   }
+  // Which page numbers to show: first, last, and a window around the
+  // current page, with an ellipsis where pages are skipped.
+  function pagerNumbers(page, pages){
+    if (pages <= 7) return Array.from({ length: pages }, function(_, i){ return i; });
+    const out = [0];
+    let lo = Math.max(1, page - 1), hi = Math.min(pages - 2, page + 1);
+    if (page <= 2) { lo = 1; hi = 3; }
+    if (page >= pages - 3) { lo = pages - 4; hi = pages - 2; }
+    if (lo > 1) out.push('…');
+    for (let i = lo; i <= hi; i++) out.push(i);
+    if (hi < pages - 2) out.push('…');
+    out.push(pages - 1);
+    return out;
+  }
   function pagerHTML(pg, noun, cls){
     if (!pg || pg.total <= PAGE_SIZE) return '';
     noun = noun || 'invoices';
+    const nums = pagerNumbers(pg.page, pg.pages).map(function(n){
+      if (n === '…') return '<span class="pager-gap">…</span>';
+      return '<button type="button" class="pager-num' + (n === pg.page ? ' on' : '') + '"' + (n === pg.page ? ' aria-current="page"' : '') + ' onclick="goPage(\'' + pg.key + '\', ' + n + ')">' + (n + 1) + '</button>';
+    }).join('');
     return '<div class="pager' + (cls ? ' ' + cls : '') + '">' +
+      '<div class="pager-row">' +
       '<button type="button" class="btn-small"' + (pg.page === 0 ? ' disabled' : '') + ' onclick="setPage(\'' + pg.key + '\', -1)">&larr; Previous</button>' +
-      '<span class="pager-info">Showing ' + (pg.from + 1).toLocaleString() + '\u2013' + pg.to.toLocaleString() + ' of ' + pg.total.toLocaleString() + ' ' + noun + ' \u00b7 page ' + (pg.page + 1) + ' of ' + pg.pages + '</span>' +
-      '<button type="button" class="btn-small"' + (pg.page >= pg.pages - 1 ? ' disabled' : '') + ' onclick="setPage(\'' + pg.key + '\', 1)">Next &rarr;</button></div>';
+      '<span class="pager-nums">' + nums + '</span>' +
+      '<button type="button" class="btn-small"' + (pg.page >= pg.pages - 1 ? ' disabled' : '') + ' onclick="setPage(\'' + pg.key + '\', 1)">Next &rarr;</button>' +
+      '</div><div class="pager-row">' +
+      '<span class="pager-info">Showing ' + (pg.from + 1).toLocaleString() + '–' + pg.to.toLocaleString() + ' of ' + pg.total.toLocaleString() + ' ' + noun + '</span>' +
+      (pg.pages > 7 ? '<label class="pager-jump">Go to page <input type="number" min="1" max="' + pg.pages + '" value="' + (pg.page + 1) + '" onchange="goPage(\'' + pg.key + '\', this.value - 1)" onkeydown="if(event.key===\'Enter\'){this.blur();}"> of ' + pg.pages + '</label>' : '') +
+      '</div></div>';
+  }
+  function goPage(key, n){
+    const st = __pageState[key]; if (!st) return;
+    n = Math.floor(Number(n)); if (isNaN(n)) return;
+    setPage(key, n - st.page);
   }
   const PAGE_VIEW = { queue: 'queue', sheet: 'sheet', accounts: 'accounts', sent: 'sent', responses: 'responses', escalations: 'escalations', collected: 'collected', collectedmtd: 'collectedmtd', report: 'report', mtdlist: 'invoicedmtd', baddebt: 'baddebt' };
   function setPage(key, delta){
@@ -5542,19 +5578,20 @@ function todoRowHTML(item, num, priority){
     const nav = document.getElementById('nav-count-baddebt'); if(nav) nav.textContent = state.invoices.filter(isBadDebt).length || '';
     if(!rows.length){ listEl.innerHTML = '<div class="empty">No invoices have been written off as bad debt' + (q ? ' matching "' + hEsc(q) + '"' : '') + '.</div>'; return; }
     const pg = pageOf('baddebt', rows, [q, sort, state.deptFilter, state.officeFilter].join('|'));
-    listEl.innerHTML = '<table class="sheet-table bd-table"><thead><tr><th>Customer</th><th>Invoice #</th><th>Business</th><th>City</th><th>Invoice date</th><th>Written off</th><th class="amt">Invoiced</th><th class="amt">Paid before write-off</th><th class="amt">Written off</th><th class="amt">Balance left</th></tr></thead><tbody>' +
+    const showCity = !citySubfilter();
+    listEl.innerHTML = pagerHTML(pg, 'invoices', 'top') + '<table class="log bd-table"><thead><tr><th>Customer</th><th>Invoice #</th><th>Business</th>' + (showCity ? '<th>City</th>' : '') + '<th>Invoice date</th><th>Written off</th><th class="amt">Invoiced</th><th class="amt">Paid before write-off</th><th class="amt">Written off</th><th class="amt">Balance left</th></tr></thead><tbody>' +
       pg.rows.map(function(inv){
         const paidCash = Math.max(0, Number(inv.amountPaid || 0) - Number(inv.creditAmount || 0));
         const left = Math.max(0, Number(inv.amount || 0) - Number(inv.amountPaid || 0));
         return '<tr><td><a href="#" onclick="event.preventDefault(); openDetail(' + JSON.stringify(inv.id) + ')"><b>' + hEsc(inv.name) + '</b></a>' + (inv.claimNumber ? '<div class="acct-sub">' + hEsc(inv.claimNumber) + '</div>' : '') + '</td>' +
-          '<td>' + hEsc(inv.invoiceNumber || ('#' + inv.id)) + '</td><td>' + hEsc(deptLabel(inv)) + '</td><td>' + hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '') + '</td>' +
+          '<td style="font-family:var(--font-mono);font-size:11.5px;">' + hEsc(inv.invoiceNumber || ('#' + inv.id)) + '</td><td>' + hEsc(deptLabel(inv)) + '</td>' + (showCity ? '<td>' + hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '') + '</td>' : '') +
           '<td>' + (inv.invoiceDate ? fmtDate(inv.invoiceDate) : '—') + '</td><td>' + (inv.badDebtAt ? fmtDate(inv.badDebtAt) : '—') + '</td>' +
           '<td class="amt">$' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
           '<td class="amt">$' + paidCash.toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
           '<td class="amt"><b>$' + writtenOff(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b></td>' +
           '<td class="amt">' + (left > 0.005 ? '$' + left.toLocaleString(undefined,{minimumFractionDigits:2}) : '<span style="color:var(--slate-soft);">—</span>') + '</td></tr>';
       }).join('') +
-      '<tr><td style="font-weight:600;" colspan="8">' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + '</td><td class="amt" style="font-weight:600;">$' + total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</td><td></td></tr></tbody></table>' + pagerHTML(pg, 'invoices');
+      '<tr class="total"><td colspan="' + (showCity ? 8 : 7) + '">' + rows.length + ' invoice' + (rows.length === 1 ? '' : 's') + '</td><td class="amt">$' + total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</td><td></td></tr></tbody></table>' + pagerHTML(pg, 'invoices');
   }
   function renderCollectedMTD(){
     const { start, end } = monthRange();
