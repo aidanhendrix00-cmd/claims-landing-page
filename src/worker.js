@@ -4203,6 +4203,34 @@ recorded = round2(recorded + amt);
 }
 paid = round2(paid + recorded);
 const crmTotal = ctx.rawPaidAmount;
+// QuickBooks reports the complete set of payments applied to this invoice.
+// A row we hold that QuickBooks no longer reports is a payment that was
+// reversed, voided, deleted or unapplied: it comes off the ledger and the
+// account gets a note, so the balance reopens instead of staying "paid".
+if (raw.paymentsAuthoritative) {
+try {
+const keep = {};
+for (const p of list) { const ext = p && (p.id || p.externalId || p.paymentId); if (ext && round2(p.amount) > 0) keep[String(ext).slice(0, 120)] = true; }
+const held = await pgSelect(env, 'invoice_payments', 'tenant_id=' + pgEq(tenantId) + '&account_id=' + pgEq(accountId) + '&source=eq.integration&select=id,amount,external_id,deposited_on,reference,kind');
+let heldTotal = 0; for (const h of held) heldTotal = round2(heldTotal + Number(h.amount || 0));
+const stale = [];
+for (const h of held) {
+if (h.external_id && !keep[h.external_id]) stale.push(h);
+}
+// Placeholder rows ("marked paid in the accounting system") with no QuickBooks
+// id go too when QuickBooks now says less was paid than we hold.
+if (crmTotal !== null && crmTotal !== undefined && heldTotal - crmTotal > 0.005) {
+for (const h of held) if (!h.external_id) stale.push(h);
+}
+for (const h of stale) {
+await pgDelete(env, 'invoice_payments', 'id=' + pgEq(h.id));
+paid = round2(Math.max(0, paid - Number(h.amount || 0)));
+const when = h.deposited_on ? String(h.deposited_on).slice(0, 10) : '';
+try { await pgInsert(env, 'account_notes', { occurred_at: nowIso, tenant_id: tenantId, account_id: accountId, author_name: 'QuickBooks sync', source: 'sync',
+body: (h.kind === 'credit' ? 'Credit of $' : 'Payment of $') + Number(h.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) + (when ? ' dated ' + when : '') + (h.reference ? ' (ref ' + h.reference + ')' : '') + ' was reversed, voided or unapplied in QuickBooks; the balance is open again.' }); } catch (e) {}
+}
+} catch (e) { console.log('QBO_PAYMENT_PRUNE_FAILED account=' + accountId + ' ' + (e && e.message)); }
+}
 if (crmTotal !== null && crmTotal !== undefined) {
 if (crmTotal - paid > 0.005) {
 await pgInsert(env, 'invoice_payments', {
@@ -4563,6 +4591,31 @@ return (rows || []).map(qboConnFromRow).filter(Boolean);
 }
 // Per-connection external-id prefixes (see the header note on multi-company).
 function qboExtPrefix(conn) { return (conn && conn.cfg && conn.cfg.idPrefix) || QBO_EXTERNAL_PREFIX; }
+// The "city" every invoice from a QuickBooks company file is filed under is
+// the file itself - "Total Apartment Solutions (Atlanta)" files as Atlanta -
+// not the customer's billing-address city (a management company billed in
+// Dallas for an Atlanta property is still Atlanta's work). An admin can
+// override the label per connection (cfg.office).
+function qboConnOfficeLabel(conn) {
+const cfg = (conn && conn.cfg) || {};
+if (cfg.office && String(cfg.office).trim()) return String(cfg.office).trim().slice(0, 40);
+const name = String(cfg.companyName || '').trim();
+if (!name) return null;
+const m = /\(([^)]+)\)\s*$/.exec(name);
+if (m && m[1].trim()) return m[1].trim().slice(0, 40);
+return name.replace(/[,\s]+(llc|l\.l\.c\.|inc\.?|corp\.?|co\.?)\s*$/i, '').trim().slice(0, 40) || null;
+}
+function officeSlugOf(label) { return String(label == null ? '' : label).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40); }
+// Today's date (YYYY-MM-DD) in the tenant's working time zone. QuickBooks
+// allows invoices dated in the future; they are not receivable yet and stay
+// out of every list, total and cadence until their date arrives.
+function todayCentral() {
+const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+const get = function (t) { return (parts.find(function (p) { return p.type === t; }) || {}).value; };
+return get('year') + '-' + get('month') + '-' + get('day');
+}
+function invoiceDateOnly(v) { const s = String(v || ''); return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null; }
+function isFutureDated(row, today) { const d = invoiceDateOnly(row && row.invoiced_at); return !!(d && d > (today || todayCentral())); }
 function qboPayPrefix(conn) { return (conn && conn.cfg && conn.cfg.payPrefix) || QBO_PAYMENT_PREFIX; }
 function qboRealmPrefixes(realmId) { return { idPrefix: QBO_EXTERNAL_PREFIX + String(realmId) + '-', payPrefix: QBO_PAYMENT_PREFIX + String(realmId) + '-' }; }
 // PostgREST filter for "rows mirrored from this connection": its own prefix,
@@ -4829,10 +4882,11 @@ contact: person,
 contactEmail: (inv.BillEmail && inv.BillEmail.Address) || (customer && customer.PrimaryEmailAddr && customer.PrimaryEmailAddr.Address) || null,
 contactPhone: (customer && customer.PrimaryPhone && customer.PrimaryPhone.FreeFormNumber) || null,
 claimNumber: qboClaimNumber(inv),
-office: addr.City || null,
+office: qboConnOfficeLabel(conn) || addr.City || null,
 department: qboConnDepartment(conn, departments) || qboDepartmentKey(inv, departments),
 meta: inv.DueDate ? ('Due ' + inv.DueDate) : null,
 payments: payments,
+paymentsAuthoritative: true,
 creditAmount: creditAmount,
 badDebt: badDebt,
 badDebtAt: badDebtAt
@@ -4997,6 +5051,15 @@ const toRead = {};
 for (const p of livePayments) for (const line of (p.Line || [])) for (const lt of (line.LinkedTxn || [])) {
 if (lt && lt.TxnType === 'Invoice' && !liveInvoices[String(lt.TxnId)]) toRead[String(lt.TxnId)] = true;
 }
+// A payment that was unapplied or reversed no longer names the invoice it
+// used to pay, so that invoice is found from our own ledger and re-read.
+for (const p of livePayments.slice(0, 50)) {
+try {
+const prefix = qboPayPrefix(conn) + p.Id + '-';
+const rows = await pgSelect(env, 'invoice_payments', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=like.' + encodeURIComponent(prefix + '*') + '&select=external_id');
+for (const r of rows) { const invId = String(r.external_id).slice(prefix.length).split('-')[0]; if (invId && !liveInvoices[invId]) toRead[invId] = true; }
+} catch (e) {}
+}
 for (const id of await qboRemovePayments(env, conn, deletedPayments)) { if (!liveInvoices[id]) toRead[id] = true; }
 const count = Object.keys(liveInvoices).length + Object.keys(toRead).length;
 // A burst bigger than one step can carry (a bulk edit, a long outage) is
@@ -5013,6 +5076,113 @@ const fetched = await qboFetchByIds(env, conn, 'Invoice', Object.keys(toRead));
 await qboIngestInvoices(env, conn, invoices.concat(fetched));
 await qboMarkInvoicesDeleted(env, conn, deletedInvoices);
 await qboSaveConfig(env, conn, { cdcAt: startedAt, lastError: null }, { last_synced_at: new Date().toISOString() });
+// Housekeeping that does not depend on change notifications: unapplied
+// payments and credit memos (hourly) and the open-balance sweep (daily).
+try { await qboUnappliedRefresh(env, conn); } catch (e) { console.log('QBO_UNAPPLIED_FAILED integration=' + conn.id + ' ' + (e && e.message)); }
+try { await qboBalanceSweepStep(env, conn); } catch (e) { console.log('QBO_SWEEP_FAILED integration=' + conn.id + ' ' + (e && e.message)); }
+}
+// Every open invoice in QuickBooks, compared with what we hold, once a day.
+// Catches what change notifications can miss: a payment reversed or deleted
+// without the invoice itself being touched, an invoice we never received, a
+// balance that drifted. One page of 1,000 per step, then fixes in batches.
+const QBO_SWEEP_EVERY_MS = 24 * 3600000;
+async function qboBalanceSweepStep(env, conn) {
+const cfg = conn.cfg || {};
+let sweep = cfg.sweep || null;
+if (!sweep) {
+const last = cfg.sweepAt ? new Date(cfg.sweepAt).getTime() : 0;
+if (Date.now() - last < QBO_SWEEP_EVERY_MS) return;
+sweep = { phase: 'scan', start: 1, fix: [], startedAt: new Date().toISOString(), scanned: 0, found: 0 };
+}
+if (sweep.phase === 'scan') {
+const page = await qboQuery(env, conn, 'Invoice', "Balance > '0'", sweep.start, 1000);
+const prefix = qboExtPrefix(conn);
+const byExt = {};
+for (const chunk of qboChunks(page.map(function (inv) { return prefix + inv.Id; }), 100)) {
+const rows = await pgSelect(env, 'accounts', 'tenant_id=' + pgEq(conn.tenant_id) + '&external_id=in.(' + chunk.map(function (x) { return '"' + String(x).replace(/"/g, '') + '"'; }).join(',') + ')&select=external_id,status,amount,paid_amount');
+for (const r of rows) byExt[r.external_id] = r;
+}
+for (const inv of page) {
+const ours = byExt[prefix + inv.Id];
+const qboBal = round2(inv.Balance);
+const ourBal = ours ? round2(Number(ours.amount || 0) - Number(ours.paid_amount || 0)) : null;
+if (!ours || ours.status === 'paid' || Math.abs(ourBal - qboBal) > 0.005) { if (sweep.fix.length < 2000) sweep.fix.push(String(inv.Id)); sweep.found++; }
+}
+sweep.scanned += page.length;
+if (page.length < 1000) sweep.phase = 'fix'; else sweep.start += 1000;
+await qboSaveConfig(env, conn, { sweep: sweep });
+return;
+}
+if (sweep.phase === 'fix') {
+const batch = sweep.fix.splice(0, 60);
+if (batch.length) {
+const fetched = await qboFetchByIds(env, conn, 'Invoice', batch);
+await qboIngestInvoices(env, conn, fetched);
+}
+if (sweep.fix.length) { await qboSaveConfig(env, conn, { sweep: sweep }); return; }
+console.log('QBO_SWEEP_DONE integration=' + conn.id + ' scanned=' + sweep.scanned + ' fixed=' + sweep.found);
+await qboSaveConfig(env, conn, { sweep: null, sweepAt: new Date().toISOString(), sweepLast: { scanned: sweep.scanned, fixed: sweep.found, at: new Date().toISOString() } });
+}
+}
+// Money QuickBooks holds for a customer that is not applied to any invoice:
+// payments with an unapplied amount and credit memos with a balance. Kept in
+// unapplied_credits, replaced wholesale for the company every hour, and shown
+// on the account so the team knows a balance may already be covered.
+const QBO_UNAPPLIED_EVERY_MS = 3600000;
+async function qboQueryAll(env, conn, entity, where, maxPages) {
+const out = []; let start = 1;
+for (let i = 0; i < (maxPages || 5); i++) {
+const page = await qboQuery(env, conn, entity, where, start, 1000);
+for (const r of page) out.push(r);
+if (page.length < 1000) break;
+start += 1000;
+}
+return out;
+}
+async function qboUnappliedRefresh(env, conn) {
+const cfg = conn.cfg || {};
+const last = cfg.unappliedAt ? new Date(cfg.unappliedAt).getTime() : 0;
+if (Date.now() - last < QBO_UNAPPLIED_EVERY_MS) return;
+let payments = [];
+try { payments = await qboQueryAll(env, conn, 'Payment', "UnappliedAmt > '0'"); }
+catch (e) {
+// Not every realm lets UnappliedAmt be filtered: scan the last 18 months.
+const since = new Date(Date.now() - 548 * 86400000).toISOString().slice(0, 10);
+payments = (await qboQueryAll(env, conn, 'Payment', "TxnDate >= '" + since + "'", 8)).filter(function (p) { return Number(p.UnappliedAmt) > 0.005; });
+}
+const memos = await qboQueryAll(env, conn, 'CreditMemo', "Balance > '0'");
+const rows = [];
+const prefix = qboExtPrefix(conn);
+for (const p of payments) {
+const amt = round2(p.UnappliedAmt);
+if (!(amt > 0)) continue;
+rows.push({ tenant_id: conn.tenant_id, integration_id: conn.id, external_id: prefix + 'UP' + p.Id, kind: 'payment', customer_name: String((p.CustomerRef && p.CustomerRef.name) || '').slice(0, 200), amount: amt,
+txn_date: p.TxnDate || null, reference: p.PaymentRefNum ? String(p.PaymentRefNum).slice(0, 80) : null, memo: p.PrivateNote ? String(p.PrivateNote).slice(0, 300) : null, total_amount: round2(p.TotalAmt), updated_at: new Date().toISOString() });
+}
+for (const cm of memos) {
+const amt = round2(cm.Balance);
+if (!(amt > 0)) continue;
+rows.push({ tenant_id: conn.tenant_id, integration_id: conn.id, external_id: prefix + 'UC' + cm.Id, kind: 'credit_memo', customer_name: String((cm.CustomerRef && cm.CustomerRef.name) || '').slice(0, 200), amount: amt,
+txn_date: cm.TxnDate || null, reference: cm.DocNumber ? String(cm.DocNumber).slice(0, 80) : null, memo: ((cm.CustomerMemo && cm.CustomerMemo.value) || cm.PrivateNote) ? String((cm.CustomerMemo && cm.CustomerMemo.value) || cm.PrivateNote).slice(0, 300) : null, total_amount: round2(cm.TotalAmt), updated_at: new Date().toISOString() });
+}
+await pgDelete(env, 'unapplied_credits', 'tenant_id=' + pgEq(conn.tenant_id) + '&integration_id=' + pgEq(conn.id));
+for (const r of rows.slice(0, 2000)) { try { await pgInsert(env, 'unapplied_credits', r); } catch (e) {} }
+await qboSaveConfig(env, conn, { unappliedAt: new Date().toISOString(), unappliedCount: rows.length });
+}
+// GET /api/accounts/unapplied - every unapplied payment and credit memo in
+// the company's QuickBooks files, by customer, for the accounts the user can see.
+async function handleAccountsUnapplied(request, env) {
+const user = await getSessionUser(request, env);
+if (!user) return json({ ok: false }, 401);
+const rows = await pgSelectAll(env, 'unapplied_credits', 'tenant_id=' + pgEq(user.tenant_id) + '&select=*&order=customer_name.asc,txn_date.desc') || [];
+const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id));
+const byConn = {}; for (const c of conns) byConn[String(c.id)] = c;
+const departments = resolveDepartments(user.tenant_departments);
+return json({ ok: true, rows: rows.map(function (r) {
+const c = byConn[String(r.integration_id)];
+return { id: r.id, customerName: r.customer_name, kind: r.kind, amount: Number(r.amount || 0), totalAmount: r.total_amount == null ? null : Number(r.total_amount), date: r.txn_date, reference: r.reference, memo: r.memo,
+file: c ? qboConnOfficeLabel(c) : null, office: c ? officeSlugOf(qboConnOfficeLabel(c)) : null, department: c ? (c.cfg.department || null) : null, departmentLabel: c && c.cfg.department ? (departments[c.cfg.department] || null) : null, company: c ? (c.cfg.companyName || null) : null };
+}) });
 }
 // One page of a queued change batch per step; the last page marks deletions
 // and moves the change cursor forward.
@@ -5278,6 +5448,7 @@ const importing = !!(connected && cfg.import && cfg.import.phase !== 'done');
 const needsReconnect = !!(cfg.needsReconnect || (envSwitched && conn.status === 'connected'));
 return { id: conn.id, status: conn.status, realmId: cfg.realmId || null, companyName: cfg.companyName || null,
 environment: cfg.environment || null, department: cfg.department || null, departmentLabel: cfg.department && departments[cfg.department] ? departments[cfg.department] : null,
+office: officeSlugOf(qboConnOfficeLabel(conn)) || null, officeLabel: qboConnOfficeLabel(conn), officeOverride: !!(cfg.office && String(cfg.office).trim()),
 connected: connected, needsReconnect: needsReconnect, importing: importing, imported: (cfg.import && cfg.import.imported) || 0,
 connectedAt: conn.connected_at || cfg.connectedAt || null, lastSyncedAt: conn.last_synced_at || null, lastError: connected ? (cfg.lastError || null) : null,
 reconnectReason: canManage && needsReconnect ? ((envSwitched && conn.status === 'connected') ? envNote : (cfg.lastError || null)) : null };
@@ -5393,6 +5564,15 @@ const id = parseInt(body.id, 10);
 const conn = id ? (await qboLoadConns(env, 'id=' + pgEq(id) + '&tenant_id=' + pgEq(user.tenant_id)))[0] : null;
 if (!conn) return json({ ok: false, error: 'Connection not found' }, 404);
 let departments = resolveDepartments(user.tenant_departments);
+// { id, office } alone: rename the city (file label) this company files under
+// and re-file its invoices; the business mapping is left as it is.
+if (body.office !== undefined && body.department === undefined && !body.newDepartmentLabel) {
+const label = String(body.office || '').trim().slice(0, 40);
+await qboSaveConfig(env, conn, { office: label || null });
+const slug = await qboRetagOffice(env, Object.assign({}, conn, { cfg: Object.assign({}, conn.cfg, { office: label || null }) }), qboConnOfficeLabel(Object.assign({}, conn, { cfg: Object.assign({}, conn.cfg, { office: label || null }) })));
+try { await logUserActivity(env, user, null, 'integration', (conn.cfg.companyName || 'QuickBooks company') + ' now files under ' + (label || qboConnOfficeLabel(conn) || 'its file name')); } catch (e) {}
+return json({ ok: true, office: slug, officeLabel: qboConnOfficeLabel(Object.assign({}, conn, { cfg: Object.assign({}, conn.cfg, { office: label || null }) })) });
+}
 let key = String(body.department || '').trim();
 // "Add a business..." from the card: a new department is created on the
 // company and the connection mapped to it in one go.
@@ -5511,6 +5691,22 @@ try { await logUserActivity(env, user, null, 'integration', 'Cleared ' + n + ' Q
 return json({ ok: true, applied: true, count: n, rows: listed });
 }
 // Re-tag every invoice mirrored from a connection with its (new) department.
+// Re-file every invoice of a company file under its office (city) label, and
+// make sure the tenant's office list carries that label.
+async function qboRetagOffice(env, conn, label) {
+const slug = officeSlugOf(label);
+if (!slug) return null;
+const t = await pgSelectOne(env, 'tenants', 'id=' + pgEq(conn.tenant_id) + '&select=id,offices,integration_mode');
+let offices = resolveOffices(t ? t.offices : null);
+if (offices === OFFICE_LABELS) offices = {};
+if (!offices[slug]) {
+offices = Object.assign({}, offices); offices[slug] = String(label).trim().slice(0, 40);
+await pgUpdate(env, 'tenants', 'id=' + pgEq(conn.tenant_id), { offices: offices });
+}
+const filter = 'tenant_id=' + pgEq(conn.tenant_id) + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix));
+await pgUpdate(env, 'accounts', filter, { office: slug, updated_at: new Date().toISOString() });
+return slug;
+}
 async function qboRetagDepartment(env, conn, department) {
 const filter = 'tenant_id=' + pgEq(conn.tenant_id) + '&' + (await qboOwnRowsFilter(env, conn, 'external_id', qboExtPrefix));
 await pgUpdate(env, 'accounts', filter, { department: department || null, updated_at: new Date().toISOString() });
@@ -6188,6 +6384,7 @@ const accounts = await pgSelectAll(env, 'accounts',
 'tenant_id=' + pgEq(settings.tenant_id) + '&' + statusFilter + officeFilter + '&select=*&order=id.asc'
 ) || [];
 const checkpoints = cadenceCheckpointsFor(settings);
+const cadenceToday = todayCentral();
 const weekAgo = new Date(now.getTime() - 7 * 86400000).toISOString();
 
 for (const account of accounts) {
@@ -6197,6 +6394,7 @@ if (isDoNotContact(account)) { summary.skipped++; continue; }
 if (account.sensitive) { summary.skipped++; continue; }
 if (account.escalated) { summary.skipped++; continue; }
 if (!account.invoiced_at) { summary.skipped++; continue; }
+if (isFutureDated(account, cadenceToday)) { summary.skipped++; continue; }
 const balance = Number(account.amount || 0) - Number(account.paid_amount || 0);
 if (balance <= 0) { summary.skipped++; continue; }
 
@@ -8277,7 +8475,7 @@ const scope = accountScopeQuery(user);
 let version = null; let cacheKey = null; let cache = null;
 try {
 version = await accountsVersion(env, user.tenant_id);
-const etag = 'W/"' + (await sha1Hex('gz2|' + user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"';
+const etag = 'W/"' + (await sha1Hex('gz3|' + user.tenant_id + '|' + scope + '|' + version.v + '|' + todayCentral())).slice(0, 32) + '"';
 if (request.headers.get('if-none-match') === etag) {
 return new Response(null, { status: 304, headers: { 'ETag': etag, 'Cache-Control': 'no-cache' } });
 }
@@ -8292,12 +8490,15 @@ if (cacheKey && cache) {
 // the moment anything changes, so a longer life only saves cold reads.
 try { const p = cache.put(cacheKey, gzipCacheEntry(gz.slice(0))); if (ctx && ctx.waitUntil) ctx.waitUntil(p); else await p; } catch (e) {}
 }
-const etagOut = version ? 'W/"' + (await sha1Hex('gz2|' + user.tenant_id + '|' + scope + '|' + version.v)).slice(0, 32) + '"' : null;
+const etagOut = version ? 'W/"' + (await sha1Hex('gz3|' + user.tenant_id + '|' + scope + '|' + version.v + '|' + todayCentral())).slice(0, 32) + '"' : null;
 return gzipJsonResponse(gz, etagOut, 'miss');
 }
 // The /api/accounts answer for one tenant and access scope, as JSON text.
 async function buildAccountsBody(env, tenantId, scope) {
-const list = await pgSelectAllById(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + scope + '&select=*');
+const today = todayCentral();
+// Invoices dated after today are not receivable yet: they appear on the day
+// they are dated (the cache key carries the date, so the list rolls over).
+const list = (await pgSelectAllById(env, 'accounts', 'tenant_id=' + pgEq(tenantId) + scope + '&select=*')).filter(function (a) { return a.status === 'paid' || !isFutureDated(a, today); });
 list.sort(function (x, y) { return descNullsFirst(x.invoiced_at, y.invoiced_at) || (Number(y.id) - Number(x.id)); });
 const accounts = list.map(function (a) {
 let days = null;
@@ -11407,6 +11608,7 @@ if (url.pathname === '/api/quickbooks/status' && request.method === 'GET') { ret
 if (url.pathname === '/api/quickbooks/department' && request.method === 'POST') { return handleQuickBooksDepartment(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/diagnose' && request.method === 'GET') { return handleQuickBooksDiagnose(request, env); }
 if (url.pathname === '/api/quickbooks/line-audit' && request.method === 'GET') { return handleQuickBooksLineAudit(request, env); }
+if (url.pathname === '/api/accounts/unapplied' && request.method === 'GET') { return handleAccountsUnapplied(request, env); }
 if (url.pathname === '/api/quickbooks/sandbox-cleanup' && request.method === 'POST') { return handleQuickBooksSandboxCleanup(request, env); }
 if (url.pathname === '/api/quickbooks/webhook' && request.method === 'POST') { return handleQuickBooksWebhook(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/continue' && request.method === 'POST') { return handleQuickBooksContinue(request, env, ctx); }
