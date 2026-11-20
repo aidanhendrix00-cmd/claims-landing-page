@@ -6636,7 +6636,7 @@ It must:
 3. Mention the average age of the invoices (${sm.avgAge} days).
 4. Say the Account Statement is attached.
 5. Ask whether these invoices are in their payment processing, whether anything is needed from us to release payment, and for the expected payment date.
-Keep it professional and courteous but direct, under 220 words plus the invoice list. End with a closing line such as "Thank you," and nothing after it - the sender's signature is added automatically.
+Keep it professional and courteous but direct, under 220 words plus the invoice list. Format it as a proper business email in plain text: the greeting on its own line, a blank line, short paragraphs separated by blank lines (no paragraph longer than three sentences), the invoice list as its own block with a blank line before and after it, then a blank line and a closing line such as "Thank you," with nothing after it - the sender's signature is added automatically. No bullet characters, headings, bold, markdown or emoji.
 
 Hard rules - these override everything above:
 1. Use only the facts listed. Never invent PO numbers, claim numbers, late fees, interest, dates or legal consequences, and never turn a dollar amount into a reference number.
@@ -8632,7 +8632,11 @@ ${recipientGuidance}
 
 ${instructions}
 
-End the email with a closing line such as "Thank you," and nothing after it: no name, title, phone number, company name or placeholder. The sender's own signature is added automatically under the message.
+Format it as a proper business email, in plain text:
+- The greeting on its own line, then a blank line.
+- The body in two or three short paragraphs separated by blank lines, one point each (what the invoice covers, what is outstanding and what you need, the offer to help or send anything required). No paragraph longer than three sentences.
+- A blank line, then the closing line such as "Thank you," and nothing after it: no name, title, phone number, company name or placeholder. The sender's own signature is added automatically under the message.
+- No bullet points, headings, bold, markdown or emoji.
 
 Hard rules - these override everything above:
 1. Use only the facts listed under Details. If something is "none on file" or not listed (an invoice number, a claim number, a name, a date, a PO number, a late fee, an interest rate), leave it out entirely. Never fill a gap with a guess, and never turn a dollar amount or a date into a reference number.
@@ -8651,7 +8655,7 @@ Hard rules - these override everything above:
     return buildPrompt(inv, draftType, docs, recipient) +
       `\n\nThe collections coordinator already has a draft of this email and wants it changed:\n\n<current_draft>\n${String(currentDraft || '').slice(0, 3500)}\n</current_draft>` +
       instructionBlock(instruction) +
-      `\n\nReturn only the revised email body, ending with a closing line and no signature.`;
+      `\n\nReturn only the revised email body: greeting on its own line, short paragraphs separated by blank lines, ending with a closing line and no signature.`;
   }
 
   // The company's own demand-letter template (My Account > Settings), filled
