@@ -538,6 +538,13 @@
   .esc-opt .t{font-size:13px;font-weight:600;color:var(--ink);}
   .esc-opt .d{font-size:11.5px;color:var(--slate);margin-top:2px;}
   .esc-opt select{margin-top:8px;width:100%;font-size:13px;padding:7px 9px;border-radius:7px;border:1px solid var(--line);font-family:var(--font-body);}
+  .prev-email{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-left:3px solid var(--brand-rust);border-radius:10px;padding:10px 12px;background:#fff;margin:0 0 12px;}
+  .prev-email-text{display:flex;flex-direction:column;gap:3px;min-width:0;}
+  .prev-email-text b{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);}
+  .prev-email-meta{font-size:12.5px;color:var(--ink);line-height:1.4;}
+  .prev-email-meta .muted{color:var(--slate-soft);}
+  .prev-email .btn-primary{white-space:nowrap;flex-shrink:0;}
+  .prev-email .btn-primary:disabled{opacity:.55;cursor:default;}
   .ai-instruct{border:1px solid var(--line);border-radius:10px;padding:12px 12px 10px;background:#FAF8F2;margin:0 0 12px;}
   .ai-instruct-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
   .ai-instruct-head b{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);}
@@ -1436,6 +1443,13 @@
       <div class="hint" id="subject-hint">Auto-generated &mdash; edit it before approving if needed. If this invoice already has an email thread, this is sent as a reply on it (subject becomes &ldquo;Re: &hellip;&rdquo;) so the customer sees one conversation.</div>
     </div>
 
+    <div class="prev-email" id="prev-email-box" style="display:none;">
+      <div class="prev-email-text">
+        <b>Last email sent on this invoice</b>
+        <span class="prev-email-meta" id="prev-email-meta"></span>
+      </div>
+      <button type="button" class="btn-primary" id="prev-email-btn" onclick="draftFollowUpToPrevious()" title="Writes a short follow-up that refers back to that email, on the same subject thread">&#8617; Draft follow-up to that email</button>
+    </div>
     <div class="ai-instruct" id="ai-instruct-box">
       <div class="ai-instruct-head"><b>Tell the AI what to change</b><span style="font-size:11px;color:var(--slate-soft);">Rewrites the draft below</span></div>
       <div class="ai-instruct-row">
@@ -1780,6 +1794,7 @@
       <div id="msg-earlier"></div>
     </div>
     <div class="drawer-actions">
+      <button class="btn-solid" id="msg-followup-btn" onclick="(function(){ const id = currentMessagesId; closeMessagesSent(); openDrawer(id, 'followup', 'followupPrev'); })()" title="Opens the draft drawer with a short follow-up that refers back to the most recent email on this account">&#8617; Draft follow-up to this email</button>
       <button class="btn-small" id="msg-history-btn" onclick="(function(){ const id = currentMessagesId; closeMessagesSent(); openAccountHistory(id); })()">Full account history</button>
       <button class="btn-small" onclick="closeMessagesSent()">Close</button>
     </div>
@@ -5946,7 +5961,7 @@ function todoRowHTML(item, num, priority){
               <td style="font-family:var(--font-mono);font-size:11px;">${s.subject || '\u2014'}</td>
               <td>${s.source === 'automation' ? '<span class="status-pill auto-tag">AUTONOMOUS</span>' : ('Manual' + (s.sentBy ? ' <span class="sent-by">\u00b7 ' + hEsc(s.sentBy) + '</span>' : ''))}</td>
               <td><span class="status-pill ${s.status}">${msgStatusLabel(s.status)}</span></td>
-              <td style="white-space:nowrap;"><button class="btn-small" onclick="openMessagesSent(${JSON.stringify(s.invoiceId)})" title="Read the most recent follow-up, demand letter or NOIL sent on this account">See messages sent</button></td>
+              <td style="white-space:nowrap;"><button class="btn-small" onclick="openMessagesSent(${JSON.stringify(s.invoiceId)})" title="Read the most recent follow-up, demand letter or NOIL sent on this account">See messages sent</button> <button class="btn-small" onclick="openDrawer(${JSON.stringify(s.invoiceId)}, 'followup', 'followupPrev')" title="Draft a short follow-up that refers back to the most recent email on this account">&#8617; Follow up</button></td>
             </tr>
           `).join('')}
         </tbody>
@@ -7268,6 +7283,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     document.getElementById('msg-earlier-count').textContent = '';
     document.getElementById('msg-earlier-wrap').style.display = 'none';
     document.getElementById('msg-history-btn').style.display = inv ? '' : 'none';
+    const fub = document.getElementById('msg-followup-btn'); if(fub) fub.style.display = (inv && !isDoNotContact(inv) && lastSentEmailFor(inv)) ? '' : 'none';
     document.getElementById('overlay-messages').classList.add('open');
     // Draw what the Comms Log already knows straight away (bodies included on
     // live dashboards), then swap in the server's copy when it lands.
@@ -8856,7 +8872,9 @@ Hard rules - these override everything above:
     generateDraft(false); // automatic: redraft immediately once a recipient is chosen
   }
 
-  function openDrawer(id, draftType){
+  // mode 'followupPrev': open straight onto a follow-up to the last email sent
+  // (the Messages-sent drawer's button) instead of a fresh first draft.
+  function openDrawer(id, draftType, mode){
     currentDraftType = draftType || 'followup';
     currentInvoice = findInv(id);
     if(!currentInvoice) return;
@@ -8890,8 +8908,114 @@ Hard rules - these override everything above:
     const instrEl = document.getElementById('ai-instruct'); if(instrEl) instrEl.value = '';
     resetAiInstructNote();
     renderSignaturePreview();
+    renderPrevEmailBox();
     document.getElementById('overlay').classList.add('open');
-    generateDraft(false);
+    if(mode === 'followupPrev' && lastSentEmailFor(currentInvoice)) draftFollowUpToPrevious();
+    else generateDraft(false);
+  }
+
+  /* ---- Follow up on the last email sent ------------------------------
+     One click writes a short follow-up that refers back to the most recent
+     email on this invoice (from the Comms Log) and keeps its subject so the
+     customer sees one thread. AI on a live workspace; a template in the demo. */
+  function htmlToPlainText(html){
+    const s = String(html || '');
+    if(s.indexOf('<') === -1) return s;
+    const t = s.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<\/(p|div|tr|li|h[1-6])>/gi, '\n').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+    const el = document.createElement('textarea'); el.innerHTML = t;
+    return el.value.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function lastSentEmailFor(inv){
+    if(!inv) return null;
+    const rows = (state.commsLog || []).filter(function(c){
+      return String(c.invoiceId) === String(inv.id) && !/fail|error|held|bounce/i.test(String(c.status || ''));
+    }).sort(function(a, b){ return logTime(b.sentTs || b.sentAt) - logTime(a.sentTs || a.sentAt); });
+    const c = rows[0]; if(!c) return null;
+    const when = hParse(c.sentTs || c.sentAt);
+    const text = htmlToPlainText(c.body || c.preview || '');
+    // Drop the signature block so the model follows up on the message, not the sign-off.
+    const sigAt = text.search(/\n(thank you|thanks|sincerely|best regards|kind regards|regards|respectfully)[,.]?\s*\n/i);
+    return {
+      at: when, dateLabel: when ? fmtDate(when) : (c.sentAt || ''), subject: c.subject || '', type: c.draftType || 'Follow-up',
+      recipient: c.recipient || '', status: String(c.status || 'sent').toLowerCase(), replied: /replied/i.test(String(c.status || '')),
+      text: (sigAt > 0 ? text.slice(0, sigAt) : text).trim().slice(0, 2500)
+    };
+  }
+  function renderPrevEmailBox(){
+    const box = document.getElementById('prev-email-box'); if(!box) return;
+    const prev = lastSentEmailFor(currentInvoice);
+    if(!prev || currentDraftType !== 'followup'){ box.style.display = 'none'; return; }
+    const parts = [hEsc(prev.type), hEsc(prev.dateLabel)];
+    if(prev.recipient) parts.push('to ' + hEsc(prev.recipient));
+    const status = prev.replied ? '<span class="muted">· they replied</span>' : (prev.status === 'opened' ? '<span class="muted">· opened, no reply</span>' : '<span class="muted">· no reply yet</span>');
+    document.getElementById('prev-email-meta').innerHTML = parts.join(' · ') + ' ' + status + (prev.subject ? '<br><span class="muted">Subject: ' + hEsc(prev.subject) + '</span>' : '');
+    box.style.display = 'flex';
+  }
+  function previousEmailBlock(prev, inv){
+    const reply = prev.replied && inv.responseSummary ? ('They replied: ' + inv.responseSummary) : (prev.replied ? 'They replied, but payment has not arrived.' : 'No reply has been received.');
+    return `\n\nThe collections coordinator already emailed this recipient about this invoice. ${reply}\n\n<previous_email sent="${prev.dateLabel}"${prev.subject ? ' subject="' + prev.subject.replace(/"/g, "'") + '"' : ''}>\n${prev.text}\n</previous_email>\n\nWrite a short FOLLOW-UP to that email (under 100 words). Open by referring to it by date, for example "I wanted to follow up on my email of ${prev.dateLabel}". Do not repeat it; summarise what it asked in at most one clause. ${prev.replied ? 'Acknowledge their reply and ask for the payment itself or a firm payment date.' : 'Note that we have not received a response, and ask for the payment status and an expected payment date.'} Offer to resend anything they need. Courteous, and one notch firmer than the previous email. Same formatting rules: greeting on its own line, short paragraphs separated by blank lines, closing line, no signature.`;
+  }
+  function templateFollowUpToPrevious(inv, prev, recipient){
+    const who = recipient === 'adjuster' ? 'there' : (recipient === 'contact' ? ((contactPersonName(inv).split(' ')[0]) || 'there') : ((String(inv.contact || '').trim().split(' ')[0]) || 'there'));
+    const money = '$' + balanceDue(inv).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const ref = inv.invoiceNumber ? ('invoice ' + inv.invoiceNumber) : 'the invoice';
+    const middle = prev.replied
+      ? `Thank you for your reply. As of today the balance of ${money} is still outstanding on our side, so could you confirm when payment will be released?`
+      : `We haven't received a response yet, and the balance of ${money} remains outstanding. Could you let me know the status of payment and an expected payment date?`;
+    return `Hello ${who},\n\nI wanted to follow up on my email of ${prev.dateLabel} regarding ${ref} for ${inv.name}.\n\n${middle} If anything is needed from us to release payment, I'm happy to send it over.\n\nThank you,`;
+  }
+  async function draftFollowUpToPrevious(){
+    const inv = currentInvoice; if(!inv) return;
+    const prev = lastSentEmailFor(inv);
+    if(!prev){ showToast('No email has been sent on this invoice yet — draft the first one below.'); return; }
+    const btn = document.getElementById('prev-email-btn');
+    const draftBox = document.getElementById('draft-text');
+    const errBox = document.getElementById('err');
+    const approveBtn = document.getElementById('approve-btn');
+    const statusRow = document.getElementById('status-row');
+    const statusText = document.getElementById('status-row-text');
+    const note = document.getElementById('ai-instruct-note');
+    if(btn && btn.disabled) return;
+    if(currentDraftType !== 'followup'){
+      currentDraftType = 'followup';
+      document.getElementById('drawer-title').textContent = 'Draft Follow-Up — ' + inv.name;
+    }
+    // Same subject as the last email (less any Re:), so the send joins that thread.
+    if(prev.subject){
+      customSubject = prev.subject.replace(/^(\s*(re|fw|fwd)\s*:\s*)+/i, '');
+      const subjectInput = document.getElementById('draft-subject'); if(subjectInput) subjectInput.value = customSubject;
+    }
+    errBox.style.display = 'none';
+    if(btn){ btn.disabled = true; btn.textContent = 'Drafting…'; }
+    approveBtn.disabled = true; draftBox.readOnly = true;
+    const prevLabel = /follow/i.test(prev.type) ? 'email' : prev.type.toLowerCase();
+    if(statusText) statusText.textContent = 'Drafting a follow-up to the ' + prevLabel + ' sent ' + prev.dateLabel + '…';
+    statusRow.style.display = 'flex';
+    try{
+      let text;
+      if(!state.currentUser){
+        await new Promise(function(r){ setTimeout(r, 600); });
+        text = templateFollowUpToPrevious(inv, prev, currentRecipient);
+      } else {
+        const prompt = buildPrompt(inv, 'followup', selectedDocs(), currentRecipient) + previousEmailBlock(prev, inv);
+        const res = await fetch('/api/ai-draft', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, maxTokens: 800, draftType: 'followup' }) });
+        const data = await res.json();
+        if(!data || !data.ok || !data.text) throw new Error((data && data.error) || 'No draft returned.');
+        text = String(data.text).trim();
+      }
+      if(currentInvoice !== inv) return;
+      draftBox.value = text;
+      if(note){ note.textContent = 'Follow-up to the ' + prevLabel + ' sent ' + prev.dateLabel + ' — review it, edit by hand, or give an instruction above.'; note.style.color = ''; }
+    }catch(e){
+      if(currentInvoice !== inv) return;
+      draftBox.value = templateFollowUpToPrevious(inv, prev, currentRecipient);
+      errBox.textContent = "AI drafting isn't available right now, so a standard follow-up to your " + prev.dateLabel + ' email was loaded — review and edit it before sending.';
+      errBox.style.display = 'block';
+    }finally{
+      if(btn){ btn.disabled = false; btn.innerHTML = '&#8617; Draft follow-up to that email'; }
+      approveBtn.disabled = false; draftBox.readOnly = false;
+      statusRow.style.display = 'none';
+    }
   }
 
   const AI_INSTRUCT_NOTE = 'Type anything — tone, a deadline, what to mention. The amounts and facts on this invoice stay the same. Press Enter to rewrite.';
