@@ -885,6 +885,9 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   // Every choice is a row of buttons you click, not a drop-down: what is
   // picked is always visible, and City / Business / Payer take several.
   function legal(){ return !!(R.me && R.me.features && R.me.features.claimsOps); }
+  // The claims-operations pack reports by business only: no City filter,
+  // no City column, aging grouped by business.
+  function noCity(){ return legal(); }
   function dncWord(){ return legal() ? 'Sent to Legal (DNC)' : 'Sent to collections'; }
   function statusOpts(){ var o = [['all', 'Default for the report'], ['open', 'Open only'], ['paid', 'Paid only'], ['collections', dncWord()], ['escalated', 'Escalated'], ['replied', 'Replied']]; if(legal()) o = o.concat([['partial', 'Partial payment'], ['follow-up', 'Follow-up due'], ['overdue', 'Overdue (5+ business days)'], ['legal', 'Sent to Legal'], ['demand', 'Demand letter sent'], ['lien', 'Lien filed'], ['sensitive', 'Sensitive customer'], ['baddebt', 'Bad debt (written off)'], ['flagged', 'Escalated / NOIL / Demand / Legal']]).concat(Object.keys(CLAIM_STATUS).map(function(k){ return ['cs-' + k, 'Claim status: ' + CLAIM_STATUS[k]]; })); return o; }
   function statusWord(k){ if(k.indexOf('cs-') === 0) return 'Claim status: ' + (CLAIM_STATUS[k.slice(3)] || k.slice(3)); return { open: 'Open only', paid: 'Paid only', collections: dncWord(), escalated: 'Escalated', replied: 'Replied', partial: 'Partial payment', 'follow-up': 'Follow-up due', flagged: 'Escalated / NOIL / Demand / Legal' }[k] || k; }
@@ -912,7 +915,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
     var types = Object.keys(REPORTS).filter(function(k){ return !REPORTS[k].adminOnly || (me.role === 'admin'); });
     if(types.indexOf(SEL.type) === -1) SEL.type = types[0];
     chipRow('rptType', types.map(function(k){ return [k, REPORTS[k].label]; }), SEL.type, false);
-    chipRow('rptCity', cities, SEL.city, true, 'All ' + (cityWordV === 'City' ? 'cities' : 'offices'));
+    if(noCity()){ SEL.city = []; var cityField = $('rptCity') && $('rptCity').parentNode; if(cityField) cityField.style.display = 'none'; document.querySelectorAll('[data-feat-hide="claimsOps"]').forEach(function(el){ el.style.display = 'none'; }); }
+    else chipRow('rptCity', cities, SEL.city, true, 'All ' + (cityWordV === 'City' ? 'cities' : 'offices'));
     chipRow('rptBiz', bizs, SEL.biz, true, 'All ' + (bizWordV === 'Business' ? 'businesses' : 'departments'));
     chipRow('rptPayer', PAYER_OPTS, SEL.payer, true, 'All payers');
     chipRow('rptStatus', statusOpts(), SEL.status, false);
@@ -1015,8 +1019,8 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       var buckets = ['0–30', '31–60', '61–90', '90+'];
       function bucket(a){ var d = ageDays(a); return d <= 30 ? 0 : d <= 60 ? 1 : d <= 90 ? 2 : 3; }
       var groups = {};
-      open.forEach(function(a){ var k = officeLabel(a.officeLocation) + ' · ' + deptLabel(a.department); (groups[k] = groups[k] || { n: 0, b: [0,0,0,0], total: 0 }); groups[k].n++; groups[k].b[bucket(a)] += balance(a); groups[k].total += balance(a); });
-      cols = [cityWord() + ' · ' + bizWord(), 'Open invoices', 'Balance ' + buckets[0] + ' days', 'Balance ' + buckets[1] + ' days', 'Balance ' + buckets[2] + ' days', 'Balance ' + buckets[3] + ' days', 'Total balance'];
+      open.forEach(function(a){ var k = noCity() ? deptLabel(a.department) : (officeLabel(a.officeLocation) + ' · ' + deptLabel(a.department)); (groups[k] = groups[k] || { n: 0, b: [0,0,0,0], total: 0 }); groups[k].n++; groups[k].b[bucket(a)] += balance(a); groups[k].total += balance(a); });
+      cols = [noCity() ? bizWord() : (cityWord() + ' · ' + bizWord()), 'Open invoices', 'Balance ' + buckets[0] + ' days', 'Balance ' + buckets[1] + ' days', 'Balance ' + buckets[2] + ' days', 'Balance ' + buckets[3] + ' days', 'Total balance'];
       rows = Object.keys(groups).sort().map(function(k){ var g = groups[k]; return [k, g.n, money(g.b[0]), money(g.b[1]), money(g.b[2]), money(g.b[3]), money(g.total)]; });
       var all = [0,0,0,0]; open.forEach(function(a){ all[bucket(a)] += balance(a); });
       rows.push(['Total', open.length, money(all[0]), money(all[1]), money(all[2]), money(all[3]), money(all.reduce(function(s, x){ return s + x; }, 0))]);
@@ -1050,12 +1054,13 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
       rows = act.map(function(r){ return [fmtWhen(r.at), r.actor || '', r.role || '', officeLabel(r.office), String(r.type || '').replace(/_/g, ' '), r.customer || '', r.invoiceNumber || '', r.summary || '']; });
       foot = act.length + ' entr' + (act.length === 1 ? 'y' : 'ies');
     }
+    if(noCity()){ var ci = cols.indexOf(cityWord()); if(ci !== -1){ cols = cols.filter(function(_, i){ return i !== ci; }); rows = rows.map(function(r){ return r.filter(function(_, i){ return i !== ci; }); }); } }
     return { title: title, cols: cols, rows: rows, foot: foot };
   }
   function totals(list){ var inv = 0, paid = 0, due = 0; list.forEach(function(a){ inv += Number(a.amount || 0); paid += Number(a.paidAmount || 0); due += balance(a); }); return list.length + ' invoice' + (list.length === 1 ? '' : 's') + ' · ' + money(inv) + ' invoiced · ' + money(paid) + ' paid · ' + money(due) + ' still due'; }
   function subtitle(f){
     var bits = [];
-    bits.push(f.city === 'all' ? ('All ' + (cityWord() === 'City' ? 'cities' : 'offices')) : f.city.map(officeLabel).join(', '));
+    if(!noCity()) bits.push(f.city === 'all' ? ('All ' + (cityWord() === 'City' ? 'cities' : 'offices')) : f.city.map(officeLabel).join(', '));
     bits.push(f.biz === 'all' ? ('All ' + (bizWord() === 'Business' ? 'businesses' : 'departments')) : f.biz.map(deptLabel).join(', '));
     if(f.payer !== 'all') bits.push(f.payer.map(function(p){ return PAYER[p] || p; }).join(', '));
     if(f.status !== 'all') bits.push(statusWord(f.status));
@@ -1079,7 +1084,7 @@ const ACCOUNT_REPORTS_SCRIPT = `<script>
   }
   function renderPreview(out){
     var box = $('rptPreview'); if(!box) return;
-    if(!out.rows.length){ box.innerHTML = '<div class="restricted-box">Nothing matches those filters. Widen the date range or pick a different ' + esc(cityWord().toLowerCase()) + ' or ' + esc(bizWord().toLowerCase()) + '.</div>'; return; }
+    if(!out.rows.length){ box.innerHTML = '<div class="restricted-box">Nothing matches those filters. Widen the date range or pick a different ' + (noCity() ? '' : esc(cityWord().toLowerCase()) + ' or ') + esc(bizWord().toLowerCase()) + '.</div>'; return; }
     var show = out.rows.slice(0, 200);
     // The download sits right on the result: one dark button for the PDF,
     // the spreadsheet and CSV beside it, so there is nothing to scroll back to.
@@ -1558,7 +1563,7 @@ const ACCOUNT_PAGE_HTML = '<!doctype html><html lang="en"><head><meta charset="U
   '<div class="acct-panel" id="panel-reports"> ' +
   '<div class="acct-card"> ' +
   '<h3>Reports</h3> ' +
-  '<div class="acct-card-sub">Run any dashboard tab as a report, narrowed to a city, business, payer, status and date range, then download it as a PDF or a spreadsheet. Reports read the same live data the dashboard shows.</div> ' +
+  '<div class="acct-card-sub">Run any dashboard tab as a report, narrowed to <span data-feat-hide="claimsOps">a city, </span>business, payer, status and date range, then download it as a PDF or a spreadsheet. Reports read the same live data the dashboard shows.</div> ' +
   REPORTS_PANEL_HTML +
   '</div> ' +
   ' ' +
