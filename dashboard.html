@@ -135,6 +135,25 @@
   .section-head h2{font-family:var(--font-display);font-size:15px;font-weight:600;margin:0;}
   .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
   .chips{display:flex;gap:6px;flex-wrap:wrap;}
+  /* Quick status buttons under the filters (Revolve pack): one click shows
+     the accounts Sent to Legal or with a demand letter out; a second click
+     returns to the full list. The badges on each row stay as they are. */
+  .quick-status{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0 14px;}
+  .quick-status .qs-title{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate-soft);margin-right:2px;}
+  .qs-btn{display:inline-flex;align-items:center;gap:10px;padding:8px 14px 8px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--panel);cursor:pointer;font:inherit;color:var(--ink);transition:all .15s ease;text-align:left;}
+  .qs-btn .qs-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .qs-btn .qs-label{font-weight:700;font-size:13px;letter-spacing:.01em;}
+  .qs-btn .qs-meta{font-size:12px;color:var(--slate);white-space:nowrap;}
+  .qs-btn.qs-legal .qs-dot{background:#B42318;}
+  .qs-btn.qs-demand .qs-dot{background:#D97706;}
+  .qs-btn:hover{border-color:var(--slate-soft);}
+  .qs-btn.qs-legal.on{background:#B42318;border-color:#912018;color:#fff;}
+  .qs-btn.qs-legal.on .qs-dot{background:#fff;}
+  .qs-btn.qs-demand.on{background:#9A3F00;border-color:#7A3200;color:#fff;}
+  .qs-btn.qs-demand.on .qs-dot{background:#fff;}
+  .qs-btn.on .qs-meta{color:rgba(255,255,255,.85);}
+  .qs-btn.on .qs-clear{display:inline;}
+  .qs-btn .qs-clear{display:none;font-size:11px;opacity:.85;margin-left:2px;}
   .chip{font-size:11.5px;padding:5px 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--slate);cursor:pointer;transition:all .15s ease;}
   .chip.active{background:var(--ink);border-color:var(--ink);color:#fff;}
   .search{font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);width:170px;color:var(--ink);appearance:none;-webkit-appearance:none;}
@@ -961,6 +980,11 @@
         </div>
       </div>
 
+      <div class="quick-status" data-feat="claimsOps" style="display:none;" id="qs-queue">
+        <span class="qs-title">Quick view</span>
+        <button type="button" class="qs-btn qs-legal" id="qs-queue-legal" onclick="quickStatus('queue','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-demand" id="qs-queue-demand" onclick="quickStatus('queue','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+      </div>
       <div class="queue" id="queue"></div>
     </section>
 
@@ -991,6 +1015,11 @@
           <label class="accts-partial-lbl" data-feat="claimsOps" style="display:none;" title="Only accounts with at least one invoice in this status">Show <select id="accts-status" onchange="setAcctsFilter('status', this.value)"></select></label>
           <button class="btn-small" id="accts-sync-btn" onclick="pullFromAccounting()" title="Pull the latest invoices and customers from every connected QuickBooks / Intuit Enterprise Suite company">&#8635; Pull from QuickBooks / IES</button>
         </div>
+      </div>
+      <div class="quick-status" data-feat="claimsOps" style="display:none;" id="qs-accounts">
+        <span class="qs-title">Quick view</span>
+        <button type="button" class="qs-btn qs-legal" id="qs-accounts-legal" onclick="quickStatus('accounts','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-demand" id="qs-accounts-demand" onclick="quickStatus('accounts','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
       <div id="accts-hint" style="margin:-6px 0 10px;font-size:12px;color:var(--slate);"></div>
       <div id="accounts-wrap"></div>
@@ -1051,6 +1080,11 @@
         </select>
         <button type="button" class="btn-small ghost" id="sheet-clear" onclick="clearSheetFilters()" style="display:none;">Clear</button>
         <span class="sheet-count" id="sheet-count"></span>
+      </div>
+      <div class="quick-status" data-feat="claimsOps" style="display:none;" id="qs-sheet">
+        <span class="qs-title">Quick view</span>
+        <button type="button" class="qs-btn qs-legal" id="qs-sheet-legal" onclick="quickStatus('sheet','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-demand" id="qs-sheet-demand" onclick="quickStatus('sheet','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
       <div class="hint" style="margin-bottom:12px;">* next to a projected payment date means it falls outside the 3-week window (This Week through Following Week).</div>
       <div class="sheet-fs-bar" id="sheet-fs-bar"><span>Accounts Receivable &mdash; full screen</span><button type="button" class="btn-small" onclick="sheetFullscreen(false)">Exit (Esc)</button></div>
@@ -4569,6 +4603,47 @@ function todoRowHTML(item, num, priority){
   }
   function currentFilterPayer(){ const a = document.querySelector('#chips .chip.active'); return a ? a.dataset.payer : 'all'; }
 
+  /* ---- Quick view buttons: Sent to Legal / Demand letter sent ----------
+     Under the filters on the Queue, A/R and Accounts tabs (Revolve pack).
+     Each button drives that tab's own status filter, so the list, the
+     pager and the count behave exactly as if the filter had been picked. */
+  function quickStatusCurrent(view){
+    if(view === 'queue') return currentFilterPayer();
+    if(view === 'sheet') return state.sheetShow || 'all';
+    if(view === 'accounts'){ const f = acctsFilters(); return statusShowValue(f.partialOnly ? 'partial' : f.status); }
+    return 'all';
+  }
+  function quickStatus(view, key){
+    const next = quickStatusCurrent(view) === key ? 'all' : key;
+    if(view === 'queue'){
+      document.querySelectorAll('#chips .chip').forEach(function(c){ c.classList.toggle('active', c.dataset.payer === next); });
+      renderQueue();
+    } else if(view === 'sheet'){
+      setSheetShow(next);
+    } else if(view === 'accounts'){
+      setAcctsFilter('status', next);
+    }
+  }
+  function renderQuickStatus(view){
+    const box = document.getElementById('qs-' + view); if(!box) return;
+    if(!claimsOps()){ box.style.display = 'none'; return; }
+    box.style.display = '';
+    const open = activeInvoices();
+    const cur = quickStatusCurrent(view);
+    [['legal', function(inv){ return isDoNotContact(inv); }], ['demand', function(inv){ return !!inv.demandLetterSentAt; }]].forEach(function(pair){
+      const key = pair[0], test = pair[1];
+      const btn = document.getElementById('qs-' + view + '-' + key); if(!btn) return;
+      const rows = open.filter(test);
+      let bal = 0; const customers = {};
+      rows.forEach(function(inv){ bal += balanceDue(inv); customers[String(inv.customerName || inv.name || '').toLowerCase()] = 1; });
+      const n = view === 'accounts' ? Object.keys(customers).length : rows.length;
+      const unit = view === 'accounts' ? (n === 1 ? ' account' : ' accounts') : (n === 1 ? ' invoice' : ' invoices');
+      btn.querySelector('.qs-meta').textContent = n + unit + ' \u00b7 $' + bal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      btn.classList.toggle('on', cur === key);
+      btn.setAttribute('aria-pressed', cur === key ? 'true' : 'false');
+    });
+  }
+
   function cadenceMiniHTML(days){
     return CADENCE.map(c => {
       let cls = 'seg';
@@ -4636,6 +4711,7 @@ function todoRowHTML(item, num, priority){
   }
   function renderQueue(){
     const el = document.getElementById('queue');
+    renderQuickStatus('queue');
     const searchVal = queueSearchValue();
     const payerFilter = currentFilterPayer();
     const sortVal = document.getElementById('sort').value;
@@ -5053,6 +5129,7 @@ function todoRowHTML(item, num, priority){
     return out;
   }
   function renderSheet(){
+    renderQuickStatus('sheet');
     const body = document.getElementById('sheet-body');
     const head = document.getElementById('sheet-head');
     const tracker = !!TENANT_DEPTS_CUSTOM;
@@ -6322,6 +6399,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   function acctBizLabel(g){ const b = Object.keys(g.biz).filter(Boolean).sort(); return b.length <= 2 ? b.join(', ') : (b.length + ' businesses'); }
   function renderAccountsTab(){
     const wrap = document.getElementById('accounts-wrap'); if(!wrap) return;
+    renderQuickStatus('accounts');
     const f = acctsFilters();
     const PACK_SORTS = { 'open-asc': 1, 'count-asc': 1, 'age-asc': 1, newest: 1, oldest: 1, 'contact-desc': 1, 'contact-asc': 1, 'name-desc': 1 };
     if(PACK_SORTS[f.sort] && !claimsOps()) f.sort = 'open-desc';
