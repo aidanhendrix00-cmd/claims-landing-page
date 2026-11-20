@@ -5336,7 +5336,7 @@ const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(tenantId));
 const out = { ok: true, tenantId: tenantId, connections: [] };
 for (const conn of conns) {
 const r = { id: conn.id, company: (conn.cfg && (conn.cfg.companyName || conn.cfg.realmId)) || String(conn.id), status: conn.status,
-open: 0, withRealItem: 0, withDescription: 0, withServiceDate: 0, multiLine: 0, genericOnly: 0, nothingUsable: 0, items: {}, samples: [], truncated: false };
+open: 0, withRealItem: 0, withDescription: 0, withServiceDate: 0, multiLine: 0, genericOnly: 0, nothingUsable: 0, items: {}, classes: {}, samples: [], truncated: false };
 if (conn.status !== 'connected') { r.error = 'not connected'; out.connections.push(r); continue; }
 try {
 let start = 1;
@@ -5357,6 +5357,10 @@ if (lines.length > 1) r.multiLine++;
 if (!real.length && names.length && !descs.length) r.genericOnly++;
 if (!real.length && !descs.length) r.nothingUsable++;
 real.forEach(function (n) { r.items[n] = (r.items[n] || 0) + 1; });
+// Class / Department (location) on the invoice or its lines - the signal a
+// business inside a shared company file would carry.
+const cls = [inv.ClassRef && inv.ClassRef.name ? 'class:' + inv.ClassRef.name : '', inv.DepartmentRef && inv.DepartmentRef.name ? 'location:' + inv.DepartmentRef.name : ''].concat(lines.map(function (l) { const d = l.SalesItemLineDetail || {}; return d.ClassRef && d.ClassRef.name ? 'lineclass:' + d.ClassRef.name : ''; }));
+Array.from(new Set(cls.filter(Boolean))).forEach(function (c) { r.classes[c] = (r.classes[c] || 0) + 1; });
 if (r.samples.length < 6) r.samples.push({ invoice: inv.DocNumber || inv.Id, date: inv.TxnDate || null, total: inv.TotalAmt, lines: lines.slice(0, 6).map(function (l) {
 const d = l.SalesItemLineDetail || {};
 return { item: (d.ItemRef && d.ItemRef.name) || null, description: String(l.Description || '').slice(0, 120) || null, serviceDate: d.ServiceDate || null, qty: d.Qty == null ? null : d.Qty, amount: l.Amount == null ? null : l.Amount };
@@ -5370,6 +5374,7 @@ if (r.open >= cap) r.truncated = true;
 // Top items by frequency, as a list.
 r.topItems = Object.keys(r.items).map(function (k) { return { item: k, invoices: r.items[k] }; }).sort(function (a, b) { return b.invoices - a.invoices; }).slice(0, 15);
 delete r.items;
+r.classes = Object.keys(r.classes).map(function (k) { return { name: k, invoices: r.classes[k] }; }).sort(function (a, b) { return b.invoices - a.invoices; }).slice(0, 25);
 out.connections.push(r);
 }
 return json(out);
