@@ -557,6 +557,13 @@
   .esc-opt .t{font-size:13px;font-weight:600;color:var(--ink);}
   .esc-opt .d{font-size:11.5px;color:var(--slate);margin-top:2px;}
   .esc-opt select{margin-top:8px;width:100%;font-size:13px;padding:7px 9px;border-radius:7px;border:1px solid var(--line);font-family:var(--font-body);}
+  .unapplied-tag{font-size:11px;color:#9A3F00;background:#FFF1E0;border:1px solid #F5C58A;border-radius:4px;padding:1px 6px;display:inline-block;margin-top:3px;white-space:nowrap;}
+  .acct-kpi.unapplied .v{color:#9A3F00;}
+  .unapplied-box{border:1px solid #F5C58A;background:#FFF9F0;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12.5px;}
+  .unapplied-head{display:flex;justify-content:space-between;font-weight:700;color:#9A3F00;margin-bottom:6px;}
+  .unapplied-row{display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-top:1px solid #F5E3C8;}
+  .unapplied-note{font-size:11px;color:var(--slate);margin-top:6px;}
+  .hist-kv .v.unapplied{color:#9A3F00;} .unapplied-sub{font-size:11px;font-weight:400;color:var(--slate);}
   .prev-email{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-left:3px solid var(--brand-rust);border-radius:10px;padding:10px 12px;background:#fff;margin:0 0 12px;}
   .prev-email-text{display:flex;flex-direction:column;gap:3px;min-width:0;}
   .prev-email-text b{font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--slate);}
@@ -1522,6 +1529,7 @@
     <div class="drawer-head"><h3 id="acct-panel-title">Account</h3><button class="close" onclick="closeAccountPanel()">Close &times;</button></div>
     <div class="drawer-sub" id="acct-panel-sub"></div>
     <div class="acct-kpis" id="acct-panel-kpis"></div>
+    <div id="acct-panel-unapplied"></div>
     <div class="drawer-section">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
         <h4 style="margin:0;">Invoices on this account</h4>
@@ -2279,6 +2287,10 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   // on the interactive demo) the dashboard behaves exactly as before.
   function featOn(name){ const f = window.__me && window.__me.ok && window.__me.features; return !!(f && f[name]); }
   function claimsOps(){ return featOn('claimsOps'); }
+  /* Revolve files invoices under the QuickBooks company file they came from
+     (Greg asked for filters by file, not by billing-address city). */
+  function officeWord(){ return claimsOps() ? 'QuickBooks file' : (TENANT_DEPTS_CUSTOM ? 'City' : 'Office'); }
+  function officesWord(){ return claimsOps() ? 'QuickBooks files' : (TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'); }
   // Elements marked data-feat="x" exist only with that pack; elements marked
   // data-feat-text carry their pack wording there and their standard wording
   // in the markup.
@@ -3410,6 +3422,7 @@ async function loadRealAccountsNow(){
       const payReq = takePrefetch('payments') || fetch('/api/invoices/payments', { credentials: 'include' }).catch(function(){ return null; });
       const notesReq = takePrefetch('notes') || fetch('/api/accounts/notes?all=1', { credentials: 'same-origin', cache: 'no-store' }).catch(function(){ return null; });
       const commsReq = takePrefetch('comms') || fetch('/api/invoices/comms', { credentials: 'same-origin', cache: 'no-store' }).catch(function(){ return null; });
+      const unappliedReq = fetch('/api/accounts/unapplied', { credentials: 'same-origin', cache: 'no-store' }).catch(function(){ return null; });
       const res = await (takePrefetch('accounts') || fetch('/api/accounts', { credentials: 'include' }));
       if (!res) throw new Error('accounts request failed');
       if (!res.ok) {
@@ -3638,6 +3651,7 @@ async function loadRealAccountsNow(){
         if (extra.length) inv.activity = extra.concat(inv.activity || []);
       });
       pmark('notes-done'); await loadServerComms(invoices, commsReq); pmark('comms-done');
+      try { const ur = await unappliedReq; const uj = ur && ur.ok ? await ur.json() : null; state.unapplied = (uj && uj.ok && Array.isArray(uj.rows)) ? uj.rows : []; } catch (e) { state.unapplied = []; }
       // A send the server could not deliver is something a person has to look
       // at; flag it from the server's own record so the alert survives refreshes.
       const latestStatus = {};
@@ -4156,16 +4170,16 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       const tab = panel.dataset.scopePanel, bars = panel.dataset.scopeBars === '1';
       let cityRow = '';
       if(sub){
-        if(subCities.length > 1) cityRow = '<div class="mtd-filter-group"><span class="wf-label">Cities in ' + hEsc(depts.map(function(d){ return DEPARTMENT_LABELS[d] || d; }).join(', ')) + '</span><div class="chips" id="' + tab + '-city-chips">' +
+        if(subCities.length > 1) cityRow = '<div class="mtd-filter-group"><span class="wf-label">' + officesWord() + ' in ' + hEsc(depts.map(function(d){ return DEPARTMENT_LABELS[d] || d; }).join(', ')) + '</span><div class="chips" id="' + tab + '-city-chips">' +
           '<div class="chip' + (offices.length ? '' : ' active') + '" onclick="scopeClear(\'office\')">All</div>' + subCities.map(function(o){ return chip(o, OFFICE_LABELS[o] || o, offices.indexOf(o) !== -1, 'scopeToggleOffice'); }).join('') + '</div></div>';
       } else if(!SCOPE_HIDE_OFFICES){
-        cityRow = '<div class="mtd-filter-group"><span class="wf-label">' + (TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices') + '</span><div class="chips" id="' + tab + '-city-chips">' +
+        cityRow = '<div class="mtd-filter-group"><span class="wf-label">' + officesWord() + '</span><div class="chips" id="' + tab + '-city-chips">' +
           '<div class="chip' + (offices.length ? '' : ' active') + '" onclick="scopeClear(\'office\')">All</div>' + OFFICE_LOCATIONS.map(function(o){ return chip(o, OFFICE_LABELS[o] || o, offices.indexOf(o) !== -1, 'scopeToggleOffice'); }).join('') + '</div></div>';
       }
       const deptRow = '<div class="mtd-filter-group"><span class="wf-label">' + (TENANT_DEPTS_CUSTOM ? 'Businesses' : 'Departments') + '</span><div class="chips" id="' + tab + '-dept-chips">' +
         '<div class="chip' + (depts.length ? '' : ' active') + '" onclick="scopeClear(\'dept\')">All</div>' + Object.keys(DEPARTMENT_LABELS).map(function(d){ return chip(d, DEPARTMENT_LABELS[d] || d, depts.indexOf(d) !== -1, 'scopeToggleDept'); }).join('') + '</div></div>';
       const hint = '<div class="hint" style="margin:0;font-size:12.5px;">' +
-        (sub ? ('Pick any number of businesses' + (bars ? ' (or click the bars)' : '') + (depts.length ? (subCities.length > 1 ? '; narrow to a city with the row above. ' : '. ') : '; the cities a business works in appear once you pick one. ') + (bars ? 'The chart, the breakdown and the list below follow the selection' : 'Everything on this tab follows the selection') + ', and so does every other tab.')
+        (sub ? ('Pick any number of businesses' + (bars ? ' (or click the bars)' : '') + (depts.length ? (subCities.length > 1 ? '; narrow to a ' + officeWord().toLowerCase() + ' with the row above. ' : '. ') : '; the ' + officesWord().toLowerCase() + ' a business works in appear once you pick one. ') + (bars ? 'The chart, the breakdown and the list below follow the selection' : 'Everything on this tab follows the selection') + ', and so does every other tab.')
              : ('Pick any number of ' + (SCOPE_HIDE_OFFICES ? bizWord : cityWord + ' and ' + bizWord) + (bars ? ' (or click the bars)' : '') + '. ' + (bars ? 'The charts, the breakdown and the list below follow the selection' : 'Everything on this tab follows the selection') + ', and so does every other tab.')) +
         ((offices.length || depts.length) ? ' <a href="#" onclick="scopeClearAll(); return false;">Show everything</a>' : '') + '</div>';
       panel.innerHTML = (sub ? deptRow + cityRow : cityRow + deptRow) + hint;
@@ -5114,7 +5128,7 @@ function todoRowHTML(item, num, priority){
   // the total splits into one line per pick so each dollar amount is
   // attributable. Only the rows on screen are counted, like the total itself.
   function sheetBreakdownRows(rows, before, colCount, weeksOn){
-    const cityWord = TENANT_DEPTS_CUSTOM ? 'City' : 'Office', bizWord = TENANT_DEPTS_CUSTOM ? 'Business' : 'Department';
+    const cityWord = officeWord(), bizWord = TENANT_DEPTS_CUSTOM ? 'Business' : 'Department';
     const line = function(group, name, sub){
       const invoiced = sub.reduce(function(sum, i){ return sum + (Number(i.amount) || 0); }, 0);
       const due = sub.reduce(function(sum, i){ return sum + balanceDue(i); }, 0);
@@ -5337,7 +5351,7 @@ function todoRowHTML(item, num, priority){
     const maxGroup = Math.max(1, ...groupKeys.map(k => groups[k].total));
     applyReportBoxSize('report-payer');
     const titleEl = document.getElementById('report-payer-title');
-    if (titleEl) titleEl.textContent = mode === 'city' ? ('By ' + (TENANT_DEPTS_CUSTOM ? 'City' : 'Office')) : (mode === 'business' ? ('By ' + (TENANT_DEPTS_CUSTOM ? 'Business' : 'Department')) : ('By ' + (TENANT_DEPTS_CUSTOM ? 'Business \u00b7 City' : 'Department \u00b7 Office')));
+    if (titleEl) titleEl.textContent = mode === 'city' ? ('By ' + officeWord()) : (mode === 'business' ? ('By ' + (TENANT_DEPTS_CUSTOM ? 'Business' : 'Department')) : ('By ' + (TENANT_DEPTS_CUSTOM ? 'Business \u00b7 City' : 'Department \u00b7 Office')));
     document.querySelectorAll('#aging-modes .rc-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
     const segTitle = ['0\u201330 days', '31\u201360 days', '61\u201390+ days'];
     document.getElementById('report-payer').innerHTML = (groupKeys.length ? groupKeys.map(g => {
@@ -5596,7 +5610,7 @@ function todoRowHTML(item, num, priority){
       <div class="kpi"><div class="label">Data Sources</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Synced automatically, no manual entry' : 'Not connected yet'}</div></div>
       ${citySubfilter()
         ? `<div class="kpi"><div class="label">Businesses Reporting</div><div class="value">${mtdDeptKeys().filter(d => records.some(r => r.department === d)).length}/${mtdDeptKeys().length}</div><div class="sub">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length} cit${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length === 1 ? 'y' : 'ies'} with invoices</div></div>`
-        : `<div class="kpi"><div class="label">${TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${mtdDeptKeys().filter(d => records.some(r => r.department === d)).length}/${mtdDeptKeys().length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with invoices</div></div>`}
+        : `<div class="kpi"><div class="label">${officesWord()} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${mtdDeptKeys().filter(d => records.some(r => r.department === d)).length}/${mtdDeptKeys().length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with invoices</div></div>`}
     `;
     renderMtdFilterChips();
     // Clicking a bar selects that city or business (click again to unselect;
@@ -5653,7 +5667,7 @@ function todoRowHTML(item, num, priority){
       const label = /^\d{4}-\d{2}$/.test(k) ? (monthNames[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(0, 4)) : 'Undated';
       return `<div class="aging-dept">
         <div class="aging-dept-head"><span>${label}<span class="cnt">${monthCounts[k] || list.length} invoice${(monthCounts[k] || list.length)===1?'':'s'}${list.length < (monthCounts[k] || 0) ? ' \u00b7 ' + list.length + ' on this page' : ''}</span></span><span class="tot">${money2(mTotal)}</span></div>
-        <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Invoice date</th><th>${TENANT_DEPTS_CUSTOM ? 'Business' : 'Department'}</th><th>${TENANT_DEPTS_CUSTOM ? 'City' : 'Office'}</th><th>Payer</th><th>Status</th><th class="amt">Invoiced</th><th class="amt">Balance</th><th></th></tr></thead><tbody>
+        <div style="overflow-x:auto;"><table class="aging"><thead><tr><th>Account</th><th>Invoice #</th><th>Invoice date</th><th>${TENANT_DEPTS_CUSTOM ? 'Business' : 'Department'}</th><th>${officeWord()}</th><th>Payer</th><th>Status</th><th class="amt">Invoiced</th><th class="amt">Balance</th><th></th></tr></thead><tbody>
         ${list.map(inv => `<tr${isDoNotContact(inv) ? ' class="dnc-row" title="' + dncLabel() + '"' : ''}>
           <td><div style="font-weight:600;color:var(--ink);">${acctLink(inv.id, inv.name)}</div><div style="font-size:11px;color:var(--slate-soft);">${hEsc(inv.meta || '')}</div></td>
           <td style="font-family:var(--font-mono);font-size:11.5px;white-space:nowrap;">${hEsc(inv.invoiceNumber || '\u2014')}</td>
@@ -5701,7 +5715,7 @@ function todoRowHTML(item, num, priority){
     if(!rows.length){ listEl.innerHTML = '<div class="empty">No invoices have been written off as bad debt' + (q ? ' matching "' + hEsc(q) + '"' : '') + '.</div>'; return; }
     const pg = pageOf('baddebt', rows, [q, sort, state.deptFilter, state.officeFilter].join('|'));
     const showCity = !citySubfilter();
-    listEl.innerHTML = pagerHTML(pg, 'invoices', 'top') + '<table class="log bd-table"><thead><tr><th>Customer</th><th>Invoice #</th><th>Business</th>' + (showCity ? '<th>City</th>' : '') + '<th>Invoice date</th><th>Written off</th><th class="amt">Invoiced</th><th class="amt">Paid before write-off</th><th class="amt">Written off</th><th class="amt">Balance left</th></tr></thead><tbody>' +
+    listEl.innerHTML = pagerHTML(pg, 'invoices', 'top') + '<table class="log bd-table"><thead><tr><th>Customer</th><th>Invoice #</th><th>Business</th>' + (showCity ? '<th>' + officeWord() + '</th>' : '') + '<th>Invoice date</th><th>Written off</th><th class="amt">Invoiced</th><th class="amt">Paid before write-off</th><th class="amt">Written off</th><th class="amt">Balance left</th></tr></thead><tbody>' +
       pg.rows.map(function(inv){
         const paidCash = Math.max(0, Number(inv.amountPaid || 0) - Number(inv.creditAmount || 0));
         const left = Math.max(0, Number(inv.amount || 0) - Number(inv.amountPaid || 0));
@@ -5730,7 +5744,7 @@ function todoRowHTML(item, num, priority){
     document.getElementById('collected-kpis').innerHTML = `
       <div class="kpi"><div class="label">Collected &mdash; ${monthLabel()}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${payments.length} payment${payments.length===1?'':'s'} applied this month · ${hEsc(scopeLabel())}</div></div>
       <div class="kpi"><div class="label">Source</div><div class="value" style="font-size:15px;">${hEsc(dataSourcesLabel())}</div><div class="sub">${dataSourcesLive() ? 'Posts automatically when a payment is applied' : 'Not connected yet'}</div></div>
-      <div class="kpi"><div class="label">${TENANT_DEPTS_CUSTOM ? 'Cities' : 'Offices'} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${Object.keys(DEPARTMENT_LABELS).filter(d => records.some(r => r.department === d)).length}/${Object.keys(DEPARTMENT_LABELS).length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with payments</div></div>
+      <div class="kpi"><div class="label">${officesWord()} Reporting</div><div class="value">${OFFICE_LOCATIONS.filter(o => records.some(r => r.officeLocation === o)).length}/${OFFICE_LOCATIONS.length}</div><div class="sub">${Object.keys(DEPARTMENT_LABELS).filter(d => records.some(r => r.department === d)).length}/${Object.keys(DEPARTMENT_LABELS).length} ${TENANT_DEPTS_CUSTOM ? 'businesses' : 'departments'} with payments</div></div>
     `;
     const cct = document.getElementById('collected-chart-title');
     if(citySubfilter()){
@@ -6371,6 +6385,28 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
   function acctsFilters(){ return state.acctsFilters || (state.acctsFilters = { search: '', sort: 'open-desc', includePaid: false }); }
   function setAcctsFilter(k, v){ const f = acctsFilters(); f[k] = (k === 'includePaid' || k === 'partialOnly') ? !!v : String(v == null ? '' : v); if (k === 'status') f.partialOnly = false; saveState(); renderAccountsTab(); }
   function invBalance(inv){ return Math.max(0, +(Number(inv.amount || 0) - Number(inv.amountPaid || 0)).toFixed(2)); }
+  /* ---- Unapplied payments and credit memos (QuickBooks) ----
+     Money QuickBooks already holds for a customer that is not applied to any
+     invoice. Never netted against the balances (QuickBooks' own aging does
+     not net it either); shown beside them so the team knows an open balance
+     may already be covered and can apply it in QuickBooks. */
+  function unappliedFor(name){
+    const k = acctKey(name); if(!k) return [];
+    return (state.unapplied || []).filter(function(u){ return acctKey(u.customerName) === k; });
+  }
+  function unappliedTotal(rows){ return rows.reduce(function(s, u){ return s + Number(u.amount || 0); }, 0); }
+  function unappliedSummary(name){
+    const rows = unappliedFor(name); if(!rows.length) return null;
+    const pays = rows.filter(function(u){ return u.kind === 'payment'; }).length, cms = rows.length - pays;
+    const parts = []; if(pays) parts.push(pays + ' unapplied payment' + (pays === 1 ? '' : 's')); if(cms) parts.push(cms + ' credit memo' + (cms === 1 ? '' : 's'));
+    return { rows: rows, total: unappliedTotal(rows), label: parts.join(', ') };
+  }
+  function unappliedListHTML(name){
+    const rows = unappliedFor(name); if(!rows.length) return '';
+    return '<div class="unapplied-box"><div class="unapplied-head">Unapplied in QuickBooks <span>$' + unappliedTotal(rows).toLocaleString(undefined,{minimumFractionDigits:2}) + '</span></div>' +
+      rows.map(function(u){ return '<div class="unapplied-row"><span>' + (u.kind === 'payment' ? 'Payment' : 'Credit memo') + (u.reference ? ' #' + hEsc(u.reference) : '') + (u.date ? ' \u00b7 ' + fmtDate(u.date) : '') + (u.file ? ' \u00b7 ' + hEsc(u.file) : '') + '</span><b>$' + Number(u.amount).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b></div>'; }).join('') +
+      '<div class="unapplied-note">Not netted against the balances above. Apply it to an invoice in QuickBooks and the balance here updates on the next sync.</div></div>';
+  }
   // Groups every invoice (optionally including paid ones) by customer name.
   function accountGroups(allInvoices){
     const f = acctsFilters();
@@ -6445,7 +6481,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     const pg = pageOf('accounts', groups, [q, f.sort, f.includePaid ? 1 : 0, acctStatus, state.deptFilter, state.officeFilter].join('|'));
     wrap.innerHTML = pagerHTML(pg, 'accounts', 'top') + `
       <table class="log">
-        <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>City</th><th>Total open</th><th>Avg age</th><th>Last contact</th>${claimsOps() ? '<th>Last payment</th>' : ''}<th></th></tr></thead>
+        <thead><tr><th>Account</th><th>Invoices</th><th>Business / Department</th><th>${officeWord()}</th><th>Total open</th><th>Avg age</th><th>Last contact</th>${claimsOps() ? '<th>Last payment</th>' : ''}<th></th></tr></thead>
         <tbody>
           ${pg.rows.map(g => `
             <tr class="acct-row" data-key="${hEsc(g.key)}" onclick="openAccountPanel(this.dataset.key)">
@@ -6453,7 +6489,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
               <td><b>${f.includePaid ? g.count : g.openCount}</b>${f.includePaid && g.openCount !== g.count ? '<div class="acct-sub">' + g.openCount + ' open</div>' : ''}</td>
               <td>${hEsc(acctBizLabel(g))}</td>
               <td>${hEsc(Object.keys(g.cities).filter(Boolean).sort().join(', '))}</td>
-              <td class="amt">$${g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+              <td class="amt">$${g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2})}${(function(){ const u = claimsOps() ? unappliedSummary(g.name) : null; return u ? '<div class="unapplied-tag" title="' + hEsc(u.label) + ' in QuickBooks, not yet applied to an invoice">Unapplied $' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div>' : ''; })()}</td>
               <td>${g.openCount ? g.avgAge + ' days' : '—'}</td>
               <td>${g.lastContact ? fmtDate(g.lastContact) : '<span style="color:var(--slate-soft);">—</span>'}</td>
               ${claimsOps() ? '<td style="font-size:12.5px;white-space:nowrap;">' + lastPaymentHTML(lastPaymentOfGroup(g), { none: '—', invoice: true }) + '</td>' : ''}
@@ -6520,10 +6556,12 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       '<div class="acct-kpi"><div class="l">Open balance</div><div class="v">$' + g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div><div class="s">of $' + g.invoiced.toLocaleString(undefined,{minimumFractionDigits:2}) + ' invoiced</div></div>' +
       '<div class="acct-kpi"><div class="l">Average age</div><div class="v">' + (g.openCount ? g.avgAge + 'd' : '—') + '</div><div class="s">open invoices</div></div>' +
       '<div class="acct-kpi"><div class="l">Last contact</div><div class="v" style="font-size:15px;">' + (g.lastContact ? fmtDate(g.lastContact) : '—') + '</div><div class="s">' + (g.invoices.filter(sentFromAccounts).length ? 'statement sent from Accounts tab' : 'across all invoices') + '</div></div>' +
+      (claimsOps() ? (function(){ const u = unappliedSummary(g.name); return u ? '<div class="acct-kpi unapplied"><div class="l">Unapplied in QuickBooks</div><div class="v">$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div><div class="s">' + hEsc(u.label) + '</div></div>' : ''; })() : '') +
       (claimsOps() ? (function(){ const p = lastPaymentOfGroup(g); return '<div class="acct-kpi"><div class="l">Last payment</div><div class="v" style="font-size:15px;">' + (p ? '$' + Number(p.amount).toLocaleString(undefined,{minimumFractionDigits:2}) : '—') + '</div><div class="s">' + (p ? fmtDate(p.paidDate) + (p.paymentMethod ? ' · ' + hEsc(paymentMethodLabel(p.paymentMethod)) : '') + (p.invoiceNumber ? ' · ' + hEsc(p.invoiceNumber) : '') : 'no payments yet') + '</div></div>'; })() : '');
+    (function(){ const box = document.getElementById('acct-panel-unapplied'); if (box) box.innerHTML = claimsOps() ? unappliedListHTML(g.name) : ''; })();
     const rows = g.invoices.slice().sort(function(a, b){ return String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')); });
     document.getElementById('acct-inv-table').innerHTML =
-      '<thead><tr><th></th><th>Invoice #</th><th>Invoice date</th><th>Age</th><th>Business</th><th>City</th><th>Amount</th><th>Balance</th><th>Status</th><th>Last follow-up</th>' + (claimsOps() ? '<th>Last payment</th>' : '') + '</tr></thead><tbody>' +
+      '<thead><tr><th></th><th>Invoice #</th><th>Invoice date</th><th>Age</th><th>Business</th><th>' + officeWord() + '</th><th>Amount</th><th>Balance</th><th>Status</th><th>Last follow-up</th>' + (claimsOps() ? '<th>Last payment</th>' : '') + '</tr></thead><tbody>' +
       rows.map(function(inv){
         const paid = inv.jobStatus === 'paid' || invBalance(inv) <= 0;
         return '<tr class="' + (paid ? 'paid' : '') + '">' +
@@ -6890,7 +6928,7 @@ Hard rules - these override everything above:
     const box = document.getElementById('esc-search');
     if (box) { if (document.activeElement === box) f.search = box.value; else if (box.value !== f.search) box.value = f.search; }
     const off = document.getElementById('esc-office');
-    if (off) { const want = `<option value="all">${TENANT_DEPTS_CUSTOM ? 'City' : 'Office'}: All</option>` + OFFICE_LOCATIONS.map(o => `<option value="${hEsc(o)}">${hEsc(OFFICE_LABELS[o] || o)}</option>`).join(''); if (off.innerHTML !== want) off.innerHTML = want; if (off.value !== f.office) off.value = OFFICE_LABELS[f.office] ? f.office : 'all'; }
+    if (off) { const want = `<option value="all">${officeWord()}: All</option>` + OFFICE_LOCATIONS.map(o => `<option value="${hEsc(o)}">${hEsc(OFFICE_LABELS[o] || o)}</option>`).join(''); if (off.innerHTML !== want) off.innerHTML = want; if (off.value !== f.office) off.value = OFFICE_LABELS[f.office] ? f.office : 'all'; }
     const dep = document.getElementById('esc-dept');
     if (dep) { const want = `<option value="all">${TENANT_DEPTS_CUSTOM ? 'Business' : 'Department'}: All</option>` + Object.keys(DEPARTMENT_LABELS).map(d => `<option value="${hEsc(d)}">${hEsc(DEPARTMENT_LABELS[d] || d)}</option>`).join(''); if (dep.innerHTML !== want) dep.innerHTML = want; if (dep.value !== f.dept) dep.value = DEPARTMENT_LABELS[f.dept] ? f.dept : 'all'; }
     [['esc-payer', 'payer'], ['esc-notified', 'notified'], ['esc-sort', 'sort']].forEach(function(pair){ const el = document.getElementById(pair[0]); if (el && el.value !== f[pair[1]]) el.value = f[pair[1]]; });
@@ -7700,6 +7738,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Invoice amount', hMoney(a.amount)) +
       tile('Paid', hMoney(paid)) +
       tile('Balance due', hMoney(balance), balance > 0 ? '' : 'muted') +
+      (function(){ const u = claimsOps() ? unappliedSummary(a.customerName || (inv && inv.name)) : null; return u ? tile('Unapplied in QuickBooks', hMoney(u.total) + '<div class="unapplied-sub">' + hEsc(u.label) + '</div>', 'unapplied') : ''; })() +
       tile('Status', hEsc(STATUS_LABELS[a.status] || a.status || '—')) +
       tile('Invoice date', hDate(a.invoicedAt) + (a.invoicedAt ? (' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.invoicedAt) + 'd)</span>') : '')) +
       tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>' + fromAccountsBadge(a)) : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
