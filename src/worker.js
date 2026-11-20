@@ -7158,7 +7158,10 @@ const MAILBOX_PROVIDERS = {
 google: { authUrl: 'https://accounts.google.com/o/oauth2/v2/auth', tokenUrl: 'https://oauth2.googleapis.com/token',
 scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly openid email', clientIdVar: 'GOOGLE_CLIENT_ID', clientSecretVar: 'GOOGLE_CLIENT_SECRET' },
 microsoft: { authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize', tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-scope: 'offline_access openid email Mail.Send Mail.Read', clientIdVar: 'MS_CLIENT_ID', clientSecretVar: 'MS_CLIENT_SECRET' }
+// Mail.ReadWrite is needed because sending builds a draft first (POST /me/messages,
+// so the message id and conversation id are known for reply tracking and attachments
+// can be added) and then calls /send; Mail.Send alone only allows /me/sendMail.
+scope: 'offline_access openid email Mail.Send Mail.ReadWrite', clientIdVar: 'MS_CLIENT_ID', clientSecretVar: 'MS_CLIENT_SECRET' }
 };
 function mailboxRedirectUri() { return SITE_URL + '/api/mailbox/callback'; }
 function providerConfigured(env, key) { const p = MAILBOX_PROVIDERS[key]; return !!(p && env[p.clientIdVar] && env[p.clientSecretVar]); }
