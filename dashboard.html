@@ -674,11 +674,11 @@
   .kpi:hover::after{transform:scaleX(1);}
 
   /* Views glide in instead of snapping */
-  @keyframes viewIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+  @keyframes viewIn{from{opacity:0;}to{opacity:1;}}
   @keyframes cardIn{from{opacity:0;transform:translateY(12px) scale(.995);}to{opacity:1;transform:none;}}
   @keyframes ruleIn{from{transform:scaleX(0);}to{transform:scaleX(1);}}
   @keyframes rowIn{from{opacity:0;transform:translateX(-4px);}to{opacity:1;transform:none;}}
-  .view.active{animation:viewIn .34s var(--ease-out) both;}
+  .view.active{animation:viewIn .2s var(--ease-out) both;}
   .queue .card,.todo-row{animation:cardIn .4s var(--ease-out) both;}
   .queue .card:nth-child(1),.todo-row:nth-child(1){animation-delay:0ms}  .queue .card:nth-child(2),.todo-row:nth-child(2){animation-delay:35ms}
   .queue .card:nth-child(3),.todo-row:nth-child(3){animation-delay:70ms} .queue .card:nth-child(4),.todo-row:nth-child(4){animation-delay:105ms}
@@ -2203,14 +2203,23 @@ const OFFICE_MANAGERS = { arizona: { name: "Maria Chen", email: "maria.chen@exam
   };
   const PAYMENT_WINDOW_DAYS = { insurance: 45, pm: 30, private: 21 };
 
+  // Formatting the same few thousand dates on every render is the single
+  // biggest cost on the big tabs, so results are memoised per input string.
+  const __fmtDateCache = new Map();
   function fmtDate(d){
     if(!d) return null;
+    const key = (d instanceof Date) ? null : String(d);
+    if (key !== null && __fmtDateCache.has(key)) return __fmtDateCache.get(key);
     // A bare YYYY-MM-DD is a calendar date: parse it at local noon so it never
     // rolls back a day for US time zones the way new Date('YYYY-MM-DD') (UTC) does.
-    const dt = (d instanceof Date) ? d : (/^\d{4}-\d{2}-\d{2}$/.test(String(d)) ? new Date(String(d) + 'T12:00:00') : new Date(d));
-    if(isNaN(dt.getTime())) return null;
-    return dt.toLocaleDateString(undefined,{month:'short', day:'numeric', year:'numeric'});
+    const dt = (d instanceof Date) ? d : (/^\d{4}-\d{2}-\d{2}$/.test(key) ? new Date(key + 'T12:00:00') : new Date(d));
+    const out = isNaN(dt.getTime()) ? null : dt.toLocaleDateString(undefined,{month:'short', day:'numeric', year:'numeric'});
+    if (key !== null) { if (__fmtDateCache.size > 20000) __fmtDateCache.clear(); __fmtDateCache.set(key, out); }
+    return out;
   }
+  // One collator for every name sort (localeCompare with options re-creates one per call).
+  const NAME_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+  const nameCompare = function(a, b){ return NAME_COLLATOR.compare(String(a || ''), String(b || '')); };
   // The system of record's name in dynamic text: a QuickBooks workspace has no
   // CRM, so anything synced in is labelled QuickBooks there.
   function sysLabel(){ return (window.__me && window.__me.ok && window.__me.integrationMode === 'quickbooks') ? 'QuickBooks' : 'CRM'; }
@@ -3995,7 +4004,21 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   /* ============================================================
      HELPERS
      ============================================================ */
-  function findInv(id){ return state.invoices.find(i=>i.id===id); }
+  // Invoice lookup by id through an index that is rebuilt only when the
+  // invoices array is replaced or grows (a reload), not a linear scan per call.
+  let __invIndex = null, __invIndexRef = null, __invIndexLen = -1;
+  function findInv(id){
+    const list = state.invoices || [];
+    if (__invIndex === null || __invIndexRef !== list || __invIndexLen !== list.length) {
+      __invIndex = new Map(); __invIndexRef = list; __invIndexLen = list.length;
+      for (let i = 0; i < list.length; i++) __invIndex.set(list[i].id, list[i]);
+    }
+    const hit = __invIndex.get(id);
+    if (hit !== undefined) return hit;
+    // ids can arrive as strings from DOM attributes; fall back to a loose match once
+    const n = typeof id === 'string' && id !== '' && !isNaN(Number(id)) ? Number(id) : (typeof id === 'number' ? String(id) : null);
+    return n === null ? undefined : __invIndex.get(n);
+  }
   function addActivity(inv, text, source, kind){
     if(typeof historyInvalidate === 'function') historyInvalidate(inv && inv.id);
     // Manual notes are persisted and queued for the CRM; automation notes are
@@ -4204,13 +4227,20 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   function sensitiveBadgeHTML(inv){ return isSensitive(inv) ? '<span class="badge sensitive" title="' + hEsc(sensitiveTitle(inv)) + '">SENSITIVE</span>' : ''; }
   function badDebtBadgeHTML(inv){ return isBadDebt(inv) ? '<span class="badge baddebt" title="Written off as bad debt in QuickBooks' + (inv.badDebtAt ? ' ' + fmtDate(inv.badDebtAt) : '') + '">BAD DEBT</span>' : ''; }
   // The most recent real payment (credit memos are not money received).
+  // Indexed once per payments list (rebuilt when the list object or its
+  // length changes) so the Accounts tab is not a payments x invoices scan.
+  let __lastPayIndex = null, __lastPayRef = null, __lastPayLen = -1;
   function lastPaymentOf(inv){
-    let best = null;
-    (state.paymentsLog || []).forEach(function(p){
-      if (String(p.invoiceId) !== String(inv.id) || p.kind === 'credit') return;
-      if (!best || String(p.paidDate) > String(best.paidDate) || (String(p.paidDate) === String(best.paidDate) && String(p.id) > String(best.id))) best = p;
-    });
-    return best;
+    const log = state.paymentsLog || [];
+    if (__lastPayIndex === null || __lastPayRef !== log || __lastPayLen !== log.length) {
+      __lastPayIndex = new Map(); __lastPayRef = log; __lastPayLen = log.length;
+      log.forEach(function(p){
+        if (p.kind === 'credit') return;
+        const k = String(p.invoiceId); const best = __lastPayIndex.get(k);
+        if (!best || String(p.paidDate) > String(best.paidDate) || (String(p.paidDate) === String(best.paidDate) && String(p.id) > String(best.id))) __lastPayIndex.set(k, p);
+      });
+    }
+    return __lastPayIndex.get(String(inv.id)) || null;
   }
   function lastPaymentOfGroup(g){
     let best = null;
@@ -4602,7 +4632,7 @@ function todoRowHTML(item, num, priority){
       const matchesSpecial = payerFilter === 'follow-up' ? !!followUpReminder(inv) : (payerFilter === 'flagged' ? !!escalationFlags(inv).length : statusShowMatches(inv, payerFilter));
       return matchesSearch && matchesPayer && matchesSpecial;
     });
-    const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true });
+    const byName = (a, b) => nameCompare(a.name, b.name);
     const byDate = (a, b) => String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || ''));
     items = items.slice().sort((a,b) => {
       switch (sortVal) {
@@ -4961,7 +4991,7 @@ function todoRowHTML(item, num, priority){
   }
   function sortSheetRows(rows){
     const mode = SHEET_SORTS[state.sheetSort] ? state.sheetSort : 'name-asc';
-    const byName = function(a, b){ return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base', numeric: true }); };
+    const byName = function(a, b){ return nameCompare(a.name, b.name); };
     const byDate = function(a, b){ return String(a.invoiceDate || '').localeCompare(String(b.invoiceDate || '')); };
     // Last follow-up as a sortable timestamp; invoices never followed up sort last in both directions.
     const fuTime = function(inv){ const t = inv.lastFollowUpAt ? new Date(inv.lastFollowUpAt).getTime() : NaN; return isNaN(t) ? null : t; };
@@ -6004,7 +6034,8 @@ function todoRowHTML(item, num, priority){
     const sel = document.getElementById('resp-sim-invoice');
     if(!sel) return;
     const prevVal = sel.value;
-    const open = activeInvoices().filter(i => !i.escalated);
+    if(window.__CLMS_REAL) return;   // demo-only simulator (inside a data-demo-only card); never built on a live workspace
+    const open = activeInvoices().filter(i => !i.escalated).slice(0, 500);
     if(open.length === 0){ sel.innerHTML = `<option value="">No open invoices</option>`; return; }
     sel.innerHTML = open.map(i => `<option value="${i.id}">${i.name} \u2014 $${i.amount.toLocaleString(undefined,{minimumFractionDigits:2})} \u2014 ${i.followups} follow-up${i.followups===1?'':'s'} sent</option>`).join('');
     if(prevVal && open.find(i=>String(i.id)===prevVal)) sel.value = prevVal;
@@ -6296,7 +6327,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     if(acctStatus !== 'all' && claimsOps()) groups = groups.filter(function(g){ return g.invoices.some(function(inv){ return statusShowMatches(inv, acctStatus); }); });
     const q = f.search.trim().toLowerCase();
     if(q) groups = groups.filter(function(g){ return g.name.toLowerCase().indexOf(q) !== -1 || Object.keys(g.biz).join(' ').toLowerCase().indexOf(q) !== -1 || String(g.contact || '').toLowerCase().indexOf(q) !== -1; });
-    const byName = function(a, b){ return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }); };
+    const byName = function(a, b){ return nameCompare(a.name, b.name); };
     const cnt = function(g){ return f.includePaid ? g.count : g.openCount; };
     // Accounts with no date / no contact sort last in both directions.
     const dateCmp = function(a, b, newestFirst, key){ const da = a[key] || '', db = b[key] || ''; if(!da && !db) return 0; if(!da) return 1; if(!db) return -1; return newestFirst ? db.localeCompare(da) : da.localeCompare(db); };
@@ -8337,7 +8368,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     const sel = document.getElementById('sf-sim-invoice');
     if(!sel) return;
     const prevVal = sel.value;
-    const opts = visibleInvoices();
+    if(window.__CLMS_REAL) return;   // demo-only simulator; never built on a live workspace
+    const opts = visibleInvoices().slice(0, 500);
     sel.innerHTML = opts.map(i => `<option value="${i.id}">${i.name} \u2014 ${STATUS_LABELS[i.jobStatus]}</option>`).join('');
     if(prevVal && opts.find(i=>String(i.id)===prevVal)) sel.value = prevVal;
   }
