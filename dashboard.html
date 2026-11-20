@@ -558,6 +558,8 @@
   .esc-opt .t{font-size:13px;font-weight:600;color:var(--ink);}
   .esc-opt .d{font-size:11.5px;color:var(--slate);margin-top:2px;}
   .esc-opt select{margin-top:8px;width:100%;font-size:13px;padding:7px 9px;border-radius:7px;border:1px solid var(--line);font-family:var(--font-body);}
+  .badge.unapplied{background:#FFF1E0;color:#9A3F00;border-color:#F5C58A;}
+  .unapplied-sub-cell{display:block;font-size:10.5px;color:#9A3F00;white-space:nowrap;margin-top:2px;}
   .unapplied-tag{font-size:11px;color:#9A3F00;background:#FFF1E0;border:1px solid #F5C58A;border-radius:4px;padding:1px 6px;display:inline-block;margin-top:3px;white-space:nowrap;}
   .acct-kpi.unapplied .v{color:#9A3F00;}
   .unapplied-box{border:1px solid #F5C58A;background:#FFF9F0;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:12.5px;}
@@ -4693,7 +4695,7 @@ function todoRowHTML(item, num, priority){
             ${catBadgeHTML(inv, true)}
             <span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus].toUpperCase()}</span>
             <span class="badge cw">WITH: ${CURRENTLY_WITH_LABELS[inv.currentlyWith].toUpperCase()}</span>
-            ${claimsOps() ? claimStatusBadgeHTML(inv) + followUpBadgeHTML(inv) + escalationBadgesHTML(inv) + partialBadgeHTML(inv) : dncBadgeHTML(inv) + partialBadgeHTML(inv) + escBadge}${warnBadge}${staleBadge}
+            ${claimsOps() ? claimStatusBadgeHTML(inv) + followUpBadgeHTML(inv) + escalationBadgesHTML(inv) + partialBadgeHTML(inv) + unappliedBadgeHTML(inv) : dncBadgeHTML(inv) + partialBadgeHTML(inv) + escBadge}${warnBadge}${staleBadge}
           </div>
         </div>
         <div class="amount">${isPartiallyPaid(inv) ? '<span class="owed-label">Balance owed</span>' : ''}${money2(balanceDue(inv))}
@@ -4989,7 +4991,7 @@ function todoRowHTML(item, num, priority){
         <td><span class="age-pill ${agingBucketClass(age)}">${age} day${age===1?'':'s'}</span></td>
         <td><span class="badge dept">${hEsc(DEPARTMENT_LABELS[inv.department] || inv.department || '\u2014')}</span></td>
         <td><span class="badge office">${hEsc(city)}</span></td>
-        <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}</td>
+        <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}${unappliedSubHTML(inv)}</td>
         <td class="tracker-text"><textarea rows="2" placeholder="Name, email, phone\u2026" onchange="setTrackerText(${inv.id}, 'contactInfo', this.value)">${hEsc(inv.contactInfo || '')}</textarea></td>
         <td>${inv.lastContact ? fmtDate(inv.lastContact) + fromAccountsBadge(inv) : '\u2014'}</td>
         <td><span class="status-pill ${respondedPillClass(inv)}">${respondedLabel(inv)}</span>${followUpBadgeHTML(inv) ? '<div class="esc-row esc-cell">' + followUpBadgeHTML(inv) + '</div>' : ''}</td>
@@ -5204,7 +5206,7 @@ function todoRowHTML(item, num, priority){
         <td><span class="badge office">${hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '')}</span></td>
         <td>${deptBadgeHTML(inv, false)}</td>
         <td><span class="badge cat">${hEsc(CATEGORY_LABELS[inv.category] || inv.category || '')}</span></td>
-        <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}</td>
+        <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span>` : ''}${unappliedSubHTML(inv)}</td>
         <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus]}</span>${isPartiallyPaid(inv) ? ' <span class="badge partial">PARTIAL PAYMENT</span>' : ''}</td>
         <td><span class="badge cw">${CURRENTLY_WITH_LABELS[inv.currentlyWith]}</span></td>
         <td style="font-family:var(--font-mono);font-size:11px;">${inv.claimNumber || '\u2014'}</td>
@@ -5447,7 +5449,7 @@ function todoRowHTML(item, num, priority){
               <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '—'}</span>${escStatusHTML(inv)}</td>
               <td><span class="age-pill ${agingBucketClass(age)}">${age} day${age===1?'':'s'}</span></td>
               <td style="white-space:nowrap;">${inv.lastContact ? fmtDate(inv.lastContact) + ((hDaysSince(inv.lastContact) !== null) ? ` <span style="color:var(--slate-soft);font-size:11px;">(${hDaysSince(inv.lastContact)}d ago)</span>` : '') : '<span style="color:var(--slate-soft);">No contact yet</span>'}</td>
-              <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span><span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}</td>
+              <td class="amt">${money2(balanceDue(inv))}${unappliedSubHTML(inv)}${isPartiallyPaid(inv) ? `<span class="paid-sub">${money2(paidAmt(inv))} paid of ${money2(inv.amount)}</span><span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}</td>
               <td style="white-space:nowrap;"><span class="hist-link" onclick="openAccountHistory(${inv.id})">History</span> &middot; <span class="hist-link" onclick="openDetail(${inv.id})">Manage</span></td>
             </tr>`;
           }).join('')}
@@ -5685,7 +5687,7 @@ function todoRowHTML(item, num, priority){
           <td><span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer] || inv.payer || '\u2014'}</span></td>
           <td><span class="badge sfstatus"><span class="sfdot"></span>${STATUS_LABELS[inv.jobStatus] || inv.jobStatus || '\u2014'}</span>${claimsOps() ? escalationCellHTML(inv) : escStatusHTML(inv)}</td>
           <td class="amt">${money2(inv.amount)}</td>
-          <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}</td>
+          <td class="amt">${money2(balanceDue(inv))}${isPartiallyPaid(inv) ? `<span class="badge partial" style="margin-top:3px;">PARTIAL PAYMENT</span>` : ''}${unappliedSubHTML(inv)}</td>
           <td style="white-space:nowrap;"><span class="hist-link" onclick="openAccountHistory(${inv.id})">History</span> &middot; <span class="hist-link" onclick="openDetail(${inv.id})">Manage</span></td>
         </tr>`).join('')}
         </tbody></table></div>
@@ -6399,9 +6401,26 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
      invoice. Never netted against the balances (QuickBooks' own aging does
      not net it either); shown beside them so the team knows an open balance
      may already be covered and can apply it in QuickBooks. */
+  let __unappliedIdx = null, __unappliedSrc = null;
   function unappliedFor(name){
     const k = acctKey(name); if(!k) return [];
-    return (state.unapplied || []).filter(function(u){ return acctKey(u.customerName) === k; });
+    const src = state.unapplied || [];
+    if (__unappliedSrc !== src) {
+      __unappliedIdx = {}; __unappliedSrc = src;
+      src.forEach(function(u){ const kk = acctKey(u.customerName); if (kk) (__unappliedIdx[kk] = __unappliedIdx[kk] || []).push(u); });
+    }
+    return __unappliedIdx[k] || [];
+  }
+  // Compact forms for invoice cards, table cells and drawers (Revolve only).
+  function unappliedBadgeHTML(inv){
+    if (!claimsOps() || !inv) return '';
+    const u = unappliedSummary(inv.customerName || inv.name); if (!u) return '';
+    return '<span class="badge unapplied" title="' + hEsc(u.label) + ' sitting unapplied in QuickBooks for this customer; not netted against the balance">UNAPPLIED IN QB: $' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>';
+  }
+  function unappliedSubHTML(inv){
+    if (!claimsOps() || !inv) return '';
+    const u = unappliedSummary(inv.customerName || inv.name); if (!u) return '';
+    return '<span class="unapplied-sub-cell" title="' + hEsc(u.label) + ' in QuickBooks, not yet applied to an invoice">Unapplied in QB $' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>';
   }
   function unappliedTotal(rows){ return rows.reduce(function(s, u){ return s + Number(u.amount || 0); }, 0); }
   function unappliedSummary(name){
@@ -6991,7 +7010,7 @@ Hard rules - these override everything above:
             <span class="badge ${inv.payer}">${PAYER_LABELS[inv.payer].toUpperCase()}</span>
             ${deptBadgeHTML(inv, true)}
             ${catBadgeHTML(inv, true)}
-            <span class="badge escalated">ESCALATED</span>
+            <span class="badge escalated">ESCALATED</span>${unappliedBadgeHTML(inv)}
 ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F5346;border-color:#BFE0D3;">NOTIFIED: ${inv.notifiedName.toUpperCase()}</span>` : ''}
           </div>
         </div>
@@ -7158,7 +7177,8 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       const lpEl = document.getElementById('detail-last-payment');
       if (lpEl) lpEl.innerHTML = '<b>Last payment:</b> ' + lastPaymentHTML(lp, { none: 'none recorded yet' }) +
         (inv.creditAmount ? '<div style="margin-top:4px;"><b>Credits applied:</b> $' + Number(inv.creditAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + (isBadDebt(inv) ? ' <span class="badge baddebt">BAD DEBT</span>' : '') + '</div>' : '') +
-        '<div style="margin-top:4px;color:var(--slate-soft);">Balance due $' + balanceDue(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + ' of $' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '. Full payment history is under Account History.</div>';
+        '<div style="margin-top:4px;color:var(--slate-soft);">Balance due $' + balanceDue(inv).toLocaleString(undefined,{minimumFractionDigits:2}) + ' of $' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '. Full payment history is under Account History.</div>' +
+        (function(){ const u = unappliedSummary(inv.customerName || inv.name); return u ? '<div class="unapplied-box" style="margin:8px 0 0;"><div class="unapplied-head">Unapplied in QuickBooks <span>$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span></div>' + u.rows.slice(0, 6).map(function(x){ return '<div class="unapplied-row"><span>' + (x.kind === 'payment' ? 'Payment' : 'Credit memo') + (x.reference ? ' #' + hEsc(x.reference) : '') + (x.date ? ' \u00b7 ' + fmtDate(x.date) : '') + '</span><b>$' + Number(x.amount).toLocaleString(undefined,{minimumFractionDigits:2}) + '</b></div>'; }).join('') + (u.rows.length > 6 ? '<div class="unapplied-note">+ ' + (u.rows.length - 6) + ' more under Account History.</div>' : '') + '<div class="unapplied-note">Not netted against the balance. Apply it in QuickBooks and the balance here follows on the next sync.</div></div>' : ''; })();
       const sEl = document.getElementById('detail-sensitive'); if (sEl) sEl.innerHTML = sensitiveControlsHTML(inv);
     }
     // DO NOT CONTACT: reflect the flag, and hide every way of drafting a message
