@@ -16,7 +16,12 @@
     "QBO_PAGE_SIZE": "15",
     // Self-calls the every-minute sync sweep may make per firing (one per
     // company per round). Paid plan: 400; free plan: 45.
-    "QBO_SWEEP_BUDGET": "400"
+    "QBO_SWEEP_BUDGET": "400",
+    // Microsoft Entra app "clAIms" (Outlook / Microsoft 365 mailbox connect).
+    // The client id is public; MS_CLIENT_SECRET lives in the Worker's secrets.
+    // Plain-text variables set in the Cloudflare dashboard are replaced by this
+    // block on every deploy, so anything non-secret must be listed here.
+    "MS_CLIENT_ID": "9ab4837e-6406-4e88-ae6c-dd53b3671a0c"
   },
   "triggers": {
     // Every minute: QuickBooks / IES change pulls and first imports (each
