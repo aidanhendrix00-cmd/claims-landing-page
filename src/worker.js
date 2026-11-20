@@ -5318,6 +5318,60 @@ out.credentials = /invalid_grant|invalid authorization code|status=400/i.test(ms
 return json(out);
 }
 
+// GET /api/quickbooks/line-audit - read-only. For each of the company's
+// QuickBooks connections, how many open invoices carry usable line data
+// (a real Product/Service name, a description, a service date), so we know
+// what an AI draft could cite before storing lines. Admins of the company
+// only; reads QuickBooks, writes nothing.
+const QBO_GENERIC_ITEM_RE = /^(services?|sales|hours?|labou?r|misc(ellaneous)?|item|invoice|balance|other|fee)$/i;
+async function handleQuickBooksLineAudit(request, env) {
+const user = await getSessionUser(request, env);
+if (!user || user.role !== 'admin') return json({ ok: false }, 403);
+const url = new URL(request.url);
+const cap = Math.min(Math.max(parseInt(url.searchParams.get('max'), 10) || 600, 100), 2000);
+const conns = await qboLoadConns(env, 'tenant_id=' + pgEq(user.tenant_id));
+const out = { ok: true, connections: [] };
+for (const conn of conns) {
+const r = { id: conn.id, company: (conn.cfg && (conn.cfg.companyName || conn.cfg.realmId)) || String(conn.id), status: conn.status,
+open: 0, withRealItem: 0, withDescription: 0, withServiceDate: 0, multiLine: 0, genericOnly: 0, nothingUsable: 0, items: {}, samples: [], truncated: false };
+if (conn.status !== 'connected') { r.error = 'not connected'; out.connections.push(r); continue; }
+try {
+let start = 1;
+while (r.open < cap) {
+const page = await qboQuery(env, conn, 'Invoice', "Balance > '0'", start, 100);
+if (!page.length) break;
+for (const inv of page) {
+r.open++;
+const lines = (inv.Line || []).filter(function (l) { return l && l.DetailType === 'SalesItemLineDetail'; });
+const names = lines.map(function (l) { return l.SalesItemLineDetail && l.SalesItemLineDetail.ItemRef && l.SalesItemLineDetail.ItemRef.name; }).filter(Boolean);
+const real = names.filter(function (n) { return !QBO_GENERIC_ITEM_RE.test(String(n).trim()); });
+const descs = lines.map(function (l) { return String(l.Description || '').trim(); }).filter(Boolean);
+const dates = lines.map(function (l) { return l.SalesItemLineDetail && l.SalesItemLineDetail.ServiceDate; }).filter(Boolean);
+if (real.length) r.withRealItem++;
+if (descs.length) r.withDescription++;
+if (dates.length) r.withServiceDate++;
+if (lines.length > 1) r.multiLine++;
+if (!real.length && names.length && !descs.length) r.genericOnly++;
+if (!real.length && !descs.length) r.nothingUsable++;
+real.forEach(function (n) { r.items[n] = (r.items[n] || 0) + 1; });
+if (r.samples.length < 6) r.samples.push({ invoice: inv.DocNumber || inv.Id, date: inv.TxnDate || null, total: inv.TotalAmt, lines: lines.slice(0, 6).map(function (l) {
+const d = l.SalesItemLineDetail || {};
+return { item: (d.ItemRef && d.ItemRef.name) || null, description: String(l.Description || '').slice(0, 120) || null, serviceDate: d.ServiceDate || null, qty: d.Qty == null ? null : d.Qty, amount: l.Amount == null ? null : l.Amount };
+}), moreLines: Math.max(0, lines.length - 6) });
+}
+if (page.length < 100) break;
+start += 100;
+}
+if (r.open >= cap) r.truncated = true;
+} catch (e) { r.error = String(e && e.message || e).slice(0, 200); }
+// Top items by frequency, as a list.
+r.topItems = Object.keys(r.items).map(function (k) { return { item: k, invoices: r.items[k] }; }).sort(function (a, b) { return b.invoices - a.invoices; }).slice(0, 15);
+delete r.items;
+out.connections.push(r);
+}
+return json(out);
+}
+
 // POST /api/quickbooks/department { id, department } - map a connected
 // company file to a clAIms department (business). An explicit choice re-tags
 // every invoice already mirrored from it; "auto" (empty) re-reads the open
@@ -11344,6 +11398,7 @@ if (url.pathname === '/api/quickbooks/callback' && request.method === 'GET') { r
 if (url.pathname === '/api/quickbooks/status' && request.method === 'GET') { return handleQuickBooksStatus(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/department' && request.method === 'POST') { return handleQuickBooksDepartment(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/diagnose' && request.method === 'GET') { return handleQuickBooksDiagnose(request, env); }
+if (url.pathname === '/api/quickbooks/line-audit' && request.method === 'GET') { return handleQuickBooksLineAudit(request, env); }
 if (url.pathname === '/api/quickbooks/sandbox-cleanup' && request.method === 'POST') { return handleQuickBooksSandboxCleanup(request, env); }
 if (url.pathname === '/api/quickbooks/webhook' && request.method === 'POST') { return handleQuickBooksWebhook(request, env, ctx); }
 if (url.pathname === '/api/quickbooks/continue' && request.method === 'POST') { return handleQuickBooksContinue(request, env, ctx); }
