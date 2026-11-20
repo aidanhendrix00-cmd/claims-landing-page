@@ -84,6 +84,7 @@
   .notif-dot.alert{background:var(--amber);}
   .notif-dot.fail{background:var(--rust);}
   .notif-dot.info{background:var(--teal);}
+  .notif-dot.warn{background:#C7792B;}
   .notif-body .t{font-size:12.5px;font-weight:600;color:var(--ink);}
   .notif-body .d{font-size:11.5px;color:var(--slate);margin-top:2px;line-height:1.4;}
   .notif-body .ts{font-size:10px;color:var(--slate-soft);font-family:var(--font-mono);margin-top:3px;}
@@ -3573,6 +3574,7 @@ async function loadRealAccountsNow(){
             amount: amt,
             remainingBalance: Math.max(0, +(inv.amount - running).toFixed(2)),
             paidDate: dayOf(r.deposited_on || r.created_at) || localDay(),
+            recordedDate: dayOf(r.created_at) || null,
             officeLocation: inv.officeLocation,
             department: inv.department,
             category: inv.category,
@@ -3662,8 +3664,14 @@ async function loadRealAccountsNow(){
       });
       // The money panel reads from real payment records, so it is populated on
       // every load instead of only remembering payments made in this tab.
+      // A payment QuickBooks dates after today is post-dated (a check or ACH
+      // entered with its future clearing date); it is shown as such rather
+      // than as money received.
+      const todayStr = localDay();
       state.financialLog = paymentsLog.slice().reverse().slice(0, 150).map(function(pp){
-        return { type: 'payment', invoiceId: pp.invoiceId, invoiceName: pp.invoiceName, amount: pp.amount, officeLocation: pp.officeLocation, ts: fmtDate(pp.paidDate), at: pp.paidDate || null, key: 'payment:' + pp.invoiceId + ':' + (pp.id || pp.paidDate || '') + ':' + pp.amount };
+        const postDated = !!(pp.paidDate && String(pp.paidDate).slice(0, 10) > todayStr);
+        return { type: 'payment', invoiceId: pp.invoiceId, invoiceName: pp.invoiceName, amount: pp.amount, officeLocation: pp.officeLocation, ts: fmtDate(pp.paidDate), at: pp.paidDate || null, key: 'payment:' + pp.invoiceId + ':' + (pp.id || pp.paidDate || ''),
+          postDated: postDated, recorded: pp.recordedDate || null, reference: pp.referenceNumber || null + ':' + pp.amount };
       });
       // Response Received for a real company: every account whose reply state
       // is "replied" carries the customer's answer, so list those - newest
@@ -6296,16 +6304,17 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       return;
     }
     listEl.innerHTML = state.financialLog.slice(0, 30).map((ev, i) => {
-      const label = ev.type === 'payment' ? 'PAYMENT RECEIVED' : 'NEW INVOICE';
-      const dotCls = ev.type === 'payment' ? 'info' : 'alert';
-      const verb = ev.type === 'payment' ? 'Payment received from' : 'New invoice added for';
+      const label = ev.type === 'payment' ? (ev.postDated ? 'PAYMENT POST-DATED' : 'PAYMENT RECEIVED') : 'NEW INVOICE';
+      const dotCls = ev.type === 'payment' ? (ev.postDated ? 'warn' : 'info') : 'alert';
+      const verb = ev.type === 'payment' ? (ev.postDated ? 'Payment entered in QuickBooks for' : 'Payment received from') : 'New invoice added for';
+      const when = ev.postDated ? ('dated ' + ev.ts + (ev.recorded ? ' \u00b7 entered ' + fmtDate(ev.recorded) : '') + (ev.reference ? ' \u00b7 ref ' + hEsc(ev.reference) : '')) : ev.ts;
       return `
         <div class="notif-row${i < unread ? ' unread' : ''}" onclick="openDetail(${ev.invoiceId}); toggleMoneyPanel();">
           <div class="notif-dot ${dotCls}"></div>
           <div class="notif-body">
             <div class="t">${label}</div>
             <div class="d">${verb} <b>${acctLink(ev.invoiceId, ev.invoiceName)}</b> \u2014 $${ev.amount.toLocaleString(undefined,{minimumFractionDigits:2})} (${OFFICE_LABELS[ev.officeLocation] || ev.officeLocation})</div>
-            <div class="ts">${ev.ts}</div>
+            <div class="ts">${when}</div>
           </div>
         </div>`;
     }).join('');
