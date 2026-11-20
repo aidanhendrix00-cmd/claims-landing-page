@@ -6197,7 +6197,7 @@ if (due.kind === 'demand_letter') {
 const tpl = demandTemplateOf(cadenceTenant);
 if (tpl) {
 const vals = demandMergeValues(account, balance, cadenceTenant, ownerSig, resolveOffices(cadenceTenant && cadenceTenant.offices), resolveDepartments(cadenceTenant && cadenceTenant.departments));
-html = '<div style="font-family:Arial,sans-serif;color:#171717;max-width:600px;white-space:pre-wrap;line-height:1.5;">' + escapeHtml(mergeDemandTemplate(tpl.body, vals)) + '</div>';
+html = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#171717;max-width:600px;">' + emailTextToHtml(mergeDemandTemplate(tpl.body, vals)) + '</div>';
 if (tpl.subject) demandSubject = mergeDemandTemplate(tpl.subject, vals);
 }
 }
@@ -6291,7 +6291,9 @@ function buildSignature(settings, user, companyName, mailboxEmail) {
 settings = settings || {}; user = user || {};
 const clean = function (v, max) { return String(v || '').replace(/[\r\n]+/g, ' ').trim().slice(0, max || 120); };
 const email = clean(user.email, 200);
-const name = clean(settings.sender_name) || clean(user.full_name) || (email ? email.split('@')[0] : '') || 'Accounts Receivable';
+// Never the mailbox's local part ("info", "gnelson") as a sign-off: with no
+// name on file the email signs as the company's Accounts Receivable.
+const name = clean(settings.sender_name) || clean(user.full_name) || 'Accounts Receivable';
 const lines = [name];
 const title = clean(settings.sender_title); if (title) lines.push(title);
 const company = clean(companyName); if (company && company.toLowerCase() !== name.toLowerCase()) lines.push(company);
@@ -6299,18 +6301,70 @@ const contact = [];
 const phone = clean(settings.sender_phone, 40); if (phone) contact.push(phone);
 const replyEmail = clean(settings.reply_to, 200) || clean(mailboxEmail, 200) || email; if (replyEmail) contact.push(replyEmail);
 if (contact.length) lines.push(contact.join('  |  '));
-const html = '<div style="margin-top:18px;line-height:1.5;color:#171717;font-family:Arial,sans-serif;font-size:14px;">' +
+const html = '<div style="margin:0;line-height:1.5;color:#171717;font-family:Arial,Helvetica,sans-serif;font-size:14px;">' +
 '<strong>' + escapeHtml(lines[0]) + '</strong>' +
 lines.slice(1).map(function (l) { return '<br><span style="color:#615D53;">' + escapeHtml(l) + '</span>'; }).join('') + '</div>';
 return { name: name, lines: lines, text: lines.join('\n'), html: html, email: replyEmail || '', phone: phone || '' };
+}
+// Plain text the user approved (an AI draft, a hand-written message, a merged
+// template) rendered as real email HTML: one <p> per paragraph, <br> for a
+// single line break. Mail clients strip or ignore white-space:pre-wrap and
+// Exchange re-wraps the HTML source, so a pre-wrap block arrives with its
+// paragraph breaks lost and stray breaks mid-sentence; explicit paragraphs
+// survive every client. A draft that came back as one block with no blank
+// lines is broken into paragraphs: greeting, body in two- or three-sentence
+// paragraphs, closing.
+const EMAIL_P_STYLE = 'margin:0 0 14px;line-height:1.55;';
+function emailParagraphs(text) {
+let t = String(text || '').replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').trim();
+if (!t) return [];
+let paras = t.split(/\n{2,}/);
+const hasBlankLines = paras.length > 1;
+if (!hasBlankLines) {
+// No blank lines at all: every line break is a paragraph break, and any
+// paragraph still too long is split at sentence boundaries.
+paras = t.split('\n').map(function (p) { return p.trim(); }).filter(Boolean);
+}
+const out = [];
+paras.forEach(function (p) {
+if (hasBlankLines) { out.push(p); return; }
+const words = p.split(/\s+/).length;
+if (words <= 45) { out.push(p); return; }
+// Greeting at the start ("Hello Dana," / "Dear Accounts Payable Team,") and
+// closing at the end ("Thank you,") stand alone; the rest is grouped by
+// sentence, three to a paragraph.
+let rest = p;
+const g = /^((?:hello|hi|hey|dear|good (?:morning|afternoon|evening)|to the)[^.!?\n]{0,60}?[,:])\s+/i.exec(rest);
+if (g) { out.push(g[1]); rest = rest.slice(g[0].length); }
+let closing = '';
+const c = /\s*((?:thank you|thanks|many thanks|sincerely|best regards|kind regards|warm regards|regards|respectfully|best)(?: (?:again|in advance))?[,.]?)$/i.exec(rest);
+if (c) { closing = c[1]; rest = rest.slice(0, rest.length - c[0].length); }
+// A sentence ends at . ! or ? followed by a space and a capital (so
+// "$15,897.00" and "e.g. this" stay whole).
+const sentences = rest.split(/(?<=[.!?]["')\]]*)\s+(?=[A-Z"'(])/);
+let group = [];
+sentences.map(function (s) { return s.trim(); }).filter(Boolean).forEach(function (s) {
+group.push(s);
+const len = group.join(' ').split(/\s+/).length;
+if (group.length >= 3 || len > 60) { out.push(group.join(' ')); group = []; }
+});
+if (group.length) out.push(group.join(' '));
+if (closing) out.push(closing);
+});
+return out;
+}
+function emailTextToHtml(text) {
+return emailParagraphs(text).map(function (p) {
+return '<p style="' + EMAIL_P_STYLE + '">' + escapeHtml(p).replace(/\n/g, '<br>') + '</p>';
+}).join('');
 }
 // The body a user approved, plus their signature (once - a body that already
 // carries it is left alone).
 function bodyWithSignature(text, sig) {
 const flat = function (v) { return String(v || '').replace(/\s+/g, ' ').trim().toLowerCase(); };
 const already = flat(text).indexOf(flat(sig.text)) !== -1;
-return '<div style="font-family:Arial,sans-serif;color:#171717;max-width:560px;">' +
-'<div style="white-space:pre-wrap;">' + escapeHtml(text) + '</div>' + (already ? '' : sig.html) + '</div>';
+return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#171717;max-width:600px;">' +
+emailTextToHtml(text) + (already ? '' : sig.html) + '</div>';
 }
 async function senderSettingsFor(env, user) {
 try { return await pgSelectOne(env, 'cadence_settings', 'tenant_id=' + pgEq(user.tenant_id) + '&user_id=' + pgEq(user.id) + '&select=*'); }
