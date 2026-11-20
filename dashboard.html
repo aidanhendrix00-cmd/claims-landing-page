@@ -893,6 +893,7 @@
       <button class="nav-item" data-view="report"><span class="left"><span class="ic">R</span> Aging Report</span></button>
       <button class="nav-item" data-view="invoicedmtd"><span class="left"><span class="ic">M</span> Invoiced MTD</span><span class="count" id="nav-count-mtd"></span></button>
       <button class="nav-item" data-view="baddebt" data-feat="claimsOps" style="display:none;"><span class="left"><span class="ic">B</span> Bad Debt</span><span class="count" id="nav-count-baddebt"></span></button>
+      <button class="nav-item" data-view="credits" data-feat="claimsOps" style="display:none;"><span class="left"><span class="ic">U</span> Unapplied Credits</span><span class="count" id="nav-count-credits"></span></button>
       <button class="nav-item" data-view="collectedmtd"><span class="left"><span class="ic">$</span> Collected This Month</span><span class="count" id="nav-count-collected"></span></button>
       <button class="nav-item" data-view="collected"><span class="left"><span class="ic">C</span> Collected</span><span class="count" id="nav-count-collectedall"></span></button>
       <button class="nav-item" data-view="sent"><span class="left"><span class="ic">L</span> Comms Log</span><span class="count" id="nav-count-sent"></span></button>
@@ -1005,6 +1006,7 @@
     <!-- ===================== ACCOUNTS VIEW ===================== -->
     <section class="view" id="view-accounts">
       <div class="topbar"><div><h1>Accounts</h1><p>Every customer with all of their invoices in one place &#8212; statements and account-level follow-ups live here</p></div></div>
+      <div class="kpis" id="accounts-kpis"></div>
       <div class="mtd-filters" data-scope-panel="accounts"></div>
       <div class="section-head">
         <h2>Customer accounts</h2>
@@ -1040,6 +1042,7 @@
 
     <section class="view" id="view-sheet">
       <div class="topbar"><div><h1>Accounts Receivable</h1><p>Your full A/R ledger with autonomous contact tracking</p></div></div>
+      <div class="kpis" id="sheet-kpis"></div>
       <div class="mtd-filters" data-scope-panel="sheet"></div>
       <div class="section-head">
         <h2>Ledger</h2>
@@ -1159,6 +1162,15 @@
       <div id="baddebt-list"></div>
     </section>
 
+    <!-- ===================== UNAPPLIED CREDITS VIEW (Revolve) ===================== -->
+    <section class="view" id="view-credits">
+      <div class="topbar"><div><h1>Unapplied Credits</h1><p>Unapplied payments and open credit memos sitting in QuickBooks &#8212; money already received that is not applied to any invoice. Nothing here is netted against a balance: apply it in QuickBooks and the balance follows on the next sync. Refreshed hourly from every connected file.</p></div><div class="topbar-actions"><button class="btn-ghost" onclick="exportCredits()">Export CSV</button></div></div>
+      <div class="kpis" id="credits-kpis"></div>
+      <div class="mtd-filters" data-scope-panel="credits"></div>
+      <div class="collected-filter"><input class="search" style="width:240px;" id="credits-search" placeholder="Search customer or reference" oninput="renderCredits()"><select class="sort" id="credits-kind" onchange="renderCredits()"><option value="all">Payments and credit memos</option><option value="payment">Unapplied payments only</option><option value="credit_memo">Credit memos only</option></select><select class="sort" id="credits-file" onchange="renderCredits()"><option value="all">All QuickBooks files</option></select><select class="sort" id="credits-show" onchange="renderCredits()"><option value="all">All customers</option><option value="covers">Customer has an open balance</option><option value="noopen">Customer has nothing open</option><option value="baddebt">Customer has bad debt written off</option></select><select class="sort" id="credits-sort" onchange="renderCredits()"><option value="amount-desc">Amount (high to low)</option><option value="covers-desc">Covers the most open balance</option><option value="date-asc">Oldest first</option><option value="date-desc">Newest first</option><option value="name-asc">Customer A&ndash;Z</option></select></div>
+      <div id="credits-list"></div>
+    </section>
+
     <!-- ===================== COLLECTED THIS MONTH VIEW ===================== -->
     <section class="view" id="view-collectedmtd">
       <div class="topbar"><div><h1>Collected This Month</h1><p>Updates in real time as NetSuite posts and applies payments to each account</p></div></div>
@@ -1197,6 +1209,7 @@
     <!-- ===================== COMMS LOG VIEW ===================== -->
     <section class="view" id="view-sent">
       <div class="topbar"><div><h1>Comms Log</h1><p>Every follow-up, demand letter, and NOIL sent &#8212; manual or autonomous</p></div></div>
+      <div class="kpis" id="sent-kpis"></div>
       <div class="mtd-filters" data-scope-panel="sent"></div>
       <div id="sent-wrap"></div>
     </section>
@@ -1204,6 +1217,7 @@
     <!-- ===================== RESPONSE RECEIVED VIEW ===================== -->
     <section class="view" id="view-responses">
       <div class="topbar"><div><h1>Response Received</h1><p>Replies logged autonomously the moment an invoice's status flips to "replied" &#8212; and reflected immediately in the Response Summary column on Accounts Receivable</p></div></div>
+      <div class="kpis" id="responses-kpis"></div>
       <div class="mtd-filters" data-scope-panel="responses"></div>
 
       <div class="sf-sim-card" data-demo-only="1">
@@ -1264,6 +1278,7 @@
     <!-- ===================== AUTOMATIONS VIEW ===================== -->
     <section class="view" id="view-automations">
       <div class="topbar"><div><h1>Automations</h1><p>Autonomous CRM-triggered sends and account updates</p></div></div>
+      <div class="kpis" id="automations-kpis"></div>
 
       <div class="rule-card">
         <div>
@@ -1311,6 +1326,7 @@
         <div><h1>Integrations</h1><p>Data sources powering the invoice queue and document library</p></div>
         <div class="topbar-actions"><button class="btn-primary" data-demo-only="1" onclick="openAddIntegration()">+ Add Integration</button></div>
       </div>
+      <div class="kpis" id="integrations-kpis"></div>
 
       <div data-real-only="1">
       <div class="section-head" style="margin-top:0;"><h2 id="real-integrations-title">Live Accounting / Homeowner Database Connection</h2></div>
@@ -1362,6 +1378,7 @@
     </section>
   <section class="view" id="view-reports">
     <div class="topbar"><div><h1>Reports</h1><p>Run any tab as a report, narrowed to <span data-feat-hide="claimsOps">a city, </span>business, payer, status and date range, then download it as a PDF or spreadsheet. Reports read exactly what this dashboard shows.</p></div></div>
+    <div class="kpis" id="reports-kpis"></div>
     <div id="reports-mount"><div class="hint" style="padding:18px;color:var(--slate);">Loading the report builder&hellip;</div></div>
   </section>
   <section class="view" id="view-team">
@@ -1369,6 +1386,7 @@
       <div><h1>Team</h1><p>Manage who has access to this dashboard</p></div>
       <div class="topbar-actions"><button class="btn-primary" onclick="openInviteTeamMember()">+ Invite Team Member</button></div>
     </div>
+    <div class="kpis" id="team-kpis"></div>
     <div id="team-list-wrap"></div>
   </section>
 
@@ -1378,6 +1396,7 @@
       <div><h1>Employees Activity</h1><p>Every follow-up, demand letter, NOIL, response, payment, upload and change made by your team &#8212; plus the Automated Reach Outs clAIms sent on their behalf</p></div>
       <div class="topbar-actions"><button class="btn-ghost" onclick="loadEmployeeActivity(true)">Refresh</button></div>
     </div>
+    <div class="kpis" id="activity-kpis"></div>
     <div class="act-filters">
       <label>Person <select id="act-person" onchange="renderActivityView()"><option value="all">Everyone</option></select></label>
       <label>Activity <select id="act-type" onchange="renderActivityView()">
@@ -2962,6 +2981,8 @@ async function renderTeam() {
       if (!data || !data.ok) throw new Error((data && data.error) || 'Unable to load team.');
       team = data.team || [];
     }
+    state.team = team;
+    try { renderTabKpis('team'); } catch (e) {}
     // Plan + seat usage line, straight from the server's plan limits.
     var planLine = '';
     try {
@@ -3869,7 +3890,9 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     automations: ['renderAutomationsFeed'],
     integrations: ['renderCustomIntegrations'],
     activity: ['renderActivityIfOpen'],
-    reports: ['renderReports']
+    reports: ['renderReports'],
+    credits: ['renderCredits'],
+    team: []
   };
   const __staleViews = {};
   function activeViewName(){
@@ -3882,6 +3905,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       if (typeof fn !== 'function') return;
       try { fn(); } catch(e){ console.error('render failed:', fnName, e); }
     });
+    try { renderTabKpis(name); } catch(e){ console.error('kpis failed:', name, e); }
     delete __staleViews[name];
   }
   // Called whenever a tab becomes visible: paint it if data changed since it
@@ -3967,6 +3991,242 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       syncScopeSelect('office-filter', scopeOffices(), OFFICE_LABELS);
       if(citySubfilter()){ const ob = document.getElementById('officeFilterBox'); if(ob) ob.style.display = 'none'; }
     }catch(e){ console.error('renderAll toggles failed:', e); }
+  }
+
+  /* ============================================================
+     TAB KPIs
+     Every tab opens with at least three figures that matter to it, one of
+     them an amount. Tabs that already paint their own strip (queue, month,
+     bad debt, collected, escalations) are left to themselves.
+     ============================================================ */
+  function kpiHTML(items){
+    return items.map(function(k){ return '<div class="kpi"' + (k.title ? ' title="' + hEsc(k.title) + '"' : '') + '><div class="label">' + k.label + '</div><div class="value">' + k.value + '</div><div class="sub' + (k.cls ? ' ' + k.cls : '') + '">' + (k.sub || '') + '</div></div>'; }).join('');
+  }
+  function money0(n){ return '$' + Number(n || 0).toLocaleString(undefined,{maximumFractionDigits:0}); }
+  function weekRange(){
+    const d = new Date(); d.setHours(0,0,0,0);
+    const dow = (d.getDay() + 6) % 7; // Monday = 0
+    const start = new Date(d); start.setDate(d.getDate() - dow);
+    const end = new Date(start); end.setDate(start.getDate() + 6);
+    const iso = function(x){ return x.toISOString().slice(0, 10); };
+    return { start: iso(start), end: iso(end) };
+  }
+  function inMonth(v){
+    if (!v) return false;
+    const { start, end } = monthRange();
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(v + 'T00:00:00') : hParse(v);
+    if (!d || isNaN(d.getTime())) return false;
+    const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
+    return d >= start && d <= endOfDay;
+  }
+  function renderTabKpis(name){
+    const el = document.getElementById(name + '-kpis'); if (!el) return;
+    const open = activeInvoices();
+    const openBal = open.reduce(function(a, i){ return a + balanceDue(i); }, 0);
+    let items = [];
+    if (name === 'accounts') {
+      const groups = accountGroups(false).filter(function(g){ return g.openCount > 0; });
+      const avgAge = groups.length ? Math.round(groups.reduce(function(a, g){ return a + g.avgAge; }, 0) / groups.length) : 0;
+      const over60 = groups.filter(function(g){ return g.avgAge > 60; });
+      items = [
+        { label: 'Accounts with a balance', value: groups.length.toLocaleString(), sub: open.length.toLocaleString() + ' open invoices' },
+        { label: 'Open balance', value: money0(groups.reduce(function(a, g){ return a + g.openTotal; }, 0)), sub: 'across those accounts' },
+        { label: 'Average account age', value: avgAge + 'd', sub: over60.length + ' account' + (over60.length === 1 ? '' : 's') + ' averaging 60+ days', cls: over60.length ? 'up' : '' }
+      ];
+      if (claimsOps()) { const u = (state.unapplied || []); const t = u.reduce(function(a, x){ return a + Number(x.amount || 0); }, 0); items.push({ label: 'Unapplied in QuickBooks', value: money0(t), sub: u.length + ' payment' + (u.length === 1 ? '' : 's') + ' and credit memos, not yet applied', title: 'Money QuickBooks holds for customers that is not applied to any invoice' }); }
+      else { const pc = open.filter(isPartiallyPaid).length; items.push({ label: 'Partially paid', value: pc.toLocaleString(), sub: 'open invoices with a payment on them' }); }
+    } else if (name === 'sheet') {
+      const wk = weekRange();
+      const dueWeek = open.filter(function(i){ return i.projectedPaymentDate && dateInRange(i.projectedPaymentDate, wk.start, wk.end); });
+      const over30 = open.filter(function(i){ return agingDays(i) > 30; });
+      const over90 = open.filter(function(i){ return agingDays(i) > 90; });
+      items = [
+        { label: 'Open invoices', value: open.length.toLocaleString(), sub: accountGroups(false).filter(function(g){ return g.openCount > 0; }).length + ' accounts' },
+        { label: 'Open balance', value: money0(openBal), sub: 'total A/R on the ledger' },
+        { label: 'Expected this week', value: money0(dueWeek.reduce(function(a, i){ return a + balanceDue(i); }, 0)), sub: dueWeek.length + ' invoice' + (dueWeek.length === 1 ? '' : 's') + ' with a projected payment date this week' },
+        { label: 'Past 30 days', value: money0(over30.reduce(function(a, i){ return a + balanceDue(i); }, 0)), sub: over30.length + ' invoices · ' + money0(over90.reduce(function(a, i){ return a + balanceDue(i); }, 0)) + ' past 90', cls: over90.length ? 'up' : '' }
+      ];
+    } else if (name === 'sent') {
+      const rows = state.commsLog.filter(function(c){ return invoiceDeptMatches(c.invoiceId); });
+      const month = rows.filter(function(c){ return inMonth(c.sentTs || c.sentAt); });
+      const letters = month.filter(function(c){ return /demand|noil/i.test(String(c.draftType || '')); });
+      const seen = {}; let contacted = 0; month.forEach(function(c){ if (seen[c.invoiceId]) return; seen[c.invoiceId] = 1; const inv = findInv(c.invoiceId); if (inv && inv.jobStatus !== 'paid') contacted += balanceDue(inv); });
+      const replied = Object.keys(seen).filter(function(id){ const inv = findInv(id); return inv && inv.responded === 'replied'; }).length;
+      items = [
+        { label: 'Sent — ' + monthLabel(), value: month.length.toLocaleString(), sub: rows.length.toLocaleString() + ' all time · ' + month.filter(function(c){ return c.source === 'automation'; }).length + ' autonomous' },
+        { label: 'Demand letters & NOILs', value: letters.length.toLocaleString(), sub: 'this month' },
+        { label: 'Balance contacted', value: money0(contacted), sub: Object.keys(seen).length + ' invoices reached this month' },
+        { label: 'Replied', value: replied.toLocaleString(), sub: Object.keys(seen).length ? Math.round(replied / Object.keys(seen).length * 100) + '% of invoices contacted this month' : 'no sends this month' }
+      ];
+    } else if (name === 'responses') {
+      const rows = state.responsesLog.filter(function(r){ return invoiceDeptMatches(r.invoiceId); });
+      const month = rows.filter(function(r){ return inMonth(r.receivedTs); });
+      const bal = rows.reduce(function(a, r){ const inv = findInv(r.invoiceId); return a + (inv && inv.jobStatus !== 'paid' ? balanceDue(inv) : 0); }, 0);
+      const paid = rows.filter(function(r){ return r.jobStatus === 'paid'; }).length;
+      items = [
+        { label: 'Responses received', value: rows.length.toLocaleString(), sub: month.length + ' this month' },
+        { label: 'Balance still open on replied accounts', value: money0(bal), sub: 'a reply is not a payment — keep these moving' },
+        { label: 'Paid after replying', value: paid.toLocaleString(), sub: rows.length ? Math.round(paid / rows.length * 100) + '% of replies ended in payment' : '' }
+      ];
+    } else if (name === 'automations') {
+      const auto = state.commsLog.filter(function(c){ return c.source === 'automation' && invoiceDeptMatches(c.invoiceId); });
+      const month = auto.filter(function(c){ return inMonth(c.sentTs || c.sentAt); });
+      const cadence = open.filter(function(i){ return !i.escalated && !isDoNotContact(i); });
+      const due = open.filter(function(i){ return !!followUpReminder(i); });
+      items = [
+        { label: 'Autonomous sends — ' + monthLabel(), value: (month.length + state.automationLog.filter(function(a){ return inMonth(a.sentAt); }).length).toLocaleString(), sub: (auto.length + state.automationLog.length).toLocaleString() + ' all time' },
+        { label: 'In active cadence', value: cadence.length.toLocaleString(), sub: 'open invoices the cadence is working' },
+        { label: 'Balance in cadence', value: money0(cadence.reduce(function(a, i){ return a + balanceDue(i); }, 0)), sub: money0(open.filter(function(i){ return i.escalated; }).reduce(function(a, i){ return a + balanceDue(i); }, 0)) + ' escalated, outside the cadence' },
+        { label: 'Follow-ups due', value: due.length.toLocaleString(), sub: 'no reply 3+ business days after the last send', cls: due.length ? 'up' : '' }
+      ];
+    } else if (name === 'integrations') {
+      const live = (state.realIntegrations || []).filter(function(i){ return i.status === 'connected'; });
+      const files = live.filter(function(i){ return i.quickbooks; });
+      const last = live.reduce(function(m, i){ const t = i.last_synced_at ? new Date(i.last_synced_at).getTime() : 0; return t > m ? t : m; }, 0);
+      const reconnect = live.filter(function(i){ return i.needsReconnect || i.lastError; }).length;
+      items = [
+        { label: 'Connected QuickBooks files', value: files.length.toLocaleString(), sub: reconnect ? reconnect + ' need' + (reconnect === 1 ? 's' : '') + ' attention' : 'all healthy', cls: reconnect ? 'up' : '' },
+        { label: 'Invoices synced', value: state.invoices.length.toLocaleString(), sub: open.length.toLocaleString() + ' open' },
+        { label: 'Open balance synced', value: money0(openBal), sub: 'as QuickBooks reports it' },
+        { label: 'Last sync', value: last ? fmtTimeAgo(last) : '—', sub: 'change checks every few minutes; unapplied credits hourly' }
+      ];
+    } else if (name === 'reports') {
+      const { start, end } = monthRange();
+      const colMonth = state.paymentsLog.filter(function(pp){ return dateInRange(pp.paidDate, start, end) && paymentPassesFilters(pp); });
+      items = [
+        { label: 'Open balance', value: money0(openBal), sub: open.length.toLocaleString() + ' open invoices' },
+        { label: 'Accounts with a balance', value: accountGroups(false).filter(function(g){ return g.openCount > 0; }).length.toLocaleString(), sub: 'in the current scope' },
+        { label: 'Collected — ' + monthLabel(), value: money0(colMonth.reduce(function(a, pp){ return a + Number(pp.amount || 0); }, 0)), sub: colMonth.length + ' payments' }
+      ];
+    } else if (name === 'team') {
+      const team = state.team || [];
+      const active = team.filter(function(m){ return m.status === 'active'; });
+      const invited = team.filter(function(m){ return m.status === 'invited'; });
+      items = [
+        { label: 'Team members', value: team.length.toLocaleString(), sub: active.length + ' active' + (invited.length ? ' · ' + invited.length + ' invited' : '') },
+        { label: 'Admins', value: team.filter(function(m){ return m.role === 'admin'; }).length.toLocaleString(), sub: team.filter(function(m){ return m.role !== 'admin'; }).length + ' managers and employees' },
+        { label: 'Open balance under management', value: money0(openBal), sub: active.length ? money0(openBal / active.length) + ' per active member' : '' }
+      ];
+    } else if (name === 'activity') {
+      const all = (typeof employeeActivity === 'object' && employeeActivity.activity) || [];
+      const days = (typeof actRangeDays === 'function') ? actRangeDays() : 30;
+      const since = days ? Date.now() - days * 86400000 : 0;
+      const rows = all.filter(function(e){ if (!since) return true; const d = hParse(e.at); return !d || d.getTime() >= since; });
+      const reach = rows.filter(function(e){ return e.type === 'followup' || e.type === 'demand' || e.type === 'noil'; }).length;
+      const pays = rows.filter(function(e){ return e.type === 'payment'; });
+      const payAmt = pays.reduce(function(a, e){ return a + Number(e.amount || 0); }, 0);
+      const people = {}; rows.forEach(function(e){ if (e.actor) people[e.actor] = 1; });
+      items = [
+        { label: 'Actions' + (days ? ' — last ' + days + ' days' : ''), value: rows.length.toLocaleString(), sub: Object.keys(people).length + ' people active' },
+        { label: 'Follow-ups, letters & NOILs', value: reach.toLocaleString(), sub: rows.filter(function(e){ return e.type === 'response'; }).length + ' responses logged' },
+        { label: 'Payments logged', value: payAmt > 0 ? money0(payAmt) : pays.length.toLocaleString(), sub: payAmt > 0 ? pays.length + ' payments' : 'payments recorded by the team' }
+      ];
+    } else if (name === 'credits') {
+      items = creditsKpiItems();
+    }
+    el.innerHTML = kpiHTML(items);
+    el.style.display = items.length ? '' : 'none';
+  }
+  // Team and Activity paint outside renderView; keep their strips fresh too.
+  document.getElementById('nav').addEventListener('click', function(e){ const btn = e.target.closest('.nav-item'); if (btn && btn.dataset.view) setTimeout(function(){ try { renderTabKpis(btn.dataset.view); } catch(err){} }, 0); });
+
+  /* ============================================================
+     UNAPPLIED CREDITS (Revolve)
+     Every unapplied payment and open credit memo QuickBooks holds, as a
+     worklist: who it belongs to, which file, whether that customer has an
+     open balance it could clear, and whether the customer was written off.
+     ============================================================ */
+  function creditsRows(){
+    const groups = {}; accountGroups(true).forEach(function(g){ groups[g.key] = g; });
+    const inScope = function(u){ const g = groups[acctKey(u.customerName)]; if (!g) return true; return g.invoices.some(passesFilters); };
+    return (state.unapplied || []).filter(inScope).map(function(u){
+      const g = groups[acctKey(u.customerName)] || null;
+      const openBal = g ? g.openTotal : 0;
+      const covers = Math.min(Number(u.amount || 0), openBal);
+      const bd = g ? g.invoices.filter(isBadDebt) : [];
+      const written = bd.reduce(function(a, i){ return a + Number(i.amount || 0); }, 0);
+      const firstId = g ? ((g.invoices.filter(function(i){ return i.jobStatus !== 'paid'; })[0] || g.invoices[0] || {}).id) : null;
+      return Object.assign({}, u, { group: g, openBal: openBal, covers: covers, badDebt: bd.length, writtenOff: written, firstId: firstId, age: u.date ? hDaysSince(u.date) : null });
+    });
+  }
+  function creditsKpiItems(){
+    const rows = creditsRows();
+    const total = rows.reduce(function(a, r){ return a + Number(r.amount || 0); }, 0);
+    const pays = rows.filter(function(r){ return r.kind === 'payment'; }), cms = rows.filter(function(r){ return r.kind !== 'payment'; });
+    const payT = pays.reduce(function(a, r){ return a + Number(r.amount || 0); }, 0), cmT = cms.reduce(function(a, r){ return a + Number(r.amount || 0); }, 0);
+    // "Covers" is per customer, not per item: two credits on one $500 balance clear $500, not $1,000.
+    const byCust = {}; rows.forEach(function(r){ const k = acctKey(r.customerName); const c = byCust[k] || (byCust[k] = { amt: 0, open: r.openBal, bad: r.writtenOff }); c.amt += Number(r.amount || 0); });
+    let coverable = 0, noOpen = 0, noOpenCust = 0, onBad = 0, onBadCust = 0;
+    Object.keys(byCust).forEach(function(k){ const c = byCust[k]; coverable += Math.min(c.amt, c.open); if (c.open <= 0.005) { noOpen += c.amt; noOpenCust++; } if (c.bad > 0) { onBad += c.amt; onBadCust++; } });
+    return [
+      { label: 'Unapplied in QuickBooks', value: money0(total), sub: pays.length + ' payments ' + money0(payT) + ' · ' + cms.length + ' credit memos ' + money0(cmT) },
+      { label: 'Could clear open balances today', value: money0(coverable), sub: 'apply in QuickBooks and the balance drops on the next sync', title: 'For each customer, the smaller of their unapplied credit and their open balance' },
+      { label: 'On customers with nothing open', value: money0(noOpen), sub: noOpenCust + ' customer' + (noOpenCust === 1 ? '' : 's') + ' — overpayment or refund candidates' },
+      { label: 'On written-off customers', value: money0(onBad), sub: onBadCust ? onBadCust + ' customer' + (onBadCust === 1 ? '' : 's') + ' with bad debt and credit on account — recover before writing off' : 'none', cls: onBadCust ? 'up' : '' }
+    ];
+  }
+  function renderCredits(){
+    const listEl = document.getElementById('credits-list'); if (!listEl) return;
+    const fileSel = document.getElementById('credits-file');
+    const files = {}; (state.unapplied || []).forEach(function(u){ if (u.file) files[u.file] = 1; });
+    const want = '<option value="all">All QuickBooks files</option>' + Object.keys(files).sort().map(function(f){ return '<option value="' + hEsc(f) + '">' + hEsc(f) + '</option>'; }).join('');
+    if (fileSel && fileSel.innerHTML !== want) { const prev = fileSel.value; fileSel.innerHTML = want; fileSel.value = files[prev] ? prev : 'all'; }
+    const q = String((document.getElementById('credits-search') || {}).value || '').trim().toLowerCase();
+    const kind = (document.getElementById('credits-kind') || {}).value || 'all';
+    const file = (fileSel || {}).value || 'all';
+    const show = (document.getElementById('credits-show') || {}).value || 'all';
+    const sort = (document.getElementById('credits-sort') || {}).value || 'amount-desc';
+    let rows = creditsRows().filter(function(r){
+      if (kind !== 'all' && r.kind !== kind) return false;
+      if (file !== 'all' && r.file !== file) return false;
+      if (show === 'covers' && !(r.openBal > 0.005)) return false;
+      if (show === 'noopen' && r.openBal > 0.005) return false;
+      if (show === 'baddebt' && !r.badDebt) return false;
+      if (q && [r.customerName, r.reference, r.memo, r.file].map(function(x){ return String(x || '').toLowerCase(); }).join(' ').indexOf(q) === -1) return false;
+      return true;
+    });
+    rows.sort(function(a, b){
+      switch (sort) {
+        case 'covers-desc': return (b.covers - a.covers) || (Number(b.amount) - Number(a.amount));
+        case 'date-asc': return String(a.date || '').localeCompare(String(b.date || ''));
+        case 'date-desc': return String(b.date || '').localeCompare(String(a.date || ''));
+        case 'name-asc': return nameCompare(a.customerName, b.customerName) || (Number(b.amount) - Number(a.amount));
+        default: return (Number(b.amount) - Number(a.amount)) || nameCompare(a.customerName, b.customerName);
+      }
+    });
+    const total = rows.reduce(function(a, r){ return a + Number(r.amount || 0); }, 0);
+    if (!rows.length) { listEl.innerHTML = '<div class="empty">' + ((state.unapplied || []).length ? 'Nothing matches those filters.' : 'No unapplied payments or credit memos in QuickBooks right now. This list refreshes every hour from every connected file.') + '</div>'; return; }
+    const pg = pageOf('credits', rows, [q, kind, file, show, sort, state.deptFilter, state.officeFilter].join('|'));
+    const perCust = {}; rows.forEach(function(r){ const k = acctKey(r.customerName); const c = perCust[k] || (perCust[k] = { amt: 0, open: r.openBal }); c.amt += Number(r.amount || 0); });
+    const clear = Object.keys(perCust).reduce(function(a, k){ return a + Math.min(perCust[k].amt, perCust[k].open); }, 0);
+    listEl.innerHTML = '<div class="aging-summary"><span><b>' + rows.length + '</b> item' + (rows.length === 1 ? '' : 's') + ' on <b>' + Object.keys(perCust).length + '</b> customer' + (Object.keys(perCust).length === 1 ? '' : 's') + '</span><span>Total <b>' + money2(total) + '</b></span><span>Could clear <b>' + money2(clear) + '</b> of open balances</span></div>' +
+      pagerHTML(pg, 'items', 'top') + '<div style="overflow-x:auto;"><table class="log"><thead><tr><th>Customer</th><th>QuickBooks file</th><th>Business</th><th>Type</th><th>Reference</th><th>Date</th><th>Age</th><th class="amt">Amount</th><th class="amt">Customer open balance</th><th class="amt">Could clear</th><th>Flags</th></tr></thead><tbody>' +
+      pg.rows.map(function(r){
+        const flags = (r.badDebt ? '<span class="badge baddebt" title="' + r.badDebt + ' invoice' + (r.badDebt === 1 ? '' : 's') + ' written off, ' + money2(r.writtenOff) + '">BAD DEBT ' + money2(r.writtenOff) + '</span>' : '') +
+          (r.openBal <= 0.005 ? '<span class="badge" style="background:#EEF1F4;color:#4A5561;border-color:#D9DEE3;" title="This customer has no open invoices: likely an overpayment or a refund">NOTHING OPEN</span>' : '') +
+          (r.age !== null && r.age > 90 ? '<span class="badge stale">' + r.age + 'D UNAPPLIED</span>' : '');
+        return '<tr>' +
+          '<td>' + (r.firstId ? acctLink(r.firstId, r.customerName) : hEsc(r.customerName)) + '</td>' +
+          '<td>' + hEsc(r.file || '—') + '</td>' +
+          '<td>' + hEsc(r.departmentLabel || (r.group ? acctBizLabel(r.group) : '') || '—') + '</td>' +
+          '<td>' + (r.kind === 'payment' ? 'Unapplied payment' : 'Credit memo') + '</td>' +
+          '<td style="font-family:var(--font-mono);">' + hEsc(r.reference || '—') + (r.memo ? '<div style="font-size:11px;color:var(--slate-soft);max-width:260px;white-space:normal;">' + hEsc(String(r.memo).slice(0, 120)) + '</div>' : '') + '</td>' +
+          '<td style="white-space:nowrap;">' + (r.date ? fmtDate(r.date) : '—') + '</td>' +
+          '<td>' + (r.age === null ? '—' : r.age + 'd') + '</td>' +
+          '<td class="amt">' + money2(r.amount) + (r.totalAmount && Number(r.totalAmount) > Number(r.amount) + 0.005 ? '<span class="paid-sub">of ' + money2(r.totalAmount) + ' total</span>' : '') + '</td>' +
+          '<td class="amt">' + money2(r.openBal) + (r.group ? '<span class="paid-sub">' + r.group.openCount + ' open invoice' + (r.group.openCount === 1 ? '' : 's') + '</span>' : '') + '</td>' +
+          '<td class="amt">' + (r.covers > 0.005 ? '<b>' + money2(r.covers) + '</b>' : '—') + '</td>' +
+          '<td style="white-space:nowrap;">' + flags + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>' + pagerHTML(pg, 'items', 'bottom');
+  }
+  function exportCredits(){
+    const rows = creditsRows().sort(function(a, b){ return Number(b.amount) - Number(a.amount); });
+    const esc = function(v){ const t = String(v == null ? '' : v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const lines = [['Customer','QuickBooks file','Business','Type','Reference','Date','Days unapplied','Amount','Original total','Customer open balance','Could clear','Bad debt written off','Memo'].join(',')];
+    rows.forEach(function(r){ lines.push([r.customerName, r.file || '', r.departmentLabel || (r.group ? acctBizLabel(r.group) : ''), r.kind === 'payment' ? 'Unapplied payment' : 'Credit memo', r.reference || '', r.date || '', r.age === null ? '' : r.age, Number(r.amount || 0).toFixed(2), r.totalAmount == null ? '' : Number(r.totalAmount).toFixed(2), r.openBal.toFixed(2), r.covers.toFixed(2), r.writtenOff ? r.writtenOff.toFixed(2) : '', r.memo || ''].map(esc).join(',')); });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'unapplied-credits-' + localDay() + '.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
 
   /* ============================================================
@@ -4068,6 +4328,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     document.getElementById('nav-count-sent').textContent = state.commsLog.length;
     document.getElementById('nav-count-resp').textContent = state.responsesLog.length;
     document.getElementById('nav-count-esc').textContent = state.invoices.filter(i=>i.escalated).length;
+    const ncc = document.getElementById('nav-count-credits'); if (ncc) ncc.textContent = (state.unapplied || []).length || '';
     // Counts the month/collected tabs used to set while painting themselves;
     // those tabs now paint only when opened, so keep their badges fresh here.
     try {
@@ -5912,6 +6173,8 @@ function todoRowHTML(item, num, priority){
 
     document.getElementById('collected-all-kpis').innerHTML = `
       <div class="kpi"><div class="label">Amount Collected${collectedFilter.period === 'all' ? ' (All-Time)' : ' (Selected Period)'}</div><div class="value">$${total.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="sub">${payments.length} payment${payments.length===1?'':'s'} recorded</div></div>
+      <div class="kpi"><div class="label">Payments Received</div><div class="value">${payments.length.toLocaleString()}</div><div class="sub">${payments.length ? 'avg. ' + money2(total / payments.length) + ' per payment' : 'none in window'}</div></div>
+      <div class="kpi"><div class="label">Largest Payment</div><div class="value">${money2(payments.reduce(function(m, p){ return Math.max(m, Number(p.amount || 0)); }, 0))}</div><div class="sub">${(function(){ const big = payments.slice().sort(function(a, b){ return Number(b.amount || 0) - Number(a.amount || 0); })[0]; return big ? hEsc(big.invoiceName || '') + (big.paidDate ? ' \u00b7 ' + fmtDate(big.paidDate) : '') : '\u2014'; })()}</div></div>
       <div class="kpi"><div class="label">DSO &mdash; Last 90 Days</div><div class="value">${dso === null ? 'N/A' : dso}</div><div class="sub">${dso === null ? 'no payments in window' : 'avg. days, invoice to payment'}</div></div>
     `;
 
@@ -8166,6 +8429,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
           (known ? '<span class="hist-link" onclick="openAccountHistory(' + Number(idNum) + ')">View history</span>' : '')) : '<span style="color:var(--slate-soft);">—</span>';
         return '<tr><td style="white-space:nowrap;">' + hEsc(hDateTime(e.at)) + '</td><td>' + who + '</td><td><span class="act-type ' + hEsc(e.type || '') + '">' + hEsc(ACT_TYPE_LABELS[e.type] || e.type || 'Activity') + '</span></td><td class="act-acct">' + acct + '</td><td class="act-detail">' + hEsc(e.summary || '') + '</td></tr>';
       }).join('') + '</tbody></table>';
+    try { renderTabKpis('activity'); } catch(e) {}
   }
 
   /* ============================================================
@@ -9631,6 +9895,7 @@ try {
 const res = await fetch('/api/integrations', { credentials: 'include' });
 const data = res.ok ? await res.json() : null;
 state.realIntegrations = (data && data.ok && data.integrations) || [];
+try { renderTabKpis('integrations'); } catch (e) {}
 } catch (err) { state.realIntegrations = []; }
 // Even when the list is not available to this role, the request card still is.
 renderRealIntegrations();
