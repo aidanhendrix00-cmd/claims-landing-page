@@ -4222,6 +4222,17 @@ if (h.external_id && !keep[h.external_id]) stale.push(h);
 if (crmTotal !== null && crmTotal !== undefined && heldTotal - crmTotal > 0.005) {
 for (const h of held) if (!h.external_id) stale.push(h);
 }
+// A payment reversed in QuickBooks can keep its line on the payment while the
+// invoice balance reopens, so the lines we still hold can add up to more than
+// QuickBooks says was applied. The invoice balance is the truth: the newest
+// lines come off until what we hold fits it.
+if (crmTotal !== null && crmTotal !== undefined) {
+const staleIds = {}; for (const h of stale) staleIds[h.id] = true;
+let remaining = held.filter(function (h) { return !staleIds[h.id]; });
+let remainingTotal = 0; for (const h of remaining) remainingTotal = round2(remainingTotal + Number(h.amount || 0));
+remaining.sort(function (x, y) { return String(y.deposited_on || '').localeCompare(String(x.deposited_on || '')) || (Number(y.id) - Number(x.id)); });
+for (const h of remaining) { if (remainingTotal - crmTotal <= 0.005) break; stale.push(h); remainingTotal = round2(remainingTotal - Number(h.amount || 0)); }
+}
 for (const h of stale) {
 await pgDelete(env, 'invoice_payments', 'id=' + pgEq(h.id));
 paid = round2(Math.max(0, paid - Number(h.amount || 0)));
