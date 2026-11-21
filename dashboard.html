@@ -152,6 +152,12 @@
   .qs-btn.qs-legal.on .qs-dot{background:#fff;}
   .qs-btn.qs-demand.on{background:#9A3F00;border-color:#7A3200;color:#fff;}
   .qs-btn.qs-demand.on .qs-dot{background:#fff;}
+  .qs-btn.qs-creditmemo .qs-dot{background:#C7792B;}
+  .qs-btn.qs-creditmemo.on{background:#9A3F00;border-color:#7A3200;color:#fff;}
+  .qs-btn.qs-creditmemo.on .qs-dot{background:#fff;}
+  .qs-btn.qs-baddebt .qs-dot{background:#4A5561;}
+  .qs-btn.qs-baddebt.on{background:#2B3440;border-color:#1B2230;color:#fff;}
+  .qs-btn.qs-baddebt.on .qs-dot{background:#fff;}
   .qs-btn.on .qs-meta{color:rgba(255,255,255,.85);}
   .qs-btn.on .qs-clear{display:inline;}
   .qs-btn .qs-clear{display:none;font-size:11px;opacity:.85;margin-left:2px;}
@@ -840,6 +846,7 @@
   .chip.chip-fu.active{background:#B54708;border-color:#B54708;color:#fff;}
   .chip.chip-esc.active{background:#B42318;border-color:#B42318;color:#fff;}
   .chip.chip-partial.active{background:#8A4B18;border-color:#8A4B18;color:#fff;}
+  .chip.chip-baddebt.active{background:#2B3440;border-color:#2B3440;color:#fff;}
   .accts-partial-lbl{font-size:12px;color:var(--slate);display:flex;align-items:center;gap:5px;}
 </style>
 
@@ -990,6 +997,8 @@
             <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="demand" title="A demand letter has been sent">Demand letter sent</div>
             <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="lien" title="A lien is filed on this job">Lien filed</div>
             <div class="chip chip-sens" data-feat="claimsOps" style="display:none;" data-payer="sensitive" title="Sensitive customers - automated follow-ups paused">Sensitive</div>
+            <div class="chip chip-partial" data-feat="claimsOps" style="display:none;" data-payer="creditmemo" title="Customer has an open credit memo in QuickBooks">Credit memo</div>
+            <div class="chip chip-baddebt" data-feat="claimsOps" style="display:none;" data-payer="baddebt" title="Written off as bad debt in QuickBooks">Bad debt</div>
           </div>
         </div>
       </div>
@@ -998,6 +1007,8 @@
         <span class="qs-title">Quick view</span>
         <button type="button" class="qs-btn qs-legal" id="qs-queue-legal" onclick="quickStatus('queue','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-demand" id="qs-queue-demand" onclick="quickStatus('queue','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-creditmemo" id="qs-queue-creditmemo" onclick="quickStatus('queue','creditmemo')" title="Show only customers with an open credit memo in QuickBooks (not yet applied to an invoice). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Credit memo</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-baddebt" id="qs-queue-baddebt" onclick="quickStatus('queue','baddebt')" title="Show only invoices written off as bad debt in QuickBooks. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Bad debt</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
       <div class="queue" id="queue"></div>
     </section>
@@ -1035,6 +1046,8 @@
         <span class="qs-title">Quick view</span>
         <button type="button" class="qs-btn qs-legal" id="qs-accounts-legal" onclick="quickStatus('accounts','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-demand" id="qs-accounts-demand" onclick="quickStatus('accounts','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-creditmemo" id="qs-accounts-creditmemo" onclick="quickStatus('accounts','creditmemo')" title="Show only customers with an open credit memo in QuickBooks (not yet applied to an invoice). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Credit memo</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-baddebt" id="qs-accounts-baddebt" onclick="quickStatus('accounts','baddebt')" title="Show only invoices written off as bad debt in QuickBooks. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Bad debt</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
       <div id="accts-hint" style="margin:-6px 0 10px;font-size:12px;color:var(--slate);"></div>
       <div id="accounts-wrap"></div>
@@ -1101,6 +1114,8 @@
         <span class="qs-title">Quick view</span>
         <button type="button" class="qs-btn qs-legal" id="qs-sheet-legal" onclick="quickStatus('sheet','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-demand" id="qs-sheet-demand" onclick="quickStatus('sheet','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-creditmemo" id="qs-sheet-creditmemo" onclick="quickStatus('sheet','creditmemo')" title="Show only customers with an open credit memo in QuickBooks (not yet applied to an invoice). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Credit memo</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-baddebt" id="qs-sheet-baddebt" onclick="quickStatus('sheet','baddebt')" title="Show only invoices written off as bad debt in QuickBooks. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Bad debt</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
       <div class="hint" style="margin-bottom:12px;">* next to a projected payment date means it falls outside the 3-week window (This Week through Following Week).</div>
       <div class="sheet-fs-bar" id="sheet-fs-bar"><span>Accounts Receivable &mdash; full screen</span><button type="button" class="btn-small" onclick="sheetFullscreen(false)">Exit (Esc)</button></div>
@@ -4605,6 +4620,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     ['demand', 'Demand letter sent'],
     ['lien', 'Lien filed'],
     ['sensitive', 'Sensitive customers'],
+    ['creditmemo', 'Credit memo on account (QuickBooks)'],
     ['baddebt', 'Bad debt (written off)']
   ];
   const STATUS_SHOW_LABELS = {}; STATUS_SHOW_OPTS.forEach(function(o){ STATUS_SHOW_LABELS[o[0]] = o[1]; });
@@ -4618,6 +4634,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       case 'demand': return !!inv.demandLetterSentAt;
       case 'lien': return !!inv.lienFiled;
       case 'sensitive': return isSensitive(inv);
+      case 'creditmemo': { const u = unappliedSummary(inv.customerName || inv.name); return !!(u && u.cms); }
       case 'baddebt': return isBadDebt(inv);
       default: return true;
     }
@@ -4921,15 +4938,20 @@ function todoRowHTML(item, num, priority){
     box.style.display = '';
     const open = activeInvoices();
     const cur = quickStatusCurrent(view);
-    [['legal', function(inv){ return isDoNotContact(inv); }], ['demand', function(inv){ return !!inv.demandLetterSentAt; }]].forEach(function(pair){
+    const writtenOff = function(inv){ return Number(inv.creditAmount || 0) || Math.max(0, Number(inv.amount || 0) - Number(inv.amountPaid || 0)); };
+    [['legal', function(inv){ return isDoNotContact(inv); }], ['demand', function(inv){ return !!inv.demandLetterSentAt; }],
+     ['creditmemo', function(inv){ return statusShowMatches(inv, 'creditmemo'); }], ['baddebt', isBadDebt]].forEach(function(pair){
       const key = pair[0], test = pair[1];
       const btn = document.getElementById('qs-' + view + '-' + key); if(!btn) return;
-      const rows = open.filter(test);
+      // Written-off invoices are closed in QuickBooks, so they are counted from every invoice, not just the open ones.
+      const rows = (key === 'baddebt' ? visibleInvoices() : open).filter(test);
       let bal = 0; const customers = {};
-      rows.forEach(function(inv){ bal += balanceDue(inv); customers[String(inv.customerName || inv.name || '').toLowerCase()] = 1; });
+      rows.forEach(function(inv){ bal += (key === 'baddebt' ? writtenOff(inv) : balanceDue(inv)); customers[acctKey(inv.customerName || inv.name)] = 1; });
+      if (key === 'creditmemo') { bal = 0; Object.keys(customers).forEach(function(k){ const u = unappliedSummary(k); if (u) bal += u.cmTotal; }); }
       const n = view === 'accounts' ? Object.keys(customers).length : rows.length;
       const unit = view === 'accounts' ? (n === 1 ? ' account' : ' accounts') : (n === 1 ? ' invoice' : ' invoices');
-      btn.querySelector('.qs-meta').textContent = n + unit + ' \u00b7 $' + bal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const amtWord = key === 'baddebt' ? ' written off' : (key === 'creditmemo' ? ' in credit memos' : '');
+      btn.querySelector('.qs-meta').textContent = n + unit + ' \u00b7 $' + bal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + amtWord;
       btn.classList.toggle('on', cur === key);
       btn.setAttribute('aria-pressed', cur === key ? 'true' : 'false');
     });
@@ -5008,7 +5030,8 @@ function todoRowHTML(item, num, priority){
     const payerFilter = currentFilterPayer();
     const sortVal = document.getElementById('sort').value;
 
-    let items = activeInvoices().filter(inv => !inv.escalated).filter(inv => {
+    const base = payerFilter === 'baddebt' ? visibleInvoices().filter(isBadDebt) : activeInvoices().filter(inv => !inv.escalated);
+    let items = base.filter(inv => {
       const matchesSearch = !searchVal || [inv.name, inv.meta, inv.invoiceNumber, inv.jobNumber, inv.claimNumber, inv.contact].some(v => String(v || '').toLowerCase().includes(searchVal));
       const special = payerFilter === 'follow-up' || payerFilter === 'flagged' || !!STATUS_SHOW_LABELS[payerFilter];
       const matchesPayer = payerFilter === 'all' || special || inv.payer === payerFilter;
@@ -5322,7 +5345,7 @@ function todoRowHTML(item, num, priority){
   // state so they survive a refresh; the inputs are only written when they
   // differ, so typing is never interrupted by a background render.
   const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'days-desc': 1, 'days-asc': 1, 'followup-desc': 1, 'followup-asc': 1, 'collections': 1, 'collections-last': 1 };
-  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, overdue: 1, legal: 1, demand: 1, lien: 1, sensitive: 1, baddebt: 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
+  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, overdue: 1, legal: 1, demand: 1, lien: 1, sensitive: 1, creditmemo: 1, baddebt: 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
   function sheetSearchValue(){
     const box = document.getElementById('sheet-search');
     if (!box) return String(state.sheetSearch || '');
@@ -5443,7 +5466,7 @@ function todoRowHTML(item, num, priority){
     const foot = document.getElementById('sheet-foot');
 
     syncSheetControls();
-    const openRows = visibleInvoices().filter(i => i.jobStatus !== 'paid').filter(matchesPaymentDateFilter);
+    const openRows = ((state.sheetShow || 'all') === 'baddebt' ? visibleInvoices().filter(isBadDebt) : visibleInvoices().filter(i => i.jobStatus !== 'paid')).filter(matchesPaymentDateFilter);
     const rows = sortSheetRows(openRows.filter(matchesSheetFilters));
     const countEl = document.getElementById('sheet-count');
     if (countEl) countEl.textContent = rows.length === openRows.length ? (rows.length + ' invoice' + (rows.length === 1 ? '' : 's')) : (rows.length + ' of ' + openRows.length + ' invoices');
@@ -6766,8 +6789,8 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       ? (hasQb ? 'Invoices and customers sync automatically from your connected QuickBooks / Intuit Enterprise Suite companies; use Pull to fetch the latest right now.' : 'Connect QuickBooks or Intuit Enterprise Suite on the Integrations tab and every invoice and customer will appear here automatically.')
       : 'Demo workspace — accounts are grouped from the sample invoices.';
     let groups = accountGroups(false);
-    if(!f.includePaid) groups = groups.filter(function(g){ return g.openCount > 0; });
     const acctStatus = statusShowValue(f.partialOnly ? 'partial' : f.status);
+    if(!f.includePaid && acctStatus !== 'baddebt' && acctStatus !== 'creditmemo') groups = groups.filter(function(g){ return g.openCount > 0; });
     if(acctStatus !== 'all' && claimsOps()) groups = groups.filter(function(g){ return g.invoices.some(function(inv){ return statusShowMatches(inv, acctStatus); }); });
     const q = f.search.trim().toLowerCase();
     if(q) groups = groups.filter(function(g){ return g.name.toLowerCase().indexOf(q) !== -1 || Object.keys(g.biz).join(' ').toLowerCase().indexOf(q) !== -1 || String(g.contact || '').toLowerCase().indexOf(q) !== -1; });
