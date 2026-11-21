@@ -3604,10 +3604,18 @@ async function loadRealAccountsNow(){
           const dx = String(x.deposited_on || x.created_at || ''), dy = String(y.deposited_on || y.created_at || '');
           return dx < dy ? -1 : (dx > dy ? 1 : (Number(x.id) - Number(y.id)));
         });
+        // An invoice mirrored from QuickBooks / IES keeps the balance the
+        // accounting system reports. A payment line that would take the
+        // itemised total past that balance was reversed, voided or re-applied
+        // there (QuickBooks keeps the line on the payment), so it stays off
+        // Collected and the invoice stays open.
+        const synced = !!a.externalId;
+        const cap = synced ? +Number(a.paidAmount || 0).toFixed(2) : Infinity;
         let running = 0;
         rows.forEach(function(r){
           const amt = Number(r.amount || 0);
           if (!(amt > 0)) return;
+          if (synced && running + amt > cap + 0.005) return;
           running = +(running + amt).toFixed(2);
           paymentsLog.push({
             id: 'p' + r.id,
