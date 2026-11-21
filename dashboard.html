@@ -139,13 +139,14 @@
   /* Quick status buttons under the filters (Revolve pack): one click shows
      the accounts Sent to Legal or with a demand letter out; a second click
      returns to the full list. The badges on each row stay as they are. */
-  .quick-status{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0 14px;}
+  .quick-status{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:10px 0 14px;}
   .quick-status .qs-title{grid-column:1/-1;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--slate-soft);margin-bottom:-2px;}
   .qs-btn{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:10px;row-gap:2px;align-items:center;min-width:0;padding:10px 14px 10px 12px;border-radius:8px;border:1.5px solid var(--line);background:var(--panel);cursor:pointer;font:inherit;color:var(--ink);transition:all .15s ease;text-align:left;}
   .qs-btn .qs-dot{grid-column:1;grid-row:1/3;width:10px;height:10px;border-radius:50%;flex-shrink:0;}
   .qs-btn .qs-label{grid-column:2;grid-row:1;font-weight:700;font-size:13px;letter-spacing:.01em;}
   .qs-btn .qs-meta{grid-column:2/4;grid-row:2;font-size:12px;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  @media (max-width:1180px){ .quick-status{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (max-width:1380px){ .quick-status{grid-template-columns:repeat(3,minmax(0,1fr));} }
+  @media (max-width:900px){ .quick-status{grid-template-columns:repeat(2,minmax(0,1fr));} }
   .qs-btn.qs-legal .qs-dot{background:#B42318;}
   .qs-btn.qs-demand .qs-dot{background:#D97706;}
   .qs-btn:hover{border-color:var(--slate-soft);}
@@ -153,6 +154,9 @@
   .qs-btn.qs-legal.on .qs-dot{background:#fff;}
   .qs-btn.qs-demand.on{background:#9A3F00;border-color:#7A3200;color:#fff;}
   .qs-btn.qs-demand.on .qs-dot{background:#fff;}
+  .qs-btn.qs-unapplied .qs-dot{background:#2F7A6B;}
+  .qs-btn.qs-unapplied.on{background:#1F5F52;border-color:#174A40;color:#fff;}
+  .qs-btn.qs-unapplied.on .qs-dot{background:#fff;}
   .qs-btn.qs-creditmemo .qs-dot{background:#C7792B;}
   .qs-btn.qs-creditmemo.on{background:#9A3F00;border-color:#7A3200;color:#fff;}
   .qs-btn.qs-creditmemo.on .qs-dot{background:#fff;}
@@ -565,7 +569,9 @@
   .esc-opt .t{font-size:13px;font-weight:600;color:var(--ink);}
   .esc-opt .d{font-size:11.5px;color:var(--slate);margin-top:2px;}
   .esc-opt select{margin-top:8px;width:100%;font-size:13px;padding:7px 9px;border-radius:7px;border:1px solid var(--line);font-family:var(--font-body);}
-  .badge.unapplied{background:#FFF1E0;color:#9A3F00;border-color:#F5C58A;}
+  .badge.unapplied{background:#E6F4F1;color:#1F5F52;border-color:#9CCFC3;}
+  .badge.creditmemo{background:#FFF1E0;color:#9A3F00;border-color:#F5C58A;}
+  .badge.postdated{background:#EEF2F7;color:#2B3440;border-color:#C9D2DE;}
   .unapplied-sub-cell{display:block;font-size:10.5px;color:#9A3F00;white-space:nowrap;margin-top:2px;}
   .unapplied-tag{font-size:11px;color:#9A3F00;background:#FFF1E0;border:1px solid #F5C58A;border-radius:4px;padding:1px 6px;display:inline-block;margin-top:3px;white-space:nowrap;}
   .acct-kpi.unapplied .v{color:#9A3F00;}
@@ -998,6 +1004,7 @@
             <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="demand" title="A demand letter has been sent">Demand letter sent</div>
             <div class="chip chip-esc" data-feat="claimsOps" style="display:none;" data-payer="lien" title="A lien is filed on this job">Lien filed</div>
             <div class="chip chip-sens" data-feat="claimsOps" style="display:none;" data-payer="sensitive" title="Sensitive customers - automated follow-ups paused">Sensitive</div>
+            <div class="chip chip-partial" data-feat="claimsOps" style="display:none;" data-payer="unapplied" title="Customer has an unapplied payment in QuickBooks">Unapplied payment</div>
             <div class="chip chip-partial" data-feat="claimsOps" style="display:none;" data-payer="creditmemo" title="Customer has an open credit memo in QuickBooks">Credit memo</div>
             <div class="chip chip-baddebt" data-feat="claimsOps" style="display:none;" data-payer="baddebt" title="Written off as bad debt in QuickBooks">Bad debt</div>
           </div>
@@ -1008,6 +1015,7 @@
         <span class="qs-title">Quick view</span>
         <button type="button" class="qs-btn qs-legal" id="qs-queue-legal" onclick="quickStatus('queue','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-demand" id="qs-queue-demand" onclick="quickStatus('queue','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-unapplied" id="qs-queue-unapplied" onclick="quickStatus('queue','unapplied')" title="Show only customers with a payment QuickBooks has received but not applied to an invoice. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Unapplied payment</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-creditmemo" id="qs-queue-creditmemo" onclick="quickStatus('queue','creditmemo')" title="Show only customers with an open credit memo in QuickBooks (not yet applied to an invoice). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Credit memo</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-baddebt" id="qs-queue-baddebt" onclick="quickStatus('queue','baddebt')" title="Show only invoices written off as bad debt in QuickBooks. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Bad debt</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
@@ -1047,6 +1055,7 @@
         <span class="qs-title">Quick view</span>
         <button type="button" class="qs-btn qs-legal" id="qs-accounts-legal" onclick="quickStatus('accounts','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-demand" id="qs-accounts-demand" onclick="quickStatus('accounts','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-unapplied" id="qs-accounts-unapplied" onclick="quickStatus('accounts','unapplied')" title="Show only customers with a payment QuickBooks has received but not applied to an invoice. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Unapplied payment</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-creditmemo" id="qs-accounts-creditmemo" onclick="quickStatus('accounts','creditmemo')" title="Show only customers with an open credit memo in QuickBooks (not yet applied to an invoice). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Credit memo</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-baddebt" id="qs-accounts-baddebt" onclick="quickStatus('accounts','baddebt')" title="Show only invoices written off as bad debt in QuickBooks. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Bad debt</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
@@ -1115,6 +1124,7 @@
         <span class="qs-title">Quick view</span>
         <button type="button" class="qs-btn qs-legal" id="qs-sheet-legal" onclick="quickStatus('sheet','legal')" title="Show only accounts Sent to Legal (do not contact). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Sent to Legal</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-demand" id="qs-sheet-demand" onclick="quickStatus('sheet','demand')" title="Show only accounts with a demand letter sent. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Demand letter sent</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
+        <button type="button" class="qs-btn qs-unapplied" id="qs-sheet-unapplied" onclick="quickStatus('sheet','unapplied')" title="Show only customers with a payment QuickBooks has received but not applied to an invoice. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Unapplied payment</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-creditmemo" id="qs-sheet-creditmemo" onclick="quickStatus('sheet','creditmemo')" title="Show only customers with an open credit memo in QuickBooks (not yet applied to an invoice). Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Credit memo</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
         <button type="button" class="qs-btn qs-baddebt" id="qs-sheet-baddebt" onclick="quickStatus('sheet','baddebt')" title="Show only invoices written off as bad debt in QuickBooks. Click again to show everything."><span class="qs-dot"></span><span class="qs-label">Bad debt</span><span class="qs-meta"></span><span class="qs-clear">&times; clear</span></button>
       </div>
@@ -1127,7 +1137,7 @@
               <th>Invoice #</th><th>Job #</th><th>Invoice Date</th><th>Account / Owner</th><th>Office</th><th>Department</th><th>Category</th><th>Amount</th>
               <th>Job Status</th><th>Currently With</th><th>Claim #</th><th title="Public Adjuster involved on this claim">PA</th><th>NOIL</th><th>Lien</th><th>Last Contact</th><th>Responded?</th><th>Response Summary</th>
               <th>Recent CRM Update</th>
-              <th>WA Sent</th><th>Date of WA Signature</th><th>COS Sent</th><th>Date of COS Signature</th><th>Projected Payment Date</th><th>Payment Type</th>
+              <th>WA Sent</th><th>Date of WA Signature</th><th data-feat-hide="claimsOps">COS Sent</th><th data-feat-hide="claimsOps">Date of COS Signature</th><th>Projected Payment Date</th><th>Payment Type</th>
             </tr>
           </thead>
           <tbody id="sheet-body"></tbody>
@@ -1571,6 +1581,7 @@
     <div class="drawer-sub" id="acct-panel-sub"></div>
     <div class="acct-kpis" id="acct-panel-kpis"></div>
     <div id="acct-panel-unapplied"></div>
+    <div id="acct-panel-sensitive"></div>
     <div class="drawer-section">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
         <h4 style="margin:0;">Invoices on this account</h4>
@@ -1777,7 +1788,7 @@
           <option value="Invoice">Invoice</option>
           <option value="Contract">Contract</option>
           <option value="WorkAuth">Work Authorization</option>
-          <option value="COS">Certificate of Satisfaction</option>
+          <option value="COS" data-feat-hide="claimsOps">Certificate of Satisfaction</option>
           <option value="COI">COI (Certificate of Insurance)</option>
           <option value="W9">W-9</option>
           <option value="Other">Other</option>
@@ -1952,6 +1963,8 @@
   .hist-table td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
   .hist-empty{font-size:12.5px;color:var(--slate-soft);padding:8px 0;}
   .hist-link{color:var(--ink);text-decoration:underline;cursor:pointer;}
+  .acct-sens{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:10px 0 4px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12.5px;}
+  .acct-sens .acct-sens-sub{display:block;font-weight:400;color:var(--slate);font-size:12px;margin-top:2px;}
   .acct-link{color:inherit;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(47,122,107,.45);text-decoration-thickness:1px;text-underline-offset:3px;background-image:linear-gradient(var(--teal),var(--teal));background-repeat:no-repeat;background-size:0% 2px;background-position:0 100%;transition:background-size .22s cubic-bezier(.2,.8,.2,1),color .15s ease,text-decoration-color .15s ease;}
   .acct-link:hover,.acct-link:focus-visible{color:var(--teal);text-decoration-color:transparent;background-size:100% 2px;outline:none;}
 </style>
@@ -3581,6 +3594,10 @@ async function loadRealAccountsNow(){
           creditAmount: Number(a.creditAmount || 0)
         };
         if (isPaid && inv.amountPaid + 0.005 < inv.amount) inv.amountPaid = inv.amount;
+        // An invoice from the accounting system is listed only once it has a
+        // date, and only from that date on (the server already holds back
+        // future-dated invoices; this keeps the rule even if one slips through).
+        if (a.externalId && (!inv.invoiceDate || String(inv.invoiceDate).slice(0, 10) > localDay())) return;
         invoices.push(inv);
       });
       pmark('accounts-mapped');
@@ -3611,11 +3628,20 @@ async function loadRealAccountsNow(){
         // Collected and the invoice stays open.
         const synced = !!a.externalId;
         const cap = synced ? +Number(a.paidAmount || 0).toFixed(2) : Infinity;
-        let running = 0;
+        // A payment dated after today is post-dated (a check or ACH entered
+        // with its future clearing date): it is not money received yet, so it
+        // stays off every list and total until that day, the invoice stays
+        // open, and no follow-up goes out while it is on file. A row with no
+        // date at all is never listed.
+        const todayDay = localDay();
+        let running = 0, postDatedTotal = 0, postDatedOn = null;
         rows.forEach(function(r){
           const amt = Number(r.amount || 0);
           if (!(amt > 0)) return;
-          if (synced && running + amt > cap + 0.005) return;
+          if (synced && running + postDatedTotal + amt > cap + 0.005) return;
+          const rowDay = dayOf(r.deposited_on || r.created_at);
+          if (!rowDay) return;
+          if (rowDay > todayDay) { postDatedTotal = +(postDatedTotal + amt).toFixed(2); if (!postDatedOn || rowDay < postDatedOn) postDatedOn = rowDay; return; }
           running = +(running + amt).toFixed(2);
           paymentsLog.push({
             id: 'p' + r.id,
@@ -3645,6 +3671,11 @@ async function loadRealAccountsNow(){
         // above (older records, or a balance the CRM reported in bulk) still
         // belongs in Collected, dated to the payment date it gave us.
         if (inv.amountPaid + 0.005 < running) inv.amountPaid = running;
+        if (postDatedTotal > 0.005) {
+          inv.postDatedAmount = postDatedTotal; inv.postDatedOn = postDatedOn;
+          inv.amountPaid = Math.max(0, +(inv.amountPaid - postDatedTotal).toFixed(2));
+          if (inv.jobStatus === 'paid' && inv.amountPaid + 0.005 < inv.amount) inv.jobStatus = 'in_ar';
+        }
         const unitemised = +(inv.amountPaid - running).toFixed(2);
         if (unitemised > 0.005) {
           paymentsLog.push({
@@ -4057,7 +4088,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
         { label: 'Open balance', value: money0(groups.reduce(function(a, g){ return a + g.openTotal; }, 0)), sub: 'across those accounts' },
         { label: 'Average account age', value: avgAge + 'd', sub: over60.length + ' account' + (over60.length === 1 ? '' : 's') + ' averaging 60+ days', cls: over60.length ? 'up' : '' }
       ];
-      if (claimsOps()) { const u = (state.unapplied || []); const t = u.reduce(function(a, x){ return a + Number(x.amount || 0); }, 0); items.push({ label: 'Unapplied in QuickBooks', value: money0(t), sub: u.length + ' payment' + (u.length === 1 ? '' : 's') + ' and credit memos, not yet applied', title: 'Money QuickBooks holds for customers that is not applied to any invoice' }); }
+      if (claimsOps()) { const u = (state.unapplied || []); const t = u.reduce(function(a, x){ return a + Number(x.amount || 0); }, 0); items.push({ label: 'Unapplied payments & credit memos', value: money0(t), sub: u.filter(function(x){ return x.kind === 'payment'; }).length + ' payments, ' + u.filter(function(x){ return x.kind !== 'payment'; }).length + ' credit memos, not applied in QuickBooks', title: 'Money QuickBooks holds for customers that is not applied to any invoice' }); }
       else { const pc = open.filter(isPartiallyPaid).length; items.push({ label: 'Partially paid', value: pc.toLocaleString(), sub: 'open invoices with a payment on them' }); }
     } else if (name === 'sheet') {
       const wk = weekRange();
@@ -4095,8 +4126,8 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     } else if (name === 'automations') {
       const auto = state.commsLog.filter(function(c){ return c.source === 'automation' && invoiceDeptMatches(c.invoiceId); });
       const month = auto.filter(function(c){ return inMonth(c.sentTs || c.sentAt); });
-      const cadence = open.filter(function(i){ return !i.escalated && !isDoNotContact(i); });
-      const due = open.filter(function(i){ return !!followUpReminder(i); });
+      const cadence = open.filter(function(i){ return !i.escalated && !isDoNotContact(i) && !paymentPending(i); });
+      const due = open.filter(function(i){ return !paymentPending(i) && !!followUpReminder(i); });
       items = [
         { label: 'Autonomous sends — ' + monthLabel(), value: (month.length + state.automationLog.filter(function(a){ return inMonth(a.sentAt); }).length).toLocaleString(), sub: (auto.length + state.automationLog.length).toLocaleString() + ' all time' },
         { label: 'In active cadence', value: cadence.length.toLocaleString(), sub: 'open invoices the cadence is working' },
@@ -4629,6 +4660,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     ['demand', 'Demand letter sent'],
     ['lien', 'Lien filed'],
     ['sensitive', 'Sensitive customers'],
+    ['unapplied', 'Unapplied payment on account (QuickBooks)'],
     ['creditmemo', 'Credit memo on account (QuickBooks)'],
     ['baddebt', 'Bad debt (written off)']
   ];
@@ -4644,6 +4676,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       case 'lien': return !!inv.lienFiled;
       case 'sensitive': return isSensitive(inv);
       case 'creditmemo': { const u = unappliedSummary(inv.customerName || inv.name); return !!(u && u.cms); }
+      case 'unapplied': { const u = unappliedSummary(inv.customerName || inv.name); return !!(u && u.pays); }
       case 'baddebt': return isBadDebt(inv);
       default: return true;
     }
@@ -4687,9 +4720,14 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   // Escalated (out of the cadence), Demand letter sent, NOIL sent, Lien filed,
   // Sent to Legal (DNC). Used on queue cards, the A/R ledger, Accounts,
   // Collected, Escalations and the invoice drawer so nothing is missed.
+  // A post-dated payment on file that covers the open balance: the invoice
+  // stays open until the payment date, and nobody should be chasing it.
+  function paymentPending(inv){ return !!(inv && Number(inv.postDatedAmount || 0) > 0.005 && balanceDue(inv) <= Number(inv.postDatedAmount) + 0.005); }
+  function postDatedTitle(inv){ return 'A payment of $' + Number(inv.postDatedAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + ' is entered in QuickBooks dated ' + fmtDate(inv.postDatedOn) + '. It counts as received on that day; until then the balance stays open and no follow-up goes out.'; }
   function escalationFlags(inv){
     const f = [];
     if (isSensitive(inv)) f.push({ cls: 'sensitive', text: 'SENSITIVE', title: sensitiveTitle(inv) });
+    if (Number(inv.postDatedAmount || 0) > 0.005) f.push({ cls: 'postdated', text: 'POST-DATED PAYMENT $' + Number(inv.postDatedAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + ' \u00b7 ' + fmtDate(inv.postDatedOn), title: postDatedTitle(inv) });
     if (isBadDebt(inv)) f.push({ cls: 'baddebt', text: 'BAD DEBT', title: 'Written off as bad debt in QuickBooks' + (inv.badDebtAt ? ' ' + fmtDate(inv.badDebtAt) : '') + (inv.creditAmount ? ' - $' + Number(inv.creditAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + ' credited' : '') });
     if (inv.escalated) f.push({ cls: 'escalated', text: 'ESCALATED', title: 'Escalated - out of the automated cadence' + (inv.notifiedName ? ' (' + inv.notifiedName + ' notified)' : '') });
     if (inv.demandLetterSentAt) f.push({ cls: 'esc-demand', text: 'DEMAND LETTER SENT', title: 'Demand letter sent ' + fmtDate(inv.demandLetterSentAt) });
@@ -4790,7 +4828,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
 const wrap = document.getElementById('todo-list');
 if(!wrap) return;
 // Accounts sent to Legal are not anyone's follow-up to do.
-const open = activeInvoices().filter(inv => !isDoNotContact(inv));
+const open = activeInvoices().filter(inv => !isDoNotContact(inv) && !paymentPending(inv));
 const items = open.map(inv => {
 const cp = nextCadenceCheckpoint(inv);
 const due = inv.escalated || !cp || (inv.days >= cp.day);
@@ -4949,19 +4987,20 @@ function todoRowHTML(item, num, priority){
     const cur = quickStatusCurrent(view);
     const writtenOff = function(inv){ return Number(inv.creditAmount || 0) || Math.max(0, Number(inv.amount || 0) - Number(inv.amountPaid || 0)); };
     [['legal', function(inv){ return isDoNotContact(inv); }], ['demand', function(inv){ return !!inv.demandLetterSentAt; }],
+     ['unapplied', function(inv){ return statusShowMatches(inv, 'unapplied'); }],
      ['creditmemo', function(inv){ return statusShowMatches(inv, 'creditmemo'); }], ['baddebt', isBadDebt]].forEach(function(pair){
       const key = pair[0], test = pair[1];
       const btn = document.getElementById('qs-' + view + '-' + key); if(!btn) return;
       // Written-off invoices are closed in QuickBooks, so they are counted from every invoice, not just the open ones.
       // On the Accounts tab the credit-memo view also keeps customers with nothing open (that is where the money sits), so count them the same way.
-      const rows = (key === 'baddebt' || (key === 'creditmemo' && view === 'accounts') ? visibleInvoices() : open).filter(test);
+      const rows = (key === 'baddebt' || ((key === 'creditmemo' || key === 'unapplied') && view === 'accounts') ? visibleInvoices() : open).filter(test);
       let bal = 0; const customers = {};
       rows.forEach(function(inv){ bal += (key === 'baddebt' ? writtenOff(inv) : balanceDue(inv)); customers[acctKey(inv.customerName || inv.name)] = 1; });
-      if (key === 'creditmemo') { bal = 0; Object.keys(customers).forEach(function(k){ const u = unappliedSummary(k); if (u) bal += u.cmTotal; }); }
+      if (key === 'creditmemo' || key === 'unapplied') { bal = 0; Object.keys(customers).forEach(function(k){ const u = unappliedSummary(k); if (u) bal += (key === 'creditmemo' ? u.cmTotal : u.payTotal); }); }
       const n = view === 'accounts' ? Object.keys(customers).length : rows.length;
       const unit = view === 'accounts' ? (n === 1 ? ' account' : ' accounts') : (n === 1 ? ' invoice' : ' invoices');
-      const amtWord = key === 'baddebt' ? ' written off' : (key === 'creditmemo' ? ' in credit memos' : '');
-      btn.querySelector('.qs-meta').textContent = n + unit + ' \u00b7 $' + bal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + amtWord;
+      const amtWord = key === 'baddebt' ? ' written off' : '';
+      btn.querySelector('.qs-meta').textContent = n.toLocaleString() + unit + ' \u00b7 $' + bal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + amtWord;
       btn.classList.toggle('on', cur === key);
       btn.setAttribute('aria-pressed', cur === key ? 'true' : 'false');
     });
@@ -5355,7 +5394,7 @@ function todoRowHTML(item, num, priority){
   // state so they survive a refresh; the inputs are only written when they
   // differ, so typing is never interrupted by a background render.
   const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'days-desc': 1, 'days-asc': 1, 'followup-desc': 1, 'followup-asc': 1, 'collections': 1, 'collections-last': 1 };
-  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, overdue: 1, legal: 1, demand: 1, lien: 1, sensitive: 1, creditmemo: 1, baddebt: 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
+  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, overdue: 1, legal: 1, demand: 1, lien: 1, sensitive: 1, unapplied: 1, creditmemo: 1, baddebt: 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
   function sheetSearchValue(){
     const box = document.getElementById('sheet-search');
     if (!box) return String(state.sheetSearch || '');
@@ -5520,8 +5559,8 @@ function todoRowHTML(item, num, priority){
         <td class="sf-update-cell">${latestSalesforceUpdateHTML(inv)}</td>
         <td style="text-align:center;"><input type="checkbox" ${inv.waSent?'checked':''} onchange="toggleFlagField(${inv.id}, 'waSent', this.checked)"/></td>
         <td><input type="date" value="${inv.waSignedDate || ''}" onchange="setSignatureDate(${inv.id}, 'waSignedDate', this.value)"/></td>
-        <td style="text-align:center;"><input type="checkbox" ${inv.cosSent?'checked':''} onchange="toggleFlagField(${inv.id}, 'cosSent', this.checked)"/></td>
-        <td><input type="date" value="${inv.cosSignedDate || ''}" onchange="setSignatureDate(${inv.id}, 'cosSignedDate', this.value)"/></td>
+        ${claimsOps() ? '' : `<td style="text-align:center;"><input type="checkbox" ${inv.cosSent?'checked':''} onchange="toggleFlagField(${inv.id}, 'cosSent', this.checked)"/></td>
+        <td><input type="date" value="${inv.cosSignedDate || ''}" onchange="setSignatureDate(${inv.id}, 'cosSignedDate', this.value)"/></td>`}
         <td><input type="date" value="${hEsc(inv.projectedPaymentDate || '')}" onchange="setProjectedDate(${inv.id}, this.value)"/>${paymentDateOutsideWindow(inv.projectedPaymentDate) ? ' <span class="pd-flag" title="Outside the 3-week window (This Week through Following Week)">*</span>' : ''}</td>
         <td>
           <select onchange="setPaymentType(${inv.id}, this.value)">
@@ -6030,7 +6069,7 @@ function todoRowHTML(item, num, priority){
       pg.rows.map(function(inv){
         const paidCash = Math.max(0, Number(inv.amountPaid || 0) - Number(inv.creditAmount || 0));
         const left = Math.max(0, Number(inv.amount || 0) - Number(inv.amountPaid || 0));
-        return '<tr><td><a href="#" onclick="event.preventDefault(); openDetail(' + JSON.stringify(inv.id) + ')"><b>' + hEsc(inv.name) + '</b></a>' + (inv.claimNumber ? '<div class="acct-sub">' + hEsc(inv.claimNumber) + '</div>' : '') + '</td>' +
+        return '<tr><td><b>' + acctLink(inv.id, inv.name) + '</b>' + (inv.claimNumber ? '<div class="acct-sub">' + hEsc(inv.claimNumber) + '</div>' : '') + '</td>' +
           '<td style="font-family:var(--font-mono);font-size:11.5px;">' + hEsc(inv.invoiceNumber || ('#' + inv.id)) + '</td><td>' + hEsc(deptLabel(inv)) + '</td>' + (showCity ? '<td>' + hEsc(OFFICE_LABELS[inv.officeLocation] || inv.officeLocation || '') + '</td>' : '') +
           '<td>' + (inv.invoiceDate ? fmtDate(inv.invoiceDate) : '—') + '</td><td>' + (inv.badDebtAt ? fmtDate(inv.badDebtAt) : '—') + '</td>' +
           '<td class="amt">$' + Number(inv.amount || 0).toLocaleString(undefined,{minimumFractionDigits:2}) + '</td>' +
@@ -6720,7 +6759,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     const u = unappliedSummary(inv.customerName || inv.name); if (!u) return '';
     const t = ' in QuickBooks for this customer, not applied to any invoice; not netted against the balance';
     return (u.pays ? '<span class="badge unapplied" title="' + u.pays + ' unapplied payment' + (u.pays === 1 ? '' : 's') + t + '">UNAPPLIED PAYMENTS: $' + u.payTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '') +
-           (u.cms ? '<span class="badge unapplied" title="' + u.cms + ' open credit memo' + (u.cms === 1 ? '' : 's') + t + '">CREDIT MEMOS: $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '');
+           (u.cms ? '<span class="badge creditmemo" title="' + u.cms + ' open credit memo' + (u.cms === 1 ? '' : 's') + t + '">CREDIT MEMOS: $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '');
   }
   function unappliedSubHTML(inv){
     if (!claimsOps() || !inv) return '';
@@ -6730,6 +6769,9 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
            (u.cms ? '<span class="unapplied-sub-cell" title="' + hEsc(tip) + '">Credit memos $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span>' : '');
   }
   function unappliedTotal(rows){ return rows.reduce(function(s, u){ return s + Number(u.amount || 0); }, 0); }
+  // The heading over a customer's unapplied money names what it is: a credit
+  // memo is never called an unapplied payment.
+  function unappliedHeadLabel(u){ return u.pays && u.cms ? 'Unapplied payments & credit memos' : (u.cms ? 'Credit memos (unapplied)' : 'Unapplied payments'); }
   function unappliedSummary(name){
     const rows = unappliedFor(name); if(!rows.length) return null;
     const payRows = rows.filter(function(u){ return u.kind === 'payment'; }), cmRows = rows.filter(function(u){ return u.kind !== 'payment'; });
@@ -6745,7 +6787,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
     const o = opts || {}; const max = o.max || rows.length; const compact = !!o.compact;
     const u = unappliedSummary(name);
     const sub = [u.pays ? 'Payments $' + u.payTotal.toLocaleString(undefined,{minimumFractionDigits:2}) : '', u.cms ? 'Credit memos $' + u.cmTotal.toLocaleString(undefined,{minimumFractionDigits:2}) : ''].filter(Boolean).join(' \u00b7 ');
-    return '<div class="unapplied-box' + (compact ? ' compact' : '') + '"><div class="unapplied-head">Unapplied in QuickBooks <span>$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span></div>' +
+    return '<div class="unapplied-box' + (compact ? ' compact' : '') + '"><div class="unapplied-head">' + unappliedHeadLabel(u) + ' in QuickBooks <span>$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</span></div>' +
       (sub ? '<div class="unapplied-split">' + sub + '</div>' : '') +
       rows.slice(0, max).map(unappliedRowHTML).join('') +
       (rows.length > max ? '<div class="unapplied-note">+ ' + (rows.length - max) + ' more under Account History.</div>' : '') +
@@ -6800,7 +6842,7 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       : 'Demo workspace — accounts are grouped from the sample invoices.';
     let groups = accountGroups(false);
     const acctStatus = statusShowValue(f.partialOnly ? 'partial' : f.status);
-    if(!f.includePaid && acctStatus !== 'baddebt' && acctStatus !== 'creditmemo') groups = groups.filter(function(g){ return g.openCount > 0; });
+    if(!f.includePaid && acctStatus !== 'baddebt' && acctStatus !== 'creditmemo' && acctStatus !== 'unapplied') groups = groups.filter(function(g){ return g.openCount > 0; });
     if(acctStatus !== 'all' && claimsOps()) groups = groups.filter(function(g){ return g.invoices.some(function(inv){ return statusShowMatches(inv, acctStatus); }); });
     const q = f.search.trim().toLowerCase();
     if(q) groups = groups.filter(function(g){ return g.name.toLowerCase().indexOf(q) !== -1 || Object.keys(g.biz).join(' ').toLowerCase().indexOf(q) !== -1 || String(g.contact || '').toLowerCase().indexOf(q) !== -1; });
@@ -6904,9 +6946,16 @@ Write ONE short sentence (under 25 words) summarizing what this contact would pl
       '<div class="acct-kpi"><div class="l">Open balance</div><div class="v">$' + g.openTotal.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div><div class="s">of $' + g.invoiced.toLocaleString(undefined,{minimumFractionDigits:2}) + ' invoiced</div></div>' +
       '<div class="acct-kpi"><div class="l">Average age</div><div class="v">' + (g.openCount ? g.avgAge + 'd' : '—') + '</div><div class="s">open invoices</div></div>' +
       '<div class="acct-kpi"><div class="l">Last contact</div><div class="v" style="font-size:15px;">' + (g.lastContact ? fmtDate(g.lastContact) : '—') + '</div><div class="s">' + (g.invoices.filter(sentFromAccounts).length ? 'statement sent from Accounts tab' : 'across all invoices') + '</div></div>' +
-      (claimsOps() ? (function(){ const u = unappliedSummary(g.name); return u ? '<div class="acct-kpi unapplied"><div class="l">Unapplied in QuickBooks</div><div class="v">$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div><div class="s">' + hEsc(u.label) + '</div></div>' : ''; })() : '') +
+      (claimsOps() ? (function(){ const u = unappliedSummary(g.name); return u ? '<div class="acct-kpi unapplied"><div class="l">' + unappliedHeadLabel(u) + '</div><div class="v">$' + u.total.toLocaleString(undefined,{minimumFractionDigits:2}) + '</div><div class="s">' + hEsc(u.label) + '</div></div>' : ''; })() : '') +
       (claimsOps() ? (function(){ const p = lastPaymentOfGroup(g); return '<div class="acct-kpi"><div class="l">Last payment</div><div class="v" style="font-size:15px;">' + (p ? '$' + Number(p.amount).toLocaleString(undefined,{minimumFractionDigits:2}) : '—') + '</div><div class="s">' + (p ? fmtDate(p.paidDate) + (p.paymentMethod ? ' · ' + hEsc(paymentMethodLabel(p.paymentMethod)) : '') + (p.invoiceNumber ? ' · ' + hEsc(p.invoiceNumber) : '') : 'no payments yet') + '</div></div>'; })() : '');
     (function(){ const box = document.getElementById('acct-panel-unapplied'); if (box) box.innerHTML = claimsOps() ? unappliedListHTML(g.name) : ''; })();
+    (function(){
+      const box = document.getElementById('acct-panel-sensitive'); if (!box) return;
+      if (!claimsOps()) { box.innerHTML = ''; return; }
+      const on = g.invoices.some(isSensitive); const first = g.invoices[0];
+      box.innerHTML = '<label class="acct-sens"><span><b>Sensitive customer</b><span class="acct-sens-sub">' + (on ? 'Automated follow-ups are paused for ' + hEsc(g.name) + '.' : 'Set Yes to pause automated follow-ups for every invoice of ' + hEsc(g.name) + '.') + '</span></span>' +
+        '<select class="search" style="padding:7px 9px;width:auto;" onchange="setSensitive(' + JSON.stringify(first ? first.id : null) + ', this.value === \'1\', \'customer\'); renderAccountPanel();"><option value=""' + (on ? '' : ' selected') + '>No</option><option value="1"' + (on ? ' selected' : '') + '>Yes</option></select></label>';
+    })();
     const rows = g.invoices.slice().sort(function(a, b){ return String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')); });
     document.getElementById('acct-inv-table').innerHTML =
       '<thead><tr><th></th><th>Invoice #</th><th>Invoice date</th><th>Age</th><th>Business</th><th>' + officeWord() + '</th><th>Amount</th><th>Balance</th><th>Status</th><th>Last follow-up</th>' + (claimsOps() ? '<th>Last payment</th>' : '') + '</tr></thead><tbody>' +
@@ -7947,7 +7996,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     push(account.invoicedAt, 'invoice', 'Invoice ' + (account.invoiceNumber || '') + ' created for ' + hMoney(account.amount), null, 'system');
     push(account.lastDayOnSite, 'site', 'Last day on site', null, 'crm');
     push(account.waSignedAt, 'document', 'Work Authorization signed', null, 'system');
-    push(account.cosSignedAt, 'document', 'Certificate of Satisfaction signed', null, 'system');
+    if (!claimsOps()) push(account.cosSignedAt, 'document', 'Certificate of Satisfaction signed', null, 'system');
     push(account.demandLetterSentAt, 'demand', 'Demand letter sent', null, 'system');
     push(account.noilSentAt, 'noil', 'Notice of Intent to Lien sent', null, 'system');
     comms.forEach(function(c){ const t = /noil/i.test(c.label) ? 'noil' : (/demand/i.test(c.label) ? 'demand' : 'followup'); push(c.at, t, c.label + (c.status === 'sent' ? ' sent' : (c.status ? (' - ' + c.status) : '')), [c.recipientRole, c.subject].filter(Boolean).join(' | '), c.source); });
@@ -7982,6 +8031,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
     doNotContact: { kind: 'choice', get label(){ return claimsOps() ? 'Sent to Legal' : 'Sent to collections'; }, options: [['', 'No'], ['1', 'Yes \u2014 DO NOT CONTACT']] },
     escalated: { kind: 'choice', label: 'Escalated', options: [['', 'No'], ['1', 'Yes \u2014 out of the cadence']] },
     claimStatus: { kind: 'choice', label: 'Claim status', options: [['', '\u2014 Not set \u2014']].concat(Object.keys(CLAIM_STATUS_LABELS).map(function(k){ return [k, CLAIM_STATUS_LABELS[k]]; })) },
+    sensitive: { kind: 'choice', label: 'Sensitive customer', options: [['', 'No'], ['customer', 'Yes \u2014 every invoice for this customer'], ['invoice', 'Yes \u2014 this invoice only']] },
     responseSummary: { kind: 'text', label: 'Last response', placeholder: 'What the customer said\u2026' }
   };
   function histEditValue(inv, field){
@@ -7990,6 +8040,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       case 'lienFiled': return inv.lienFiled ? '1' : '';
       case 'doNotContact': return inv.doNotContact ? '1' : '';
       case 'escalated': return inv.escalated ? '1' : '';
+      case 'sensitive': return isSensitive(inv) ? (inv.sensitiveScope === 'customer' ? 'customer' : 'invoice') : '';
       case 'followups': return String(inv.followups || 0);
       case 'lastFollowUpAt': return inv.lastFollowUpAt ? followUpDay(inv.lastFollowUpAt) : '';
       case 'demandLetterSentAt': return inv.demandLetterSentAt ? followUpDay(inv.demandLetterSentAt) : '';
@@ -8048,6 +8099,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       case 'doNotContact': { const on = raw === '1'; if(on !== !!inv.doNotContact) await setDoNotContact(inv.id, on); break; }
       case 'escalated': { const on = raw === '1'; if(on && !inv.escalated) escalateInvoice(inv.id); else if(!on && inv.escalated) unescalateInvoice(inv.id); break; }
       case 'claimStatus': setClaimStatus(inv.id, raw); break;
+      case 'sensitive': { const cur = histEditValue(inv, 'sensitive'); if (raw !== cur) { if (raw) await setSensitive(inv.id, true, raw); else await setSensitive(inv.id, false, cur || 'invoice'); } break; }
       default: return;
     }
     saveState();
@@ -8089,7 +8141,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       tile('Invoice amount', hMoney(a.amount)) +
       tile('Paid', hMoney(paid)) +
       tile('Balance due', hMoney(balance), balance > 0 ? '' : 'muted') +
-      (function(){ const u = claimsOps() ? unappliedSummary(a.customerName || (inv && inv.name)) : null; return u ? tile('Unapplied in QuickBooks', hMoney(u.total) + '<div class="unapplied-sub">' + hEsc([u.pays ? 'Payments ' + hMoney(u.payTotal) : '', u.cms ? 'Credit memos ' + hMoney(u.cmTotal) : ''].filter(Boolean).join(' \u00b7 ')) + '</div>', 'unapplied') : ''; })() +
+      (function(){ const u = claimsOps() ? unappliedSummary(a.customerName || (inv && inv.name)) : null; return u ? tile(unappliedHeadLabel(u) + ' in QuickBooks', hMoney(u.total) + '<div class="unapplied-sub">' + hEsc([u.pays ? 'Payments ' + hMoney(u.payTotal) : '', u.cms ? 'Credit memos ' + hMoney(u.cmTotal) : ''].filter(Boolean).join(' \u00b7 ')) + '</div>', 'unapplied') : ''; })() +
       tile('Status', hEsc(STATUS_LABELS[a.status] || a.status || '—')) +
       tile('Invoice date', hDate(a.invoicedAt) + (a.invoicedAt ? (' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.invoicedAt) + 'd)</span>') : '')) +
       tile('Last contact', a.lastContact ? (hDate(a.lastContact) + ' <span style="font-weight:400;color:var(--slate-soft);">(' + hDaysSince(a.lastContact) + 'd)</span>' + fromAccountsBadge(a)) : 'None yet', a.lastContact ? '' : 'muted', 'lastContact') +
@@ -8098,7 +8150,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
       (claimsOps() && (a.creditAmount || inv.creditAmount) ? tile('Credits applied', hMoney(a.creditAmount || inv.creditAmount) + (isBadDebt(inv) ? ' <span class="badge baddebt">BAD DEBT</span>' : ''), '') : '') +
       lastDayTile +
       (TENANT_DEPTS_CUSTOM ? tile('Work Authorization signed', a.waSignedAt ? ('Signed <span style="font-weight:400;color:var(--slate-soft);">' + hDate(a.waSignedAt) + '</span>') : 'Not signed', a.waSignedAt ? '' : 'muted', 'waSignedDate') : dateTile('Work Authorization signed', a.waSignedAt, 'waSignedDate')) +
-      dateTile('COS signed', a.cosSignedAt, 'cosSignedDate') +
+      (claimsOps() ? '' : dateTile('COS signed', a.cosSignedAt, 'cosSignedDate')) +
       dateTile('Demand letter sent', a.demandLetterSentAt, 'demandLetterSentAt') +
       dateTile('NOIL sent', a.noilSentAt, 'noilSent') +
       tile('Lien filed', a.lienFiled ? 'Yes' : 'No', a.lienFiled ? '' : 'muted', 'lienFiled') +
@@ -8115,7 +8167,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         tile(claimsOps() ? 'Sent to Legal (DNC)' : 'Sent to collections', a.doNotContact ? ('Yes' + (a.doNotContactBy ? (' · ' + hEsc(a.doNotContactBy)) : '') + (a.doNotContactAt ? ('<div style="font-weight:400;font-size:12px;">' + hDate(a.doNotContactAt) + '</div>') : '')) : 'No', a.doNotContact ? '' : 'muted', 'doNotContact')
       ) : '') +
       (claimsOps() ? tile('Claim status', inv.claimStatus ? hEsc(CLAIM_STATUS_LABELS[inv.claimStatus] || inv.claimStatus) : 'Not set', inv.claimStatus ? '' : 'muted', 'claimStatus') : '') +
-      (claimsOps() ? tile('Sensitive customer', isSensitive(inv) ? ('Yes' + (inv.sensitiveScope === 'customer' ? ' · all invoices' : ' · this invoice') + (inv.sensitiveBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.sensitiveBy) + '</div>' : '')) : 'No', isSensitive(inv) ? '' : 'muted') : '') +
+      (claimsOps() ? tile('Sensitive customer', isSensitive(inv) ? ('Yes' + (inv.sensitiveScope === 'customer' ? ' · all invoices' : ' · this invoice') + (inv.sensitiveBy ? '<div style="font-weight:400;font-size:12px;">by ' + hEsc(inv.sensitiveBy) + '</div>' : '')) : 'No', isSensitive(inv) ? '' : 'muted', 'sensitive') : '') +
       tile('Escalated', a.escalated ? ('Yes' + (a.notifiedName ? (' · ' + hEsc(a.notifiedName)) : '')) : 'No', a.escalated ? '' : 'muted', 'escalated') +
       tile('Last response', (a.responded && a.responded !== 'none' && a.responseSummary) ? hEsc(a.responseSummary) : 'None yet', (a.responded && a.responded !== 'none' && a.responseSummary) ? '' : 'muted', 'responseSummary');
     (function(){ const el = document.getElementById('hist-unapplied'); if (el) el.innerHTML = claimsOps() ? unappliedListHTML(a.customerName || (inv && inv.name)) : ''; })();
@@ -8366,7 +8418,7 @@ ${inv.notifiedName ? `<span class="badge" style="background:#DFEEE9;color:#1F534
         push(staff, actAt(inv.notifiedAt, now - (idx + 1) * 3600000), inv, 'escalation', 'Escalated for manager attention' + (inv.notifiedName ? ' - ' + inv.notifiedName + ' notified' : ''));
       }
       if(inv.waSignedDate) push(staff, actAt(inv.waSignedDate), inv, 'update', 'Work Authorization signature date recorded: ' + fmtDate(inv.waSignedDate) + '.');
-      if(inv.cosSignedDate) push(actManagerFor(inv), actAt(inv.cosSignedDate), inv, 'update', 'Certificate of Satisfaction signature date recorded: ' + fmtDate(inv.cosSignedDate) + '.');
+      if(inv.cosSignedDate && !claimsOps()) push(actManagerFor(inv), actAt(inv.cosSignedDate), inv, 'update', 'Certificate of Satisfaction signature date recorded: ' + fmtDate(inv.cosSignedDate) + '.');
       if(inv.lastDayOnSite) push(actManagerFor(inv), actAt(inv.lastDayOnSite), inv, 'site', 'Last day on site recorded: ' + fmtDate(inv.lastDayOnSite) + '.');
       const firstDoc = (inv.documents || [])[0];
       if(firstDoc){
