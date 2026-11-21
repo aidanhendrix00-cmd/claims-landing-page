@@ -4944,7 +4944,8 @@ function todoRowHTML(item, num, priority){
       const key = pair[0], test = pair[1];
       const btn = document.getElementById('qs-' + view + '-' + key); if(!btn) return;
       // Written-off invoices are closed in QuickBooks, so they are counted from every invoice, not just the open ones.
-      const rows = (key === 'baddebt' ? visibleInvoices() : open).filter(test);
+      // On the Accounts tab the credit-memo view also keeps customers with nothing open (that is where the money sits), so count them the same way.
+      const rows = (key === 'baddebt' || (key === 'creditmemo' && view === 'accounts') ? visibleInvoices() : open).filter(test);
       let bal = 0; const customers = {};
       rows.forEach(function(inv){ bal += (key === 'baddebt' ? writtenOff(inv) : balanceDue(inv)); customers[acctKey(inv.customerName || inv.name)] = 1; });
       if (key === 'creditmemo') { bal = 0; Object.keys(customers).forEach(function(k){ const u = unappliedSummary(k); if (u) bal += u.cmTotal; }); }
