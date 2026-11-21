@@ -4276,6 +4276,9 @@ const patch = {};
 if (Math.abs(paid - round2(ctx.prevPaid)) > 0.005 || (crmTotal !== null && crmTotal !== undefined)) patch.paid_amount = paid;
 if (fullyPaid && ctx.status !== 'paid') { patch.status = 'paid'; }
 if (fullyPaid && !ctx.existingPaidAt && !ctx.rawPaidAt) { patch.paid_at = nowIso; }
+// Reopened (a payment reversed or unapplied): the old paid date goes, so
+// nothing reads the invoice as paid in full.
+if (!fullyPaid && ctx.existingPaidAt && invoiceTotal > 0) { patch.paid_at = null; }
 if (Object.keys(patch).length) {
 patch.updated_at = nowIso;
 await pgUpdate(env, 'accounts', 'id=' + pgEq(accountId), patch);
@@ -8367,7 +8370,7 @@ push(a.demand_letter_sent_at, 'demand', 'Demand letter sent', null, 'system');
 push(a.noil_sent_at, 'noil', 'Notice of Intent to Lien sent', null, 'system');
 push(a.notified_at, 'escalation', 'Escalated' + (a.notified_name ? (' - ' + a.notified_name + ' notified') : ''), null, 'dashboard');
 if (a.do_not_contact) push(a.do_not_contact_at || a.updated_at, 'escalation', dncLabelFor(user), a.do_not_contact_by ? ('flagged by ' + a.do_not_contact_by) : null, 'dashboard');
-push(a.paid_at, 'payment', 'Paid in full', null, 'system');
+if (a.status === 'paid') push(a.paid_at, 'payment', 'Paid in full', null, 'system');
 const commsJson = comms.map(function (c) { return Object.assign(commsToJson(c), { accountId: c.account_id }); });
 await commsAttachSenders(env, user.tenant_id, commsJson);
 const senderById = {};
@@ -8383,8 +8386,15 @@ kindLabel(c.kind) + (st === 'sent' ? ' sent' : (st ? (' - ' + st.replace(/_/g, '
 activity.forEach(function (x) {
 push(x.sent_at, 'crm', String(x.type || 'activity').replace(/_/g, ' ') + (x.status ? (' - ' + x.status) : ''), [x.recipient, x.subject].filter(Boolean).join(' | '), x.source || 'crm');
 });
+// A credit memo or write-off is named as such, never as a payment; a payment
+// dated after today is post-dated and is shown as entered, not received.
+const histToday = todayCentral();
 payments.forEach(function (p) {
-push(p.deposited_on ? (p.deposited_on + 'T12:00:00Z') : p.created_at, 'payment', 'Payment received: $' + Number(p.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }), [p.method, p.reference ? ('ref ' + p.reference) : null, p.payer_name, p.bank_name].filter(Boolean).join(' - '), 'dashboard');
+const amt = '$' + Number(p.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 });
+const day = p.deposited_on ? String(p.deposited_on).slice(0, 10) : null;
+const title = p.kind === 'credit' ? ((/bad debt/i.test(String(p.method || '')) ? 'Written off as bad debt: ' : 'Credit memo applied: ') + amt)
+: (day && day > histToday ? ('Payment post-dated ' + day + ': ' + amt + ' (counts as received on that day)') : ('Payment received: ' + amt));
+push(p.deposited_on ? (p.deposited_on + 'T12:00:00Z') : p.created_at, 'payment', title, [p.method, p.reference ? ('ref ' + p.reference) : null, p.payer_name, p.bank_name].filter(Boolean).join(' - '), 'dashboard');
 });
 docs.forEach(function (d) {
 push(d.created_at, 'document', 'Document added: ' + (d.doc_kind || 'File'), (d.doc_label ? (d.doc_label + ' - ') : '') + (d.file_name || ''), 'dashboard');
