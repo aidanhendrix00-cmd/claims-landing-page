@@ -572,6 +572,7 @@
   .badge.unapplied{background:#E6F4F1;color:#1F5F52;border-color:#9CCFC3;}
   .badge.creditmemo{background:#FFF1E0;color:#9A3F00;border-color:#F5C58A;}
   .badge.postdated{background:#EEF2F7;color:#2B3440;border-color:#C9D2DE;}
+  .badge.reversal{background:#B42318;color:#fff;border-color:#912018;letter-spacing:0.04em;}
   .unapplied-sub-cell{display:block;font-size:10.5px;color:#9A3F00;white-space:nowrap;margin-top:2px;}
   .unapplied-tag{font-size:11px;color:#9A3F00;background:#FFF1E0;border:1px solid #F5C58A;border-radius:4px;padding:1px 6px;display:inline-block;margin-top:3px;white-space:nowrap;}
   .acct-kpi.unapplied .v{color:#9A3F00;}
@@ -3282,7 +3283,7 @@ async function loadAccountNotes(invoices, started){
     const r = (started ? await started : null) || await fetch('/api/accounts/notes?all=1', { credentials: 'same-origin', cache: 'no-store' });
     const res = await r.json();
     if(res && res.ok && res.notesByAccount){
-      remote.forEach(function(inv){ const list = res.notesByAccount[String(inv.id)]; if(list && list.length) inv.activity = toActivity(list); });
+      remote.forEach(function(inv){ const list = res.notesByAccount[String(inv.id)]; if(list && list.length) inv.activity = toActivity(list); markPaymentReversal(inv); });
       return;
     }
   } catch(e) {}
@@ -3290,10 +3291,21 @@ async function loadAccountNotes(invoices, started){
   await Promise.all(remote.map(function(inv){
     return fetch('/api/accounts/notes?accountId=' + encodeURIComponent(inv.id), { credentials: 'same-origin' })
       .then(function(r){ return r.json(); })
-      .then(function(res){ if(res && res.ok && res.notes && res.notes.length) inv.activity = toActivity(res.notes); })
+      .then(function(res){ if(res && res.ok && res.notes && res.notes.length) inv.activity = toActivity(res.notes); markPaymentReversal(inv); })
       .catch(function(){});
   }));
 }
+// A payment QuickBooks reversed, voided or unapplied leaves a sync note on
+// the account; the invoice carries a PAYMENT REVERSAL badge from then on so
+// a reopened balance is never mistaken for an unpaid one.
+function markPaymentReversal(inv){
+  const rev = (inv.activity || []).filter(function(a){ return /was reversed, voided or unapplied in QuickBooks/i.test(String(a.text || '')); });
+  if (!rev.length) { inv.paymentReversal = null; return; }
+  let total = 0, last = null;
+  rev.forEach(function(a){ const m = String(a.text).match(/\$([\d,]+(?:\.\d{2})?)/); if (m) total += Number(m[1].replace(/,/g, '')) || 0; const dm = String(a.text).match(/dated (\d{4}-\d{2}-\d{2})/); const d = dm ? dm[1] : (a.at ? String(a.at).slice(0, 10) : null); if (d && (!last || d > last)) last = d; });
+  inv.paymentReversal = { count: rev.length, amount: +total.toFixed(2), at: last };
+}
+function hasPaymentReversal(inv){ return !!(inv && inv.paymentReversal && inv.paymentReversal.count); }
 
 function postAccountNote(inv, text, kind, source){
   if(!inv || !text) return Promise.resolve(null);
@@ -4660,6 +4672,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
     ['demand', 'Demand letter sent'],
     ['lien', 'Lien filed'],
     ['sensitive', 'Sensitive customers'],
+    ['reversal', 'Payment reversal (QuickBooks)'],
     ['unapplied', 'Unapplied payment on account (QuickBooks)'],
     ['creditmemo', 'Credit memo on account (QuickBooks)'],
     ['baddebt', 'Bad debt (written off)']
@@ -4677,6 +4690,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
       case 'sensitive': return isSensitive(inv);
       case 'creditmemo': { const u = unappliedSummary(inv.customerName || inv.name); return !!(u && u.cms); }
       case 'unapplied': { const u = unappliedSummary(inv.customerName || inv.name); return !!(u && u.pays); }
+      case 'reversal': return hasPaymentReversal(inv);
       case 'baddebt': return isBadDebt(inv);
       default: return true;
     }
@@ -4727,6 +4741,7 @@ if (document.visibilityState === 'visible') { refreshRealAccountsIfIdle(); loadR
   function escalationFlags(inv){
     const f = [];
     if (isSensitive(inv)) f.push({ cls: 'sensitive', text: 'SENSITIVE', title: sensitiveTitle(inv) });
+    if (hasPaymentReversal(inv)) { const r = inv.paymentReversal; f.push({ cls: 'reversal', text: 'PAYMENT REVERSAL' + (r.amount > 0.005 ? ' $' + r.amount.toLocaleString(undefined,{minimumFractionDigits:2}) : '') + (r.at ? ' \u00b7 ' + fmtDate(r.at) : ''), title: (r.count === 1 ? 'A payment' : r.count + ' payments') + ' on this invoice ' + (r.count === 1 ? 'was' : 'were') + ' reversed, voided or unapplied in QuickBooks, so the balance is open again. Details are in the Account History.' }); }
     if (Number(inv.postDatedAmount || 0) > 0.005) f.push({ cls: 'postdated', text: 'POST-DATED PAYMENT $' + Number(inv.postDatedAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + ' \u00b7 ' + fmtDate(inv.postDatedOn), title: postDatedTitle(inv) });
     if (isBadDebt(inv)) f.push({ cls: 'baddebt', text: 'BAD DEBT', title: 'Written off as bad debt in QuickBooks' + (inv.badDebtAt ? ' ' + fmtDate(inv.badDebtAt) : '') + (inv.creditAmount ? ' - $' + Number(inv.creditAmount).toLocaleString(undefined,{minimumFractionDigits:2}) + ' credited' : '') });
     if (inv.escalated) f.push({ cls: 'escalated', text: 'ESCALATED', title: 'Escalated - out of the automated cadence' + (inv.notifiedName ? ' (' + inv.notifiedName + ' notified)' : '') });
@@ -5394,7 +5409,7 @@ function todoRowHTML(item, num, priority){
   // state so they survive a refresh; the inputs are only written when they
   // differ, so typing is never interrupted by a background render.
   const SHEET_SORTS = { 'name-asc': 1, 'name-desc': 1, 'date-desc': 1, 'date-asc': 1, 'amount-desc': 1, 'amount-asc': 1, 'days-desc': 1, 'days-asc': 1, 'followup-desc': 1, 'followup-asc': 1, 'collections': 1, 'collections-last': 1 };
-  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, overdue: 1, legal: 1, demand: 1, lien: 1, sensitive: 1, unapplied: 1, creditmemo: 1, baddebt: 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
+  const SHEET_SHOWS = { all: 1, collections: 1, 'not-collections': 1, replied: 1, 'no-reply': 1, partial: 1, 'follow-up': 1, 'escalated': 1, overdue: 1, legal: 1, demand: 1, lien: 1, sensitive: 1, reversal: 1, unapplied: 1, creditmemo: 1, baddebt: 1, 'cs-under_review': 1, 'cs-approved': 1, 'cs-denied': 1, 'cs-pending_documentation': 1, 'cs-resolved': 1 };
   function sheetSearchValue(){
     const box = document.getElementById('sheet-search');
     if (!box) return String(state.sheetSearch || '');
